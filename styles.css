@@ -494,6 +494,102 @@ main {
   background: #d16f43;
 }
 
+.sponsor-card {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 30;
+  width: min(300px, calc(100vw - 40px));
+  padding: 18px 18px 16px;
+  border: 1px solid rgba(209, 111, 67, 0.45);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(23, 16, 18, 0.92), rgba(23, 16, 18, 0.82));
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  animation: sponsor-in 480ms ease 1.2s both;
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+
+.sponsor-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(209, 111, 67, 0.85);
+}
+
+.sponsor-card.is-hidden {
+  display: none;
+}
+
+@keyframes sponsor-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sponsor-tag {
+  margin: 0 0 8px;
+  color: #ffd0b4;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+}
+
+.sponsor-card h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  letter-spacing: 0.05em;
+}
+
+.sponsor-card p:not(.sponsor-tag) {
+  margin: 0 0 14px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.sponsor-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 2px;
+  color: #2a2928;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.6), transparent 48%), linear-gradient(180deg, #ffb17e, #d16f43);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  transition: filter 160ms ease, transform 160ms ease;
+}
+
+.sponsor-cta:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.sponsor-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  padding: 2px 6px;
+  border: none;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 16px;
+  line-height: 1;
+  background: transparent;
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.sponsor-close:hover {
+  color: #fff;
+}
+
 @media (max-width: 640px) {
   .site-nav {
     display: none;

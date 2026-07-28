@@ -97,6 +97,11 @@ const translations = {
     "download.ctaSub": "Launcher 0.1.0 · In development",
     "footer.disclaimer": "Unofficial project, not affiliated with Mojang / Microsoft",
     "footer.scene": "Scene",
+    "sponsor.tag": "SPONSOR",
+    "sponsor.title": "Want a server to play with friends?",
+    "sponsor.body":
+      "Godlike high-performance Minecraft hosting — one-click modpack deploy, free DDoS protection, 24/7 uptime. The melody is ready; all you need is a server.",
+    "sponsor.cta": "⚡ Start your server for free",
   },
 };
 
@@ -153,3 +158,23 @@ const savedLang =
   readStoredLang() ||
   (navigator.language && navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en");
 applyLanguage(savedLang);
+
+const sponsorCard = document.getElementById("sponsor-card");
+const sponsorClose = document.getElementById("sponsor-close");
+
+function sponsorDismissed() {
+  try {
+    return sessionStorage.getItem("sponsor-dismissed") === "1";
+  } catch {
+    return false;
+  }
+}
+
+if (sponsorDismissed()) sponsorCard.classList.add("is-hidden");
+
+sponsorClose.addEventListener("click", () => {
+  sponsorCard.classList.add("is-hidden");
+  try {
+    sessionStorage.setItem("sponsor-dismissed", "1");
+  } catch {}
+});
