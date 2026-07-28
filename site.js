@@ -112,7 +112,25 @@ zhTexts["meta.description"] = document
 
 const langToggle = document.getElementById("lang-toggle");
 
+// localStorage throws in sandboxed iframes (e.g. masked domain forwarding), so guard every access
+function readStoredLang() {
+  try {
+    return localStorage.getItem("site-lang");
+  } catch {
+    return null;
+  }
+}
+
+function storeLang(lang) {
+  try {
+    localStorage.setItem("site-lang", lang);
+  } catch {}
+}
+
+let currentLang = "zh";
+
 function applyLanguage(lang) {
+  currentLang = lang;
   const dict = lang === "en" ? translations.en : zhTexts;
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     const text = dict[el.dataset.i18n];
@@ -124,15 +142,14 @@ function applyLanguage(lang) {
     .querySelector('meta[name="description"]')
     .setAttribute("content", dict["meta.description"]);
   langToggle.textContent = lang === "en" ? "中文" : "EN";
-  localStorage.setItem("site-lang", lang);
+  storeLang(lang);
 }
 
 langToggle.addEventListener("click", () => {
-  const next = localStorage.getItem("site-lang") === "en" ? "zh" : "en";
-  applyLanguage(next);
+  applyLanguage(currentLang === "en" ? "zh" : "en");
 });
 
 const savedLang =
-  localStorage.getItem("site-lang") ||
+  readStoredLang() ||
   (navigator.language && navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en");
 applyLanguage(savedLang);
