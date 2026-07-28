@@ -20,23 +20,24 @@
       <div class="brand">
         <img class="brand-icon" src="assets/app-icon.jpg" alt="忘却的旋律启动器图标" />
         <span class="brand-copy">
-          <strong>忘却的旋律</strong>
-          <small>MELODY LAUNCHER · REMAKE</small>
+          <strong data-i18n="brand.name">忘却的旋律</strong>
+          <small>THE-MELODY-OF-OBLIVION-REMAKE</small>
         </span>
       </div>
       <nav class="site-nav" aria-label="页面导航">
-        <a href="#remake">重置计划</a>
-        <a href="#features">功能</a>
-        <a href="#tech">技术</a>
-        <a href="#download">下载</a>
+        <a href="#remake" data-i18n="nav.remake">重置计划</a>
+        <a href="#features" data-i18n="nav.features">功能</a>
+        <a href="#tech" data-i18n="nav.tech">技术</a>
+        <a href="#download" data-i18n="nav.download">下载</a>
+        <button class="lang-toggle" type="button" id="lang-toggle" aria-label="Switch language">EN</button>
       </nav>
     </header>
 
     <main>
       <section class="hero">
         <p class="hero-tag">REMAKE PROJECT</p>
-        <h1>这是对忘却的旋律启动器的重置</h1>
-        <p class="hero-lead">
+        <h1 data-i18n="hero.title">这是对忘却的旋律启动器的重置</h1>
+        <p class="hero-lead" data-i18n="hero.lead">
           我们把旧启动器推倒重来——更快的下载引擎、更干净的界面、更聪明的版本管理。
           一切只为一件事：让你更快回到方块世界。
         </p>
@@ -44,97 +45,97 @@
           <a class="cta-button" href="#download">
             <span class="play-symbol" aria-hidden="true"></span>
             <span class="cta-copy">
-              <strong>获取启动器</strong>
+              <strong data-i18n="hero.cta">获取启动器</strong>
               <small>Windows 10 / 11</small>
             </span>
           </a>
-          <a class="ghost-button" href="#remake">了解重置计划</a>
+          <a class="ghost-button" href="#remake" data-i18n="hero.ghost">了解重置计划</a>
         </div>
         <div class="hero-stats" role="list">
-          <div class="stat" role="listitem"><strong>32</strong><small>路并发下载</small></div>
-          <div class="stat" role="listitem"><strong>4</strong><small>种加载器支持</small></div>
-          <div class="stat" role="listitem"><strong>2</strong><small>类账户登录</small></div>
-          <div class="stat" role="listitem"><strong>0</strong><small>系统 Java 依赖</small></div>
+          <div class="stat" role="listitem"><strong>32</strong><small data-i18n="stats.downloads">路并发下载</small></div>
+          <div class="stat" role="listitem"><strong>4</strong><small data-i18n="stats.loaders">种加载器支持</small></div>
+          <div class="stat" role="listitem"><strong>2</strong><small data-i18n="stats.accounts">类账户登录</small></div>
+          <div class="stat" role="listitem"><strong>0</strong><small data-i18n="stats.java">系统 Java 依赖</small></div>
         </div>
       </section>
 
       <section id="remake" class="panel-section">
         <p class="section-tag">WHY REMAKE</p>
-        <h2>为什么重置</h2>
+        <h2 data-i18n="remake.title">为什么重置</h2>
         <div class="remake-grid">
           <article class="remake-card">
-            <h3>旧版的遗憾</h3>
-            <p>曾经的忘却的旋律是许多老玩家的第一款启动器。可惜作者停止了更新，它渐渐消失在版本更迭中，玩家也失去了这个方便顺手的选择。</p>
+            <h3 data-i18n="remake.card1.title">旧版的遗憾</h3>
+            <p data-i18n="remake.card1.body">曾经的忘却的旋律是许多老玩家的第一款启动器。可惜作者停止了更新，它渐渐消失在版本更迭中，玩家也失去了这个方便顺手的选择。</p>
           </article>
           <article class="remake-card">
-            <h3>重置的原则</h3>
-            <p>从零开始，用 Electron 重新构建。紧凑的窗口、场景化的背景、每一个按钮都为启动服务。</p>
+            <h3 data-i18n="remake.card2.title">重置的原则</h3>
+            <p data-i18n="remake.card2.body">从零开始，用 Electron 重新构建。紧凑的窗口、场景化的背景、每一个按钮都为启动服务。</p>
           </article>
           <article class="remake-card">
-            <h3>回顾经典</h3>
-            <p>重拾这个名字，是为了向那个年代致敬。把当年一键进入方块世界的简单快乐，用今天的技术重新带回来。</p>
+            <h3 data-i18n="remake.card3.title">回顾经典</h3>
+            <p data-i18n="remake.card3.body">重拾这个名字，是为了向那个年代致敬。把当年一键进入方块世界的简单快乐，用今天的技术重新带回来。</p>
           </article>
         </div>
       </section>
 
       <section id="features" class="panel-section">
         <p class="section-tag">FEATURES</p>
-        <h2>核心功能</h2>
+        <h2 data-i18n="features.title">核心功能</h2>
         <div class="feature-grid">
           <article class="feature-card">
             <span class="feature-symbol" aria-hidden="true">⇄</span>
-            <h3>版本管理</h3>
-            <p>接入 BMCLAPI 与 Mojang 官方清单，自动选择更快的下载源，本地版本即刻可见。</p>
+            <h3 data-i18n="features.card1.title">版本管理</h3>
+            <p data-i18n="features.card1.body">接入 BMCLAPI 与 Mojang 官方清单，自动选择更快的下载源，本地版本即刻可见。</p>
           </article>
           <article class="feature-card">
             <span class="feature-symbol" aria-hidden="true">⬇</span>
-            <h3>高速下载</h3>
-            <p>最高 32 路并发，大文件自动分段并行下载，SHA-1 完整性校验，失败自动切换源。</p>
+            <h3 data-i18n="features.card2.title">高速下载</h3>
+            <p data-i18n="features.card2.body">最高 32 路并发，大文件自动分段并行下载，SHA-1 完整性校验，失败自动切换源。</p>
           </article>
           <article class="feature-card">
             <span class="feature-symbol" aria-hidden="true">◆</span>
-            <h3>多加载器</h3>
-            <p>原版、Fabric、Forge、NeoForge 一站式安装，选好版本剩下的交给启动器。</p>
+            <h3 data-i18n="features.card3.title">多加载器</h3>
+            <p data-i18n="features.card3.body">原版、Fabric、Forge、NeoForge 一站式安装，选好版本剩下的交给启动器。</p>
           </article>
           <article class="feature-card">
             <span class="feature-symbol" aria-hidden="true">▣</span>
-            <h3>整合包安装</h3>
-            <p>Modrinth .mrpack 与 CurseForge .zip 直接拖入窗口即可识别安装，实例目录互不污染。</p>
+            <h3 data-i18n="features.card4.title">整合包安装</h3>
+            <p data-i18n="features.card4.body">Modrinth .mrpack 与 CurseForge .zip 直接拖入窗口即可识别安装，实例目录互不污染。</p>
           </article>
           <article class="feature-card">
             <span class="feature-symbol" aria-hidden="true">☺</span>
-            <h3>账户管理</h3>
-            <p>离线账户与 Microsoft 正版登录并存，令牌系统级加密存储，启动前自动刷新。</p>
+            <h3 data-i18n="features.card5.title">账户管理</h3>
+            <p data-i18n="features.card5.body">离线账户与 Microsoft 正版登录并存，令牌系统级加密存储，启动前自动刷新。</p>
           </article>
           <article class="feature-card">
             <span class="feature-symbol" aria-hidden="true">☕</span>
-            <h3>Java 托管</h3>
-            <p>严格匹配版本要求的 Java，缺失时自动下载校验过的 Temurin JRE，不动系统环境。</p>
+            <h3 data-i18n="features.card6.title">Java 托管</h3>
+            <p data-i18n="features.card6.body">严格匹配版本要求的 Java，缺失时自动下载校验过的 Temurin JRE，不动系统环境。</p>
           </article>
         </div>
       </section>
 
       <section id="tech" class="panel-section">
         <p class="section-tag">UNDER THE HOOD</p>
-        <h2>技术底座</h2>
+        <h2 data-i18n="tech.title">技术底座</h2>
         <ul class="tech-list">
-          <li><strong>Electron</strong><span>主进程 / 预加载桥 / 渲染层三层隔离，令牌永不进入页面</span></li>
-          <li><strong>启动核心</strong><span>版本继承、规则过滤、原生库解压、退出状态回传与临时文件清理</span></li>
-          <li><strong>下载器</strong><span>双源并行探测、HTTP Range 分段、可取消任务与临时分段清理</span></li>
-          <li><strong>账户体系</strong><span>设备代码授权全链路：Microsoft → Xbox → XSTS → Minecraft Services</span></li>
+          <li><strong data-i18n="tech.item1.title">Electron</strong><span data-i18n="tech.item1.body">主进程 / 预加载桥 / 渲染层三层隔离，令牌永不进入页面</span></li>
+          <li><strong data-i18n="tech.item2.title">启动核心</strong><span data-i18n="tech.item2.body">版本继承、规则过滤、原生库解压、退出状态回传与临时文件清理</span></li>
+          <li><strong data-i18n="tech.item3.title">下载器</strong><span data-i18n="tech.item3.body">双源并行探测、HTTP Range 分段、可取消任务与临时分段清理</span></li>
+          <li><strong data-i18n="tech.item4.title">账户体系</strong><span data-i18n="tech.item4.body">设备代码授权全链路：Microsoft → Xbox → XSTS → Minecraft Services</span></li>
         </ul>
       </section>
 
       <section id="download" class="download-section">
         <p class="section-tag">DOWNLOAD</p>
-        <h2>准备好回到旋律中了吗？</h2>
-        <p class="download-lead">重置版目前处于开发阶段，正式版本发布后将在此提供下载。</p>
+        <h2 data-i18n="download.title">准备好回到旋律中了吗？</h2>
+        <p class="download-lead" data-i18n="download.lead">重置版目前处于开发阶段，正式版本发布后将在此提供下载。</p>
         <div class="hero-actions">
           <a class="cta-button" href="#" aria-disabled="true">
             <span class="play-symbol" aria-hidden="true"></span>
             <span class="cta-copy">
-              <strong>敬请期待</strong>
-              <small>Launcher 0.1.0 · 开发中</small>
+              <strong data-i18n="download.cta">敬请期待</strong>
+              <small data-i18n="download.ctaSub">Launcher 0.1.0 · 开发中</small>
             </span>
           </a>
         </div>
@@ -143,12 +144,12 @@
 
     <footer class="site-footer">
       <div class="footer-meta">
-        <strong>忘却的旋律</strong>
-        <span>Launcher Remake</span>
-        <span>非官方项目，与 Mojang / Microsoft 无关</span>
+        <strong data-i18n="brand.name">忘却的旋律</strong>
+        <span>The-Melody-of-Oblivion-Remake</span>
+        <span data-i18n="footer.disclaimer">非官方项目，与 Mojang / Microsoft 无关</span>
       </div>
       <div class="wallpaper-switcher" role="group" aria-label="切换背景">
-        <span>场景</span>
+        <span data-i18n="footer.scene">场景</span>
         <button class="wallpaper-dot is-active" type="button" data-wallpaper-index="0" aria-label="场景一" aria-pressed="true"></button>
         <button class="wallpaper-dot" type="button" data-wallpaper-index="1" aria-label="场景二" aria-pressed="false"></button>
         <button class="wallpaper-dot" type="button" data-wallpaper-index="2" aria-label="场景三" aria-pressed="false"></button>

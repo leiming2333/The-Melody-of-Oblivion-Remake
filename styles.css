@@ -126,6 +126,24 @@ html {
   border-bottom-color: #d16f43;
 }
 
+.lang-toggle {
+  align-self: center;
+  padding: 4px 12px;
+  font: inherit;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.72);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease;
+}
+
+.lang-toggle:hover {
+  color: #fff;
+  border-color: #d16f43;
+}
+
 main {
   display: flex;
   flex-direction: column;
