@@ -1662,7 +1662,7 @@ body.menu-open .menu-button span:last-child {
   font-size: 9px !important;
 }
 
-.sponsor-card {
+.partner-window {
   position: fixed;
   z-index: 90;
   right: 24px;
@@ -1678,20 +1678,20 @@ body.menu-open .menu-button span:last-child {
     linear-gradient(150deg, rgba(22, 20, 29, 0.97), rgba(10, 10, 15, 0.95));
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48), 0 0 34px rgba(199, 104, 255, 0.08);
   backdrop-filter: blur(18px);
-  animation: sponsor-in 480ms ease 600ms both;
+  animation: partner-window-in 480ms ease 600ms both;
   transition: border-color 180ms ease, transform 180ms ease;
 }
 
-.sponsor-card:hover {
+.partner-window:hover {
   border-color: rgba(199, 104, 255, 0.62);
   transform: translateY(-3px);
 }
 
-.sponsor-card.is-hidden {
+.partner-window.is-hidden {
   display: none;
 }
 
-@keyframes sponsor-in {
+@keyframes partner-window-in {
   from {
     opacity: 0;
     transform: translateY(18px);
@@ -1702,7 +1702,7 @@ body.menu-open .menu-button span:last-child {
   }
 }
 
-.sponsor-tag {
+.partner-window-tag {
   margin: 0 0 9px;
   color: var(--accent-bright);
   font-family: Consolas, monospace;
@@ -1711,20 +1711,20 @@ body.menu-open .menu-button span:last-child {
   letter-spacing: 0.16em;
 }
 
-.sponsor-card h3 {
+.partner-window h3 {
   margin: 0 28px 9px 0;
   font-size: 17px;
   letter-spacing: -0.015em;
 }
 
-.sponsor-card > p:not(.sponsor-tag) {
+.partner-window > p:not(.partner-window-tag) {
   margin: 0 0 16px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.75;
 }
 
-.sponsor-cta {
+.partner-window-link {
   display: flex;
   min-height: 40px;
   padding: 9px 14px;
@@ -1739,19 +1739,19 @@ body.menu-open .menu-button span:last-child {
   transition: border-color 160ms ease, background 160ms ease;
 }
 
-.sponsor-cta:hover,
-.sponsor-cta:focus-visible {
+.partner-window-link:hover,
+.partner-window-link:focus-visible {
   border-color: rgba(199, 104, 255, 0.68);
   background: rgba(199, 104, 255, 0.2);
 }
 
-.sponsor-cta:focus-visible,
-.sponsor-close:focus-visible {
+.partner-window-link:focus-visible,
+.partner-window-close:focus-visible {
   outline: 2px solid var(--accent-bright);
   outline-offset: 3px;
 }
 
-.sponsor-close {
+.partner-window-close {
   position: absolute;
   top: 9px;
   right: 10px;
@@ -1768,7 +1768,7 @@ body.menu-open .menu-button span:last-child {
   transition: color 160ms ease, background 160ms ease;
 }
 
-.sponsor-close:hover {
+.partner-window-close:hover {
   color: #fff;
   background: rgba(255, 255, 255, 0.07);
 }
@@ -2076,7 +2076,7 @@ body.menu-open .menu-button span:last-child {
     --shell: calc(100% - 24px);
   }
 
-  .sponsor-card {
+  .partner-window {
     right: 12px;
     bottom: 12px;
     width: calc(100vw - 24px);

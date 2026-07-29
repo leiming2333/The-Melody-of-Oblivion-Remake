@@ -5,8 +5,8 @@ const navigation = document.querySelector("#site-nav");
 const menuButton = document.querySelector("#menu-button");
 const languageButton = document.querySelector("#language-button");
 const downloadButton = document.querySelector("#download-button");
-const sponsorCard = document.querySelector("#sponsor-card");
-const sponsorClose = document.querySelector("#sponsor-close");
+const partnerWindow = document.querySelector("#partner-window");
+const partnerWindowClose = document.querySelector("#partner-window-close");
 const toast = document.querySelector("#toast");
 const slides = [...document.querySelectorAll(".backdrop-slide")];
 const launcherSceneSlides = [...document.querySelectorAll(".launcher-scene-slide")];
@@ -51,11 +51,11 @@ const translations = {
     "chip.speed": "Live download speed",
     "chip.java": "Runtime",
     "scene.label": "Scene",
-    "sponsor.tag": "Advertisement · Partner promotion",
-    "sponsor.title": "Want a server to play with friends?",
-    "sponsor.body":
+    "partner.tag": "Advertisement · Partner promotion",
+    "partner.title": "Want a server to play with friends?",
+    "partner.body":
       "Godlike high-performance Minecraft hosting — one-click modpack deployment, free DDoS protection, and 24/7 uptime.",
-    "sponsor.cta": "⚡ Explore game server hosting",
+    "partner.cta": "⚡ Explore game server hosting",
     "vision.title": "Not a refresh. A new beginning.",
     "vision.lead":
       "We kept the familiar name, but none of the old baggage. Downloads, accounts, versions, Java, and modpacks are redesigned around today's expectations.",
@@ -161,9 +161,9 @@ function storeLanguage(language) {
   } catch {}
 }
 
-function sponsorDismissed() {
+function partnerWindowDismissed() {
   try {
-    return window.sessionStorage.getItem("melody-sponsor-dismissed") === "1";
+    return window.sessionStorage.getItem("melody-partner-window-dismissed") === "1";
   } catch {
     return false;
   }
@@ -322,12 +322,12 @@ languageButton.addEventListener("click", () => {
   applyLanguage(currentLanguage === "en" ? "zh" : "en");
 });
 
-if (sponsorDismissed()) sponsorCard.classList.add("is-hidden");
+if (partnerWindowDismissed()) partnerWindow.classList.add("is-hidden");
 
-sponsorClose.addEventListener("click", () => {
-  sponsorCard.classList.add("is-hidden");
+partnerWindowClose.addEventListener("click", () => {
+  partnerWindow.classList.add("is-hidden");
   try {
-    window.sessionStorage.setItem("melody-sponsor-dismissed", "1");
+    window.sessionStorage.setItem("melody-partner-window-dismissed", "1");
   } catch {}
 });
 
