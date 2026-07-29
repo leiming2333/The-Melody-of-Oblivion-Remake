@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#09090d" />
+    <meta
+      name="description"
+      content="忘却的旋律启动器——为 Minecraft 玩家重新打造的轻量、快速、现代化启动器。"
+    />
+    <title>忘却的旋律启动器</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' shape-rendering='crispEdges'%3E%3Crect width='64' height='64' fill='%23070609'/%3E%3Cpath fill='%23111217' d='M0 0h16v16H0zm32 0h16v16H32zM16 16h16v16H16zm32 16h16v16H48zM0 48h16v16H0zm32 0h16v16H32z'/%3E%3Cpath fill='%231b1a21' d='M16 0h16v16H16zm32 0h16v16H48zM0 16h16v16H0zm32 16h16v16H32zM16 48h16v16H16zm32 0h16v16H48z'/%3E%3Cpath fill='%23c850ff' d='M7 29h19v7H7zm31 0h19v7H38z'/%3E%3Cpath fill='%23f3a4ff' d='M9 30h7v5H9zm33 0h7v5h-7z'/%3E%3C/svg%3E" />
+    <link rel="preload" as="image" href="./assets/backgrounds/scene-01.jpg" fetchpriority="high" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content" data-i18n="a11y.skip">跳到主要内容</a>
+
+    <div class="site-backdrop" aria-hidden="true">
+      <img
+        class="backdrop-slide is-active"
+        src="./assets/backgrounds/scene-01.jpg"
+        alt=""
+        data-slide="0"
+        decoding="async"
+        fetchpriority="high"
+      />
+      <img
+        class="backdrop-slide"
+        src="./assets/backgrounds/scene-02.jpg"
+        alt=""
+        data-slide="1"
+        decoding="async"
+      />
+      <img
+        class="backdrop-slide"
+        src="./assets/backgrounds/scene-03.jpg"
+        alt=""
+        data-slide="2"
+        decoding="async"
+      />
+      <img
+        class="backdrop-slide"
+        src="./assets/backgrounds/scene-04.jpg"
+        alt=""
+        data-slide="3"
+        decoding="async"
+      />
+      <span class="backdrop-shade"></span>
+      <span class="backdrop-grid"></span>
+      <span class="backdrop-noise"></span>
+    </div>
+
+    <header class="site-header" id="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="#top" aria-label="忘却的旋律启动器首页">
+          <span class="app-icon app-icon-header" aria-hidden="true"></span>
+          <span class="brand-copy">
+            <strong data-i18n="brand.name">忘却的旋律</strong>
+            <small>MELODY LAUNCHER</small>
+          </span>
+        </a>
+
+        <nav class="site-nav" id="site-nav" aria-label="主导航">
+          <a href="#vision" data-i18n="nav.vision">重制理念</a>
+          <a href="#features" data-i18n="nav.features">核心能力</a>
+          <a href="#roadmap" data-i18n="nav.roadmap">开发进度</a>
+          <a href="#download" data-i18n="nav.download">获取启动器</a>
+        </nav>
+
+        <div class="header-actions">
+          <span class="build-status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span data-i18n="header.preview">预览版开发中</span>
+          </span>
+          <button class="language-button" id="language-button" type="button" aria-label="Switch language">
+            EN
+          </button>
+          <button
+            class="menu-button"
+            id="menu-button"
+            type="button"
+            aria-label="打开导航菜单"
+            aria-controls="site-nav"
+            aria-expanded="false"
+          >
+            <span></span><span></span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section class="hero shell" id="top">
+        <div class="hero-copy reveal">
+          <p class="eyebrow">
+            <span aria-hidden="true">◆</span>
+            <span data-i18n="hero.eyebrow">为方块世界重新调音</span>
+          </p>
+          <h1 data-i18n="hero.title">把等待留给启动器，<br />把冒险还给你。</h1>
+          <p class="hero-lead" data-i18n="hero.lead">
+            忘却的旋律是一款从零重制的 Minecraft 启动器。更快的下载、更清楚的版本管理、更安全的账户系统，都装进一个安静而紧凑的窗口。
+          </p>
+
+          <div class="hero-actions">
+            <a class="button button-primary" href="#download">
+              <span class="button-icon" aria-hidden="true">↓</span>
+              <span>
+                <strong data-i18n="hero.primary">获取 Windows 版</strong>
+                <small data-i18n="hero.primarySub">0.1.0 Preview · 即将开放</small>
+              </span>
+            </a>
+            <a class="button button-secondary" href="#features" data-i18n="hero.secondary">看看它能做什么</a>
+          </div>
+
+          <ul class="hero-meta" aria-label="项目摘要">
+            <li><strong>32</strong><span data-i18n="hero.meta1">路并发下载</span></li>
+            <li><strong>4</strong><span data-i18n="hero.meta2">类加载器</span></li>
+            <li><strong>2</strong><span data-i18n="hero.meta3">种账户模式</span></li>
+          </ul>
+        </div>
+
+        <div class="hero-visual reveal" data-reveal-delay="120">
+          <div class="orbit orbit-one" aria-hidden="true"></div>
+          <div class="orbit orbit-two" aria-hidden="true"></div>
+
+          <div class="launcher-window" aria-label="启动器界面示意图">
+            <div class="launcher-titlebar">
+              <div class="window-controls" aria-hidden="true"><i></i><i></i></div>
+            </div>
+            <div class="launcher-scene">
+              <div class="mock-account-chip">
+                <span class="mock-avatar" aria-hidden="true"><i></i></span>
+                <span class="mock-account-copy">
+                  <small data-i18n="mock.account">游戏账户</small>
+                  <strong data-i18n="mock.accountEmpty">未添加账户</strong>
+                </span>
+                <span class="mock-account-action" data-i18n="mock.manage">管理</span>
+              </div>
+
+              <div class="mock-launch-deck">
+                <div class="mock-deck-status">
+                  <span class="mock-status-light" aria-hidden="true"></span>
+                  <span data-i18n="mock.selected">已选择 1.21.5</span>
+                  <strong>SELECTED</strong>
+                </div>
+
+                <div class="mock-launch-actions">
+                  <button class="mock-primary-launch" type="button" tabindex="-1">
+                    <span class="play-mark" aria-hidden="true"></span>
+                    <span><strong data-i18n="mock.launch">启动游戏</strong><small data-i18n="mock.launchHint">准备进入方块世界</small></span>
+                  </button>
+                  <div class="mock-utility-actions">
+                    <button type="button" tabindex="-1"><b aria-hidden="true">⇄</b><span><strong data-i18n="mock.switchVersion">切换版本</strong><small data-i18n="mock.versionCount">16 个版本</small></span></button>
+                    <button type="button" tabindex="-1"><b aria-hidden="true">⚙</b><span><strong data-i18n="mock.settings">启动设置</strong><small>Java · RAM · DOWNLOAD</small></span></button>
+                  </div>
+                </div>
+
+                <div class="mock-instance-row">
+                  <span data-i18n="mock.gameList">游戏列表</span>
+                  <strong>1.21.5 <b aria-hidden="true">⌄</b></strong>
+                  <small data-i18n="mock.openFolder">打开目录</small>
+                </div>
+              </div>
+
+              <div class="mock-scene-switcher" aria-hidden="true"><span data-i18n="scene.label">场景</span><i></i><i></i><i></i><i></i></div>
+              <div class="mock-launcher-footer"><strong data-i18n="brand.name">忘却的旋律</strong><span>Launcher 0.1.0</span><span>Electron</span></div>
+            </div>
+          </div>
+
+          <div class="floating-chip chip-speed">
+            <span aria-hidden="true">↯</span>
+            <p><small data-i18n="chip.speed">实时下载速度</small><strong>42.8 MB/s</strong></p>
+          </div>
+          <div class="floating-chip chip-java">
+            <span aria-hidden="true">J</span>
+            <p><small data-i18n="chip.java">运行环境</small><strong>Java 21 Ready</strong></p>
+          </div>
+        </div>
+
+        <div class="scene-control" aria-label="切换背景场景">
+          <span data-i18n="scene.label">场景</span>
+          <div class="scene-dots">
+            <button class="is-active" type="button" data-scene-target="0" aria-label="场景 1" aria-pressed="true"></button>
+            <button type="button" data-scene-target="1" aria-label="场景 2" aria-pressed="false"></button>
+            <button type="button" data-scene-target="2" aria-label="场景 3" aria-pressed="false"></button>
+            <button type="button" data-scene-target="3" aria-label="场景 4" aria-pressed="false"></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="signal-strip" aria-label="支持能力">
+        <div class="signal-track">
+          <span>MINECRAFT</span><i>◆</i><span>FABRIC</span><i>◆</i><span>FORGE</span><i>◆</i>
+          <span>NEOFORGE</span><i>◆</i><span>MODRINTH</span><i>◆</i><span>CURSEFORGE</span><i>◆</i>
+          <span>MINECRAFT</span><i>◆</i><span>FABRIC</span><i>◆</i><span>FORGE</span><i>◆</i>
+          <span>NEOFORGE</span><i>◆</i><span>MODRINTH</span><i>◆</i><span>CURSEFORGE</span>
+        </div>
+      </section>
+
+      <section class="section shell vision-section" id="vision">
+        <div class="section-heading reveal">
+          <p class="section-index">01 / REBUILD</p>
+          <h2 data-i18n="vision.title">不是翻新，是重新开始。</h2>
+        </div>
+        <div class="vision-grid">
+          <p class="vision-lead reveal" data-i18n="vision.lead">
+            我们保留了那个熟悉的名字，但没有沿用旧时代的包袱。下载、账户、版本、Java 和整合包安装，都按照今天的标准重新设计。
+          </p>
+          <div class="vision-notes reveal" data-reveal-delay="100">
+            <article>
+              <span>01</span>
+              <div><h3 data-i18n="vision.item1Title">少一点打扰</h3><p data-i18n="vision.item1Body">不堆叠无关入口，启动流程始终在最显眼的位置。</p></div>
+            </article>
+            <article>
+              <span>02</span>
+              <div><h3 data-i18n="vision.item2Title">多一点确定</h3><p data-i18n="vision.item2Body">下载校验、版本识别和 Java 匹配都给出清晰状态。</p></div>
+            </article>
+            <article>
+              <span>03</span>
+              <div><h3 data-i18n="vision.item3Title">把复杂留在内部</h3><p data-i18n="vision.item3Body">你只负责选择版本，剩下的由启动核心完成。</p></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section shell" id="features">
+        <div class="section-heading reveal">
+          <p class="section-index">02 / CAPABILITIES</p>
+          <h2 data-i18n="features.title">每一项能力，都服务于更快进入游戏。</h2>
+          <p data-i18n="features.subtitle">没有装饰性功能清单，只有启动器真正需要解决的问题。</p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature-card feature-card-wide reveal">
+            <span class="feature-number">01</span>
+            <div class="feature-icon" aria-hidden="true">↯</div>
+            <h3 data-i18n="features.speedTitle">多源并行下载</h3>
+            <p data-i18n="features.speedBody">官方源与国内镜像自动测速，大文件分段并行，持续低速时自动切换线路。</p>
+            <div class="speed-visual" aria-hidden="true">
+              <i style="--h: 32%"></i><i style="--h: 45%"></i><i style="--h: 68%"></i><i style="--h: 54%"></i>
+              <i style="--h: 82%"></i><i style="--h: 71%"></i><i style="--h: 96%"></i><i style="--h: 88%"></i>
+              <span>32 THREADS</span>
+            </div>
+          </article>
+
+          <article class="feature-card reveal" data-reveal-delay="60">
+            <span class="feature-number">02</span>
+            <div class="feature-icon" aria-hidden="true">▦</div>
+            <h3 data-i18n="features.versionTitle">只看已安装游戏</h3>
+            <p data-i18n="features.versionBody">启动列表只保留真正完整的本地版本，切换更直接，不再被海量远程版本打断。</p>
+          </article>
+
+          <article class="feature-card reveal" data-reveal-delay="120">
+            <span class="feature-number">03</span>
+            <div class="feature-icon" aria-hidden="true">◎</div>
+            <h3 data-i18n="features.accountTitle">账户与皮肤同步</h3>
+            <p data-i18n="features.accountBody">支持离线账户与 Microsoft 正版登录，头像自动同步当前皮肤，令牌由系统安全存储。</p>
+          </article>
+
+          <article class="feature-card reveal">
+            <span class="feature-number">04</span>
+            <div class="feature-icon" aria-hidden="true">⬡</div>
+            <h3 data-i18n="features.loaderTitle">加载器一站安装</h3>
+            <p data-i18n="features.loaderBody">Fabric、Forge 与 NeoForge 共用同一套版本选择和安装进度，不必再寻找独立安装器。</p>
+          </article>
+
+          <article class="feature-card reveal" data-reveal-delay="60">
+            <span class="feature-number">05</span>
+            <div class="feature-icon" aria-hidden="true">↓</div>
+            <h3 data-i18n="features.packTitle">拖入整合包即可安装</h3>
+            <p data-i18n="features.packBody">识别 Modrinth 与 CurseForge 整合包，自动创建隔离实例，保留每套配置的独立性。</p>
+          </article>
+
+          <article class="feature-card feature-card-accent reveal" data-reveal-delay="120">
+            <span class="feature-number">06</span>
+            <div class="feature-icon" aria-hidden="true">J</div>
+            <h3 data-i18n="features.javaTitle">Java 自动匹配</h3>
+            <p data-i18n="features.javaBody">优先使用你手动选择的路径；版本不匹配时，启动器会准备经过校验的正确运行环境。</p>
+            <span class="java-tags"><i>8</i><i>17</i><i>21</i><i>25</i></span>
+          </article>
+        </div>
+      </section>
+
+      <section class="section shell performance-section" id="engine">
+        <div class="performance-panel reveal">
+          <div class="performance-copy">
+            <p class="section-index">03 / ENGINE</p>
+            <h2 data-i18n="performance.title">看得见的速度，藏在看不见的细节里。</h2>
+            <p data-i18n="performance.body">从来源探测、断点任务到 SHA-1 完整性校验，每一个下载步骤都可以取消、恢复和验证。</p>
+            <ul>
+              <li data-i18n="performance.point1">HTTP Range 大文件分段</li>
+              <li data-i18n="performance.point2">失败线路自动降级</li>
+              <li data-i18n="performance.point3">不完整安装不会进入游戏列表</li>
+            </ul>
+          </div>
+          <div class="launcher-download-console" aria-label="启动器下载页面示意">
+            <div class="launcher-download-head">
+              <span><small>VERSION MANAGER</small><strong data-i18n="performance.downloadTitle">下载游戏版本</strong></span>
+              <i aria-hidden="true">×</i>
+            </div>
+
+            <div class="launcher-download-selection">
+              <span><small data-i18n="performance.versionLabel">游戏版本</small><strong>Minecraft 1.21.5</strong></span>
+              <span><small data-i18n="performance.sourceLabel">下载线路</small><strong data-i18n="performance.sourceValue">自动测速 · 32 路</strong></span>
+            </div>
+
+            <div class="launcher-download-task">
+              <span class="launcher-download-symbol" aria-hidden="true">↓</span>
+              <span class="launcher-download-info">
+                <strong data-i18n="performance.taskLabel">正在下载 Minecraft 1.21.5</strong>
+                <i><b></b></i>
+              </span>
+              <span class="launcher-download-value"><strong>87%</strong><small>38.6 MB/s</small></span>
+            </div>
+
+            <div class="launcher-download-metrics">
+              <span><small data-i18n="performance.fileLabel">当前文件</small><strong>client.jar</strong></span>
+              <span><small data-i18n="performance.etaLabel">剩余时间</small><strong data-i18n="performance.etaValue">约 12 秒</strong></span>
+            </div>
+
+            <div class="launcher-download-actions">
+              <button type="button" tabindex="-1" data-i18n="performance.cancel">取消下载</button>
+              <button type="button" tabindex="-1" data-i18n="performance.background">转到后台</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section shell roadmap-section" id="roadmap">
+        <div class="section-heading reveal">
+          <p class="section-index">04 / ROADMAP</p>
+          <h2 data-i18n="roadmap.title">重制正在发生。</h2>
+          <p data-i18n="roadmap.subtitle">先把基础做稳，再把每一次启动做得更轻。</p>
+        </div>
+        <div class="roadmap-list">
+          <article class="roadmap-item is-complete reveal">
+            <span class="roadmap-marker">✓</span>
+            <div><small>PHASE 01</small><h3 data-i18n="roadmap.phase1Title">启动核心</h3><p data-i18n="roadmap.phase1Body">版本继承、参数组装、原生库解压与进程状态回传。</p></div>
+            <strong data-i18n="roadmap.complete">已完成</strong>
+          </article>
+          <article class="roadmap-item is-complete reveal">
+            <span class="roadmap-marker">✓</span>
+            <div><small>PHASE 02</small><h3 data-i18n="roadmap.phase2Title">账户与下载</h3><p data-i18n="roadmap.phase2Body">Microsoft 登录、多源下载、完整性检测和后台任务。</p></div>
+            <strong data-i18n="roadmap.complete">已完成</strong>
+          </article>
+          <article class="roadmap-item is-active reveal">
+            <span class="roadmap-marker">03</span>
+            <div><small>PHASE 03</small><h3 data-i18n="roadmap.phase3Title">整合包与体验优化</h3><p data-i18n="roadmap.phase3Body">完善 Modrinth、CurseForge 实例与异常状态提示。</p></div>
+            <strong data-i18n="roadmap.active">进行中</strong>
+          </article>
+          <article class="roadmap-item reveal">
+            <span class="roadmap-marker">04</span>
+            <div><small>PHASE 04</small><h3 data-i18n="roadmap.phase4Title">首个公开预览版</h3><p data-i18n="roadmap.phase4Body">打包 Windows 安装程序并开放下载。</p></div>
+            <strong data-i18n="roadmap.planned">已计划</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="section shell download-section" id="download">
+        <div class="download-panel reveal">
+          <div class="download-art" aria-hidden="true">
+            <div class="download-icon-wrap"><span class="app-icon app-icon-download"></span></div>
+            <span class="download-ring ring-one"></span>
+            <span class="download-ring ring-two"></span>
+          </div>
+          <div class="download-copy">
+            <p class="section-index">05 / DOWNLOAD</p>
+            <h2 data-i18n="download.title">下一段旋律，很快开始。</h2>
+            <p data-i18n="download.body">首个 Windows 公开预览版仍在打磨。安装包就绪后，这里会成为唯一官方下载入口。</p>
+            <div class="requirement-list">
+              <span><small data-i18n="download.system">系统</small><strong>Windows 10 / 11</strong></span>
+              <span><small data-i18n="download.arch">架构</small><strong>x64</strong></span>
+              <span><small data-i18n="download.version">版本</small><strong>0.1.0 Preview</strong></span>
+            </div>
+            <button class="button button-primary download-button" id="download-button" type="button">
+              <span class="button-icon" aria-hidden="true">⌛</span>
+              <span><strong data-i18n="download.button">安装包制作中</strong><small data-i18n="download.buttonSub">完成后将在这里开放</small></span>
+            </button>
+            <p class="download-note" data-i18n="download.note">非官方项目，与 Mojang Studios 或 Microsoft 无关。</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <div class="footer-brand">
+          <span class="app-icon app-icon-footer" aria-hidden="true"></span>
+          <div><strong data-i18n="brand.name">忘却的旋律</strong><small data-i18n="footer.slogan">重新听见进入方块世界的旋律。</small></div>
+        </div>
+        <div class="footer-meta">
+          <span>© <span id="current-year">2026</span> MELODY LAUNCHER</span>
+          <a href="#top" data-i18n="footer.backTop">返回顶部 ↑</a>
+        </div>
+      </div>
+    </footer>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
