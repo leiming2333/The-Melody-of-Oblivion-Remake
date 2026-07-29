@@ -7,6 +7,8 @@ const languageButton = document.querySelector("#language-button");
 const downloadButton = document.querySelector("#download-button");
 const toast = document.querySelector("#toast");
 const slides = [...document.querySelectorAll(".backdrop-slide")];
+const launcherSceneSlides = [...document.querySelectorAll(".launcher-scene-slide")];
+const launcherSceneIndicators = [...document.querySelectorAll(".mock-scene-switcher i")];
 const sceneButtons = [...document.querySelectorAll("[data-scene-target]")];
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -46,6 +48,9 @@ const translations = {
     "chip.speed": "Live download speed",
     "chip.java": "Runtime",
     "scene.label": "Scene",
+    "sponsor.label": "Advertisement · Partner promotion",
+    "sponsor.body": "Choose dedicated game server hosting for your Minecraft world.",
+    "sponsor.action": "Explore hosting ↗",
     "vision.title": "Not a refresh. A new beginning.",
     "vision.lead":
       "We kept the familiar name, but none of the old baggage. Downloads, accounts, versions, Java, and modpacks are redesigned around today's expectations.",
@@ -215,6 +220,12 @@ function showScene(index) {
   currentScene = nextScene;
   slides.forEach((slide, slideIndex) => {
     slide.classList.toggle("is-active", slideIndex === currentScene);
+  });
+  launcherSceneSlides.forEach((slide, slideIndex) => {
+    slide.classList.toggle("is-active", slideIndex === currentScene);
+  });
+  launcherSceneIndicators.forEach((indicator, indicatorIndex) => {
+    indicator.classList.toggle("is-active", indicatorIndex === currentScene);
   });
   sceneButtons.forEach((button, buttonIndex) => {
     const isActive = buttonIndex === currentScene;

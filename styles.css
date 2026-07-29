@@ -597,9 +597,45 @@ body.menu-open .menu-button span:last-child {
   position: relative;
   height: 100%;
   min-height: 0;
-  background:
-    linear-gradient(180deg, rgba(12, 7, 8, 0.08) 40%, rgba(11, 7, 8, 0.82) 100%),
-    url("./assets/backgrounds/scene-02.jpg") center / cover;
+  overflow: hidden;
+  background: #171014;
+}
+
+.launcher-scene-media {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.launcher-scene-media::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(12, 7, 8, 0.08) 36%, rgba(11, 7, 8, 0.84) 100%);
+  content: "";
+}
+
+.launcher-scene-slide {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transform: scale(1.04);
+  transition: opacity 900ms ease;
+  will-change: opacity, transform;
+}
+
+.launcher-scene-slide.is-active {
+  z-index: 1;
+  opacity: 1;
+  animation: launcher-scene-drift 9s linear both;
+}
+
+@keyframes launcher-scene-drift {
+  from { transform: scale(1.04) translate3d(-0.7%, 0, 0); }
+  to { transform: scale(1.11) translate3d(0.7%, -0.7%, 0); }
 }
 
 .mock-account-chip {
@@ -849,7 +885,7 @@ body.menu-open .menu-button span:last-child {
   background: rgba(255, 255, 255, 0.32);
 }
 
-.mock-scene-switcher i:first-of-type {
+.mock-scene-switcher i.is-active {
   background: #d16f43;
 }
 
@@ -1009,6 +1045,112 @@ body.menu-open .menu-button span:last-child {
 
 @keyframes marquee {
   to { transform: translateX(-50%); }
+}
+
+.sponsor-section {
+  padding-top: 46px;
+}
+
+.sponsor-card {
+  position: relative;
+  display: grid;
+  min-height: 128px;
+  padding: 26px 28px;
+  overflow: hidden;
+  border: 1px solid rgba(199, 104, 255, 0.22);
+  border-radius: 18px;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 22px;
+  background:
+    radial-gradient(circle at 82% 20%, rgba(199, 104, 255, 0.15), transparent 34%),
+    linear-gradient(135deg, rgba(22, 20, 29, 0.96), rgba(11, 11, 16, 0.94));
+  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.3);
+  transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.sponsor-card::after {
+  position: absolute;
+  right: -26px;
+  bottom: -72px;
+  width: 210px;
+  height: 150px;
+  border: 1px solid rgba(199, 104, 255, 0.12);
+  border-radius: 50%;
+  content: "";
+  pointer-events: none;
+  transform: rotate(-16deg);
+}
+
+.sponsor-card:hover,
+.sponsor-card:focus-visible {
+  border-color: rgba(199, 104, 255, 0.52);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.36), 0 0 34px rgba(199, 104, 255, 0.08);
+  transform: translateY(-2px);
+}
+
+.sponsor-label {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  color: rgba(255, 255, 255, 0.32);
+  font-family: Consolas, monospace;
+  font-size: 7px;
+  letter-spacing: 0.1em;
+}
+
+.sponsor-mark {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  border: 1px solid rgba(199, 104, 255, 0.42);
+  border-radius: 15px;
+  color: #f2d8ff;
+  background: linear-gradient(145deg, rgba(199, 104, 255, 0.3), rgba(89, 40, 118, 0.25));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 12px 28px rgba(84, 30, 112, 0.2);
+  font-family: Consolas, monospace;
+  font-size: 25px;
+  font-weight: 700;
+  place-items: center;
+}
+
+.sponsor-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.sponsor-copy small {
+  color: var(--accent-bright);
+  font-family: Consolas, monospace;
+  font-size: 7px;
+  letter-spacing: 0.17em;
+}
+
+.sponsor-copy strong {
+  color: #f2eff5;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+.sponsor-copy > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sponsor-action {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 130px;
+  height: 38px;
+  padding: 0 15px;
+  border: 1px solid rgba(199, 104, 255, 0.33);
+  border-radius: 9px;
+  align-items: center;
+  justify-content: center;
+  color: #e9c8ff;
+  background: rgba(199, 104, 255, 0.1);
+  font-size: 10px;
 }
 
 .section {
@@ -1826,6 +1968,32 @@ body.menu-open .menu-button span:last-child {
 
   .header-actions {
     margin-left: auto;
+  }
+
+  .sponsor-section {
+    padding-top: 32px;
+  }
+
+  .sponsor-card {
+    padding: 30px 20px 20px;
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .sponsor-mark {
+    width: 50px;
+    height: 50px;
+    border-radius: 13px;
+    font-size: 21px;
+  }
+
+  .sponsor-copy strong {
+    font-size: 17px;
+  }
+
+  .sponsor-action {
+    width: 100%;
+    grid-column: 1 / -1;
   }
 
   .hero {
