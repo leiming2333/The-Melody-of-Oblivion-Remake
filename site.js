@@ -1,180 +1,284 @@
-const slides = Array.from(document.querySelectorAll(".background-slide"));
-const dots = Array.from(document.querySelectorAll(".wallpaper-dot"));
-
-let activeIndex = 0;
-let rotateTimer = null;
-
-function showSlide(index) {
-  activeIndex = index;
-  slides.forEach((slide, i) => slide.classList.toggle("is-active", i === index));
-  dots.forEach((dot, i) => {
-    dot.classList.toggle("is-active", i === index);
-    dot.setAttribute("aria-pressed", String(i === index));
-  });
-}
-
-function startRotation() {
-  clearInterval(rotateTimer);
-  rotateTimer = setInterval(() => {
-    showSlide((activeIndex + 1) % slides.length);
-  }, 9000);
-}
-
-dots.forEach((dot) => {
-  dot.addEventListener("click", () => {
-    showSlide(Number(dot.dataset.wallpaperIndex));
-    startRotation();
-  });
-});
-
-startRotation();
+const page = document.documentElement;
+const body = document.body;
+const header = document.querySelector("#site-header");
+const navigation = document.querySelector("#site-nav");
+const menuButton = document.querySelector("#menu-button");
+const languageButton = document.querySelector("#language-button");
+const downloadButton = document.querySelector("#download-button");
+const toast = document.querySelector("#toast");
+const slides = [...document.querySelectorAll(".backdrop-slide")];
+const sceneButtons = [...document.querySelectorAll("[data-scene-target]")];
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 const translations = {
   en: {
-    "meta.title": "The-Melody-of-Oblivion-Remake",
+    "meta.title": "Melody Launcher",
     "meta.description":
-      "Official website of The-Melody-of-Oblivion-Remake — a modern Minecraft launcher rebuilt from the ground up.",
-    "brand.name": "The Melody of Oblivion",
-    "nav.remake": "Remake",
-    "nav.features": "Features",
-    "nav.tech": "Tech",
-    "nav.download": "Download",
-    "hero.title": "A remake of The Melody of Oblivion launcher",
+      "Melody Launcher — a lightweight, fast, and modern Minecraft launcher rebuilt from the ground up.",
+    "a11y.skip": "Skip to main content",
+    "brand.name": "Melody Launcher",
+    "nav.vision": "Why rebuild",
+    "nav.features": "Capabilities",
+    "nav.roadmap": "Roadmap",
+    "nav.download": "Get the launcher",
+    "header.preview": "Preview in development",
+    "hero.eyebrow": "Retuning the way into the block world",
+    "hero.title": "Leave the waiting to the launcher.<br />Keep the adventure for yourself.",
     "hero.lead":
-      "We tore the old launcher down and rebuilt it — a faster download engine, a cleaner interface, smarter version management. All for one thing: getting you back to the block world sooner.",
-    "hero.cta": "Get the Launcher",
-    "hero.ghost": "About the remake",
-    "stats.downloads": "concurrent downloads",
-    "stats.loaders": "loaders supported",
-    "stats.accounts": "account types",
-    "stats.java": "system Java required",
-    "remake.title": "Why a remake",
-    "remake.card1.title": "The old regret",
-    "remake.card1.body":
-      "The Melody of Oblivion was the first launcher for many veteran players. Sadly its author stopped updating it, it slowly vanished as versions moved on, and players lost a handy companion.",
-    "remake.card2.title": "Remake principles",
-    "remake.card2.body":
-      "Rebuilt from scratch with Electron. A compact window, scene-based backgrounds, and every button in service of launching the game.",
-    "remake.card3.title": "Honoring a classic",
-    "remake.card3.body":
-      "Reviving this name is a tribute to that era — bringing back the simple joy of one-click entry into the block world, with today's technology.",
-    "features.title": "Core features",
-    "features.card1.title": "Version management",
-    "features.card1.body":
-      "Connects to BMCLAPI and Mojang's official manifest, automatically picks the faster source, and shows local versions instantly.",
-    "features.card2.title": "High-speed downloads",
-    "features.card2.body":
-      "Up to 32 concurrent connections, automatic chunked parallel downloads for large files, SHA-1 integrity checks, and automatic source failover.",
-    "features.card3.title": "Multiple loaders",
-    "features.card3.body":
-      "Vanilla, Fabric, Forge, and NeoForge installed in one place — pick a version and let the launcher handle the rest.",
-    "features.card4.title": "Modpack install",
-    "features.card4.body":
-      "Drop Modrinth .mrpack or CurseForge .zip files straight into the window to install them, with fully isolated instance directories.",
-    "features.card5.title": "Account management",
-    "features.card5.body":
-      "Offline accounts and Microsoft login side by side, tokens encrypted at the system level, and automatic refresh before launch.",
-    "features.card6.title": "Managed Java",
-    "features.card6.body":
-      "Strictly matches the Java version each game requires, downloading a verified Temurin JRE when missing — without touching your system.",
-    "tech.title": "Under the hood",
-    "tech.item1.title": "Electron",
-    "tech.item1.body":
-      "Three-layer isolation across main process / preload bridge / renderer — tokens never reach the page",
-    "tech.item2.title": "Launch core",
-    "tech.item2.body":
-      "Version inheritance, rule filtering, native library extraction, exit-status reporting and temp file cleanup",
-    "tech.item3.title": "Downloader",
-    "tech.item3.body":
-      "Dual-source parallel probing, HTTP Range chunking, cancellable tasks and temp segment cleanup",
-    "tech.item4.title": "Account system",
-    "tech.item4.body":
-      "Full device-code authorization chain: Microsoft → Xbox → XSTS → Minecraft Services",
-    "download.title": "Ready to return to the melody?",
-    "download.lead":
-      "The remake is currently in development. Downloads will be available here once the official release ships.",
-    "download.cta": "Coming soon",
-    "download.ctaSub": "Launcher 0.1.0 · In development",
-    "footer.disclaimer": "Unofficial project, not affiliated with Mojang / Microsoft",
-    "footer.scene": "Scene",
-    "sponsor.tag": "SPONSOR",
-    "sponsor.title": "Want a server to play with friends?",
-    "sponsor.body":
-      "Godlike high-performance Minecraft hosting — one-click modpack deploy, free DDoS protection, 24/7 uptime. The melody is ready; all you need is a server.",
-    "sponsor.cta": "⚡ Start your server for free",
+      "Melody is a Minecraft launcher rebuilt from zero. Faster downloads, clearer version management, and safer accounts all live inside one quiet, compact window.",
+    "hero.primary": "Get for Windows",
+    "hero.primarySub": "0.1.0 Preview · Coming soon",
+    "hero.secondary": "See what it can do",
+    "hero.meta1": "download threads",
+    "hero.meta2": "loader families",
+    "hero.meta3": "account modes",
+    "mock.account": "Game account",
+    "mock.accountEmpty": "No account added",
+    "mock.manage": "Manage",
+    "mock.selected": "Selected 1.21.5",
+    "mock.launch": "Launch game",
+    "mock.launchHint": "Ready for the block world",
+    "mock.switchVersion": "Switch version",
+    "mock.versionCount": "16 versions",
+    "mock.settings": "Launch settings",
+    "mock.gameList": "Game list",
+    "mock.openFolder": "Open folder",
+    "chip.speed": "Live download speed",
+    "chip.java": "Runtime",
+    "scene.label": "Scene",
+    "vision.title": "Not a refresh. A new beginning.",
+    "vision.lead":
+      "We kept the familiar name, but none of the old baggage. Downloads, accounts, versions, Java, and modpacks are redesigned around today's expectations.",
+    "vision.item1Title": "Less interruption",
+    "vision.item1Body": "No unrelated entry points. Launching the game always stays in focus.",
+    "vision.item2Title": "More certainty",
+    "vision.item2Body": "Downloads, version checks, and Java matching always expose clear status.",
+    "vision.item3Title": "Complexity stays inside",
+    "vision.item3Body": "Choose a version; the launch core handles everything that follows.",
+    "features.title": "Every capability gets you into the game sooner.",
+    "features.subtitle": "No decorative feature list — only the problems a launcher genuinely needs to solve.",
+    "features.speedTitle": "Multi-source parallel downloads",
+    "features.speedBody":
+      "Official and mirror sources are benchmarked automatically. Large files are segmented, and sustained slowdowns trigger source failover.",
+    "features.versionTitle": "Only installed games",
+    "features.versionBody":
+      "The launch list shows only complete local versions, so switching stays direct and remote catalog noise stays out of the way.",
+    "features.accountTitle": "Account and skin sync",
+    "features.accountBody":
+      "Offline and Microsoft accounts live side by side. Avatars follow the active skin while tokens remain in secure system storage.",
+    "features.loaderTitle": "One-stop loader setup",
+    "features.loaderBody":
+      "Fabric, Forge, and NeoForge share the same version picker and progress flow — no separate installers to hunt down.",
+    "features.packTitle": "Drop in a modpack",
+    "features.packBody":
+      "Modrinth and CurseForge packs are recognized automatically and installed into clean, isolated instances.",
+    "features.javaTitle": "Automatic Java matching",
+    "features.javaBody":
+      "Your manually selected runtime is tried first. If it does not match, the launcher prepares the verified environment the game needs.",
+    "performance.title": "Visible speed, built on invisible details.",
+    "performance.body":
+      "From source probing and cancellable tasks to SHA-1 integrity checks, every download step can be understood, stopped, and verified.",
+    "performance.point1": "HTTP Range segmentation for large files",
+    "performance.point2": "Automatic fallback from failing routes",
+    "performance.point3": "Incomplete installs never enter the game list",
+    "performance.downloadTitle": "Download game version",
+    "performance.versionLabel": "Game version",
+    "performance.sourceLabel": "Download route",
+    "performance.sourceValue": "Auto benchmark · 32 threads",
+    "performance.taskLabel": "Downloading Minecraft 1.21.5",
+    "performance.fileLabel": "Current file",
+    "performance.etaLabel": "Time remaining",
+    "performance.etaValue": "About 12 seconds",
+    "performance.cancel": "Cancel download",
+    "performance.background": "Run in background",
+    "roadmap.title": "The rebuild is happening now.",
+    "roadmap.subtitle": "Stabilize the foundation first, then make every launch feel lighter.",
+    "roadmap.phase1Title": "Launch core",
+    "roadmap.phase1Body": "Version inheritance, arguments, native extraction, and process status.",
+    "roadmap.phase2Title": "Accounts and downloads",
+    "roadmap.phase2Body": "Microsoft sign-in, multi-source downloads, integrity checks, and background tasks.",
+    "roadmap.phase3Title": "Modpacks and experience polish",
+    "roadmap.phase3Body": "Improving Modrinth and CurseForge instances, plus clearer failure states.",
+    "roadmap.phase4Title": "First public preview",
+    "roadmap.phase4Body": "Package the Windows installer and open public downloads.",
+    "roadmap.complete": "Complete",
+    "roadmap.active": "In progress",
+    "roadmap.planned": "Planned",
+    "download.title": "The next melody starts soon.",
+    "download.body":
+      "The first public Windows preview is still being polished. Once the installer is ready, this will be the only official download entry.",
+    "download.system": "System",
+    "download.arch": "Architecture",
+    "download.version": "Version",
+    "download.button": "Installer in production",
+    "download.buttonSub": "Downloads will open here",
+    "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft.",
+    "footer.slogan": "Hear the way back into the block world again.",
+    "footer.backTop": "Back to top ↑",
+    "toast.preview": "The preview installer is not published yet. It will be available here when ready.",
+    "menu.open": "Open navigation menu",
+    "menu.close": "Close navigation menu",
   },
 };
 
-const zhTexts = {};
-document.querySelectorAll("[data-i18n]").forEach((el) => {
-  const key = el.dataset.i18n;
-  if (!(key in zhTexts)) zhTexts[key] = el.textContent;
+const chinese = {};
+document.querySelectorAll("[data-i18n]").forEach((element) => {
+  const key = element.dataset.i18n;
+  if (!(key in chinese)) chinese[key] = element.innerHTML;
 });
-zhTexts["meta.title"] = document.title;
-zhTexts["meta.description"] = document
-  .querySelector('meta[name="description"]')
-  .getAttribute("content");
+chinese["meta.title"] = document.title;
+chinese["meta.description"] = document.querySelector('meta[name="description"]').content;
+chinese["toast.preview"] = "预览版安装包暂未发布，完成后会在这里提供下载。";
+chinese["menu.open"] = "打开导航菜单";
+chinese["menu.close"] = "关闭导航菜单";
 
-const langToggle = document.getElementById("lang-toggle");
+let currentLanguage = "zh";
+let currentScene = 0;
+let sceneTimer;
+let toastTimer;
 
-// localStorage throws in sandboxed iframes (e.g. masked domain forwarding), so guard every access
-function readStoredLang() {
+function readStoredLanguage() {
   try {
-    return localStorage.getItem("site-lang");
+    return window.localStorage.getItem("melody-site-language");
   } catch {
     return null;
   }
 }
 
-function storeLang(lang) {
+function storeLanguage(language) {
   try {
-    localStorage.setItem("site-lang", lang);
+    window.localStorage.setItem("melody-site-language", language);
   } catch {}
 }
 
-let currentLang = "zh";
+function languageDictionary(language = currentLanguage) {
+  return language === "en" ? translations.en : chinese;
+}
 
-function applyLanguage(lang) {
-  currentLang = lang;
-  const dict = lang === "en" ? translations.en : zhTexts;
-  document.querySelectorAll("[data-i18n]").forEach((el) => {
-    const text = dict[el.dataset.i18n];
-    if (text != null) el.textContent = text;
+function applyLanguage(language) {
+  currentLanguage = language === "en" ? "en" : "zh";
+  const dictionary = languageDictionary();
+
+  document.querySelectorAll("[data-i18n]").forEach((element) => {
+    const translation = dictionary[element.dataset.i18n];
+    if (translation != null) element.innerHTML = translation;
   });
-  document.documentElement.lang = lang === "en" ? "en" : "zh-CN";
-  document.title = dict["meta.title"];
-  document
-    .querySelector('meta[name="description"]')
-    .setAttribute("content", dict["meta.description"]);
-  langToggle.textContent = lang === "en" ? "中文" : "EN";
-  storeLang(lang);
+
+  page.lang = currentLanguage === "en" ? "en" : "zh-CN";
+  document.title = dictionary["meta.title"];
+  document.querySelector('meta[name="description"]').content = dictionary["meta.description"];
+  languageButton.textContent = currentLanguage === "en" ? "中文" : "EN";
+  languageButton.setAttribute(
+    "aria-label",
+    currentLanguage === "en" ? "切换为中文" : "Switch language",
+  );
+  updateMenuLabel();
+  storeLanguage(currentLanguage);
 }
 
-langToggle.addEventListener("click", () => {
-  applyLanguage(currentLang === "en" ? "zh" : "en");
-});
+function updateMenuLabel() {
+  const isOpen = body.classList.contains("menu-open");
+  const dictionary = languageDictionary();
+  menuButton.setAttribute("aria-expanded", String(isOpen));
+  menuButton.setAttribute("aria-label", dictionary[isOpen ? "menu.close" : "menu.open"]);
+}
 
-const savedLang =
-  readStoredLang() ||
-  (navigator.language && navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en");
-applyLanguage(savedLang);
+function closeMenu() {
+  body.classList.remove("menu-open");
+  updateMenuLabel();
+}
 
-const sponsorCard = document.getElementById("sponsor-card");
-const sponsorClose = document.getElementById("sponsor-close");
+function toggleMenu() {
+  body.classList.toggle("menu-open");
+  updateMenuLabel();
+}
 
-function sponsorDismissed() {
-  try {
-    return sessionStorage.getItem("sponsor-dismissed") === "1";
-  } catch {
-    return false;
+function showScene(index) {
+  if (slides.length === 0) return;
+  currentScene = (index + slides.length) % slides.length;
+  slides.forEach((slide, slideIndex) => {
+    slide.classList.toggle("is-active", slideIndex === currentScene);
+  });
+  sceneButtons.forEach((button, buttonIndex) => {
+    const isActive = buttonIndex === currentScene;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+}
+
+function startSceneRotation() {
+  window.clearInterval(sceneTimer);
+  if (reducedMotion.matches || slides.length < 2) return;
+  sceneTimer = window.setInterval(() => showScene(currentScene + 1), 9000);
+}
+
+function showToast(message) {
+  window.clearTimeout(toastTimer);
+  toast.textContent = message;
+  toast.classList.add("is-visible");
+  toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 3600);
+}
+
+function updateHeader() {
+  header.classList.toggle("is-scrolled", window.scrollY > 18);
+}
+
+function revealPage() {
+  const revealElements = [...document.querySelectorAll(".reveal")];
+  if (reducedMotion.matches || !("IntersectionObserver" in window)) {
+    revealElements.forEach((element) => element.classList.add("is-visible"));
+    return;
   }
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const delay = Number(entry.target.dataset.revealDelay || 0);
+        window.setTimeout(() => entry.target.classList.add("is-visible"), delay);
+        observer.unobserve(entry.target);
+      });
+    },
+    { threshold: 0.12, rootMargin: "0px 0px -40px" },
+  );
+
+  revealElements.forEach((element) => observer.observe(element));
 }
 
-if (sponsorDismissed()) sponsorCard.classList.add("is-hidden");
+menuButton.addEventListener("click", toggleMenu);
+navigation.querySelectorAll("a").forEach((link) => link.addEventListener("click", closeMenu));
 
-sponsorClose.addEventListener("click", () => {
-  sponsorCard.classList.add("is-hidden");
-  try {
-    sessionStorage.setItem("sponsor-dismissed", "1");
-  } catch {}
+languageButton.addEventListener("click", () => {
+  applyLanguage(currentLanguage === "en" ? "zh" : "en");
 });
+
+sceneButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    showScene(Number(button.dataset.sceneTarget));
+    startSceneRotation();
+  });
+});
+
+downloadButton.addEventListener("click", () => {
+  showToast(languageDictionary()["toast.preview"]);
+});
+
+window.addEventListener("scroll", updateHeader, { passive: true });
+window.addEventListener("resize", () => {
+  if (window.innerWidth > 780) closeMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeMenu();
+});
+reducedMotion.addEventListener?.("change", startSceneRotation);
+
+document.querySelector("#current-year").textContent = String(new Date().getFullYear());
+showScene(0);
+startSceneRotation();
+updateHeader();
+revealPage();
+
+const storedLanguage = readStoredLanguage();
+const preferredLanguage = storedLanguage ||
+  (navigator.language?.toLowerCase().startsWith("zh") ? "zh" : "en");
+applyLanguage(preferredLanguage);
