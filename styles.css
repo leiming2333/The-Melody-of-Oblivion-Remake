@@ -630,7 +630,7 @@ body.menu-open .menu-button span:last-child {
 .launcher-scene-slide.is-active {
   z-index: 1;
   opacity: 1;
-  animation: launcher-scene-drift 9s linear both;
+  animation: launcher-scene-drift 6s linear both;
 }
 
 @keyframes launcher-scene-drift {

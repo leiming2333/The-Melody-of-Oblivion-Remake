@@ -11,6 +11,7 @@ const launcherSceneSlides = [...document.querySelectorAll(".launcher-scene-slide
 const launcherSceneIndicators = [...document.querySelectorAll(".mock-scene-switcher i")];
 const sceneButtons = [...document.querySelectorAll("[data-scene-target]")];
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const sceneRotationInterval = 6000;
 
 const translations = {
   en: {
@@ -236,8 +237,8 @@ function showScene(index) {
 
 function startSceneRotation() {
   window.clearInterval(sceneTimer);
-  if (reducedMotion.matches || document.hidden || availableSceneIndices().length < 2) return;
-  sceneTimer = window.setInterval(() => showScene(currentScene + 1), 9000);
+  if (document.hidden || availableSceneIndices().length < 2) return;
+  sceneTimer = window.setInterval(() => showScene(currentScene + 1), sceneRotationInterval);
 }
 
 function updateSceneState(slide, index) {
