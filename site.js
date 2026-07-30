@@ -110,17 +110,17 @@ const translations = {
     "roadmap.phase3Title": "Modpacks and experience polish",
     "roadmap.phase3Body": "Modrinth and CurseForge instances now separate required and optional files, surface restricted-file warnings, and report failures by install phase.",
     "roadmap.phase4Title": "First public preview",
-    "roadmap.phase4Body": "The Windows x64 portable build is available from GitHub Releases.",
+    "roadmap.phase4Body": "The Windows x64 build is available from GitHub Releases.",
     "roadmap.complete": "Complete",
     "roadmap.active": "In progress",
     "roadmap.planned": "Planned",
     "download.title": "Windows x64 public preview.",
     "download.body":
-      "Download the portable build and run it after extraction. Configure the public Microsoft Client ID before starting Microsoft sign-in.",
+      "Download and run after extraction. Configure the public Microsoft Client ID before starting Microsoft sign-in.",
     "download.system": "System",
     "download.arch": "Architecture",
     "download.version": "Version",
-    "download.button": "Download Windows x64 portable build",
+    "download.button": "Download Windows x64",
     "download.buttonSub": "GitHub Release v0.1.0",
     "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft.",
     "footer.slogan": "Hear the way back into the block world again.",
@@ -138,7 +138,7 @@ document.querySelectorAll("[data-i18n]").forEach((element) => {
 });
 chinese["meta.title"] = document.title;
 chinese["meta.description"] = document.querySelector('meta[name="description"]').content;
-chinese["toast.preview"] = "Windows x64 便携版已在 GitHub Releases 发布。";
+chinese["toast.preview"] = "Windows x64 版已在 GitHub Releases 发布。";
 chinese["menu.open"] = "打开导航菜单";
 chinese["menu.close"] = "关闭导航菜单";
 
