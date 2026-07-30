@@ -106,7 +106,7 @@ function registerMinecraftIpc({
         if (!event.sender.isDestroyed()) {
           event.sender.send('minecraft:download-progress', progress);
         }
-      }, { signal })
+      }, { signal, installOptionalFiles: options.installOptionalFiles === true })
     ));
   });
 

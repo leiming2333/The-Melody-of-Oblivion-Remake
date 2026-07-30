@@ -8,6 +8,8 @@ const {
   createInstanceId,
   parseCurseForgeManifest,
   parseModrinthIndex,
+  publicPackInfo,
+  resolveCurseForgeFile,
   safeRelativePath
 } = require('../src/main/minecraft/modpack-manager');
 
@@ -65,6 +67,11 @@ test('Modrinth 索引会解析客户端文件并识别加载器', () => {
         path: 'mods/server-only.jar',
         downloads: ['https://cdn.modrinth.com/data/server-only.jar'],
         env: { client: 'unsupported' }
+      },
+      {
+        path: 'mods/optional.jar',
+        downloads: ['https://cdn.modrinth.com/data/optional.jar'],
+        env: { client: 'optional' }
       }
     ]
   });
@@ -72,8 +79,37 @@ test('Modrinth 索引会解析客户端文件并识别加载器', () => {
   assert.equal(pack.gameVersion, '1.21.1');
   assert.equal(pack.loaderType, 'fabric');
   assert.equal(pack.loaderVersion, '0.16.10');
-  assert.equal(pack.files.length, 1);
+  assert.equal(pack.files.length, 2);
   assert.equal(pack.files[0].path, 'mods/example.jar');
+  assert.equal(pack.files[0].required, true);
+  assert.equal(pack.files[1].path, 'mods/optional.jar');
+  assert.equal(pack.files[1].required, false);
+});
+
+test('inspect 会区分必需与可选整合包文件数量', () => {
+  const pack = parseModrinthIndex({
+    formatVersion: 1,
+    game: 'minecraft',
+    name: 'Optional Pack',
+    versionId: '1.0.0',
+    dependencies: { minecraft: '1.21.1' },
+    files: [
+      {
+        path: 'mods/required.jar',
+        downloads: ['https://cdn.modrinth.com/data/required.jar'],
+        env: { client: 'required' }
+      },
+      {
+        path: 'mods/optional.jar',
+        downloads: ['https://cdn.modrinth.com/data/optional.jar'],
+        env: { client: 'optional' }
+      }
+    ]
+  });
+  const info = publicPackInfo(pack);
+  assert.equal(info.fileCount, 2);
+  assert.equal(info.requiredFileCount, 1);
+  assert.equal(info.optionalFileCount, 1);
 });
 
 test('CurseForge 清单会解析游戏、加载器与文件编号', () => {
@@ -131,6 +167,37 @@ test('可以从最小 mrpack 压缩包读取安装信息', async (t) => {
     gameVersion: '1.21.1',
     loaderType: 'vanilla',
     loaderVersion: '1.21.1',
-    fileCount: 0
+    fileCount: 0,
+    requiredFileCount: 0,
+    optionalFileCount: 0
   });
+});
+
+test('CurseForge 文件缺少下载地址时给出受限提示', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ data: { fileName: 'restricted.jar', downloadUrl: null, hashes: [] } })
+  });
+  try {
+    await assert.rejects(
+      resolveCurseForgeFile({ projectId: 42, fileId: 100, required: true }, undefined),
+      /禁止第三方自动下载/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('CurseForge 接口不可达时给出文件下架提示', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false });
+  try {
+    await assert.rejects(
+      resolveCurseForgeFile({ projectId: 42, fileId: 100, required: true }, undefined),
+      /无法获取 CurseForge 文件信息/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

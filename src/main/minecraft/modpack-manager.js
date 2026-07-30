@@ -85,7 +85,8 @@ function parseModrinthIndex(index) {
       path: safeRelativePath(file.path),
       urls: (file.downloads ?? []).map(safeDownloadUrl),
       sha1: file.hashes?.sha1,
-      size: Number.isFinite(file.fileSize) ? file.fileSize : undefined
+      size: Number.isFinite(file.fileSize) ? file.fileSize : undefined,
+      required: file.env?.client !== 'optional'
     })) : [];
   if (files.some((file) => file.urls.length === 0)) {
     throw new Error('Modrinth 整合包中存在没有下载地址的文件');
@@ -168,6 +169,7 @@ async function parseExtractedPack(extractedRoot) {
 }
 
 function publicPackInfo(pack) {
+  const requiredFileCount = pack.files.filter((file) => file.required !== false).length;
   return {
     format: pack.format,
     name: pack.name,
@@ -175,7 +177,9 @@ function publicPackInfo(pack) {
     gameVersion: pack.gameVersion,
     loaderType: pack.loaderType,
     loaderVersion: pack.loaderVersion,
-    fileCount: pack.files.length
+    fileCount: pack.files.length,
+    requiredFileCount,
+    optionalFileCount: pack.files.length - requiredFileCount
   };
 }
 
@@ -214,13 +218,6 @@ async function copyDirectoryContents(source, destination) {
   }
 }
 
-function curseForgeCdnUrl(fileId, fileName) {
-  const id = String(fileId);
-  const high = id.slice(0, -3) || '0';
-  const low = id.slice(-3).padStart(3, '0');
-  return `https://edge.forgecdn.net/files/${high}/${low}/${encodeURIComponent(fileName)}`;
-}
-
 async function resolveCurseForgeFile(entry, signal) {
   const communityUrl = `https://api.curse.tools/v1/cf/mods/${entry.projectId}/files/${entry.fileId}`;
   let metadata;
@@ -240,13 +237,15 @@ async function resolveCurseForgeFile(entry, signal) {
     if (response.ok) metadata = (await response.json()).data;
   }
   if (!metadata?.fileName) {
-    throw new Error(`无法解析 CurseForge 文件 ${entry.projectId}/${entry.fileId}`);
+    throw new Error(`无法获取 CurseForge 文件信息（项目 ${entry.projectId}，文件 ${entry.fileId}），文件可能已下架或接口暂时不可用`);
   }
-  const downloadUrl = metadata.downloadUrl || curseForgeCdnUrl(entry.fileId, metadata.fileName);
+  if (!metadata.downloadUrl) {
+    throw new Error(`CurseForge 文件禁止第三方自动下载（项目 ${entry.projectId}，文件 ${entry.fileId}），请从整合包发布页手动获取`);
+  }
   const sha1 = metadata.hashes?.find((hash) => Number(hash.algo) === 1)?.value;
   return {
     path: `mods/${metadata.fileName}`,
-    urls: [safeDownloadUrl(downloadUrl)],
+    urls: [safeDownloadUrl(metadata.downloadUrl)],
     sha1,
     size: Number.isFinite(metadata.fileLength) ? metadata.fileLength : undefined
   };
@@ -278,45 +277,76 @@ class ModpackManager {
     return this.withExtractedPack(filePath, async ({ pack }) => publicPackInfo(pack));
   }
 
-  async install(filePath, onProgress = () => {}, { signal } = {}) {
+  async install(filePath, onProgress = () => {}, { signal, installOptionalFiles = false } = {}) {
     return this.withExtractedPack(filePath, async ({ archivePath, packRoot, pack }) => {
       throwIfAborted(signal);
-      onProgress({ phase: 'preparing', message: `正在安装 ${pack.name}…` });
-      const loaderResult = await this.loaderManager.installLoader({
-        gameVersion: pack.gameVersion,
-        loaderType: pack.loaderType,
-        loaderVersion: pack.loaderVersion
-      }, (progress) => onProgress({ ...progress, modpackName: pack.name }), { signal });
+      onProgress({ phase: 'installing-base', message: `正在准备 Minecraft ${pack.gameVersion} 与加载器…` });
+      let loaderResult;
+      try {
+        loaderResult = await this.loaderManager.installLoader({
+          gameVersion: pack.gameVersion,
+          loaderType: pack.loaderType,
+          loaderVersion: pack.loaderVersion
+        }, (progress) => onProgress({
+          ...progress,
+          phase: 'installing-base',
+          message: progress.message,
+          modpackName: pack.name
+        }), { signal });
+      } catch (error) {
+        throw new Error(`基础游戏或加载器安装失败：${error.message}`);
+      }
 
       const instanceId = createInstanceId(pack.name);
       const instancesRoot = safePath(this.gameDirectory, 'melody-instances');
       const instanceDirectory = safePath(instancesRoot, instanceId);
       const stagingDirectory = safePath(instancesRoot, `.installing-${instanceId}`);
       await fs.mkdir(stagingDirectory, { recursive: true });
+      const warnings = [];
       try {
-        for (const overrideDirectory of pack.overrideDirectories) {
-          await copyDirectoryContents(
-            safePath(packRoot, ...safeRelativePath(overrideDirectory).split('/')),
-            stagingDirectory
-          );
+        onProgress({ phase: 'copying-overrides', message: '正在复制整合包配置与覆盖文件…' });
+        try {
+          for (const overrideDirectory of pack.overrideDirectories) {
+            throwIfAborted(signal);
+            await copyDirectoryContents(
+              safePath(packRoot, ...safeRelativePath(overrideDirectory).split('/')),
+              stagingDirectory
+            );
+          }
+        } catch (error) {
+          throw new Error(`覆盖文件复制失败：${error.message}`);
         }
         throwIfAborted(signal);
 
-        let files = pack.files;
+        let files = pack.files.filter((file) => file.required !== false || installOptionalFiles);
         if (pack.format === 'curseforge') {
-          const resolved = new Array(pack.files.length);
+          const selectedFiles = files;
+          const resolved = new Array(selectedFiles.length);
           let completed = 0;
-          await runPool(pack.files, Math.min(this.concurrency, 8), async (entry, index) => {
-            resolved[index] = await resolveCurseForgeFile(entry, signal);
+          onProgress({
+            phase: 'resolving-files',
+            message: `正在解析 ${selectedFiles.length} 个 CurseForge 文件…`,
+            completedFiles: 0,
+            totalFiles: selectedFiles.length
+          });
+          await runPool(selectedFiles, Math.min(this.concurrency, 8), async (entry, index) => {
+            try {
+              resolved[index] = await resolveCurseForgeFile(entry, signal);
+            } catch (error) {
+              if (entry.required !== false) {
+                throw new Error(`必需文件解析失败：${error.message}`);
+              }
+              warnings.push(error.message);
+            }
             completed += 1;
             onProgress({
-              phase: 'resolving-mods',
-              message: `正在解析 CurseForge 文件 ${completed}/${pack.files.length}`,
+              phase: 'resolving-files',
+              message: `正在解析 CurseForge 文件 ${completed}/${selectedFiles.length}`,
               completedFiles: completed,
-              totalFiles: pack.files.length
+              totalFiles: selectedFiles.length
             });
           }, signal);
-          files = resolved;
+          files = resolved.filter(Boolean);
         }
 
         const tasks = files.map((file) => ({
@@ -329,7 +359,7 @@ class ModpackManager {
         const progressTracker = createDownloadProgressTracker({
           tasks,
           onProgress,
-          phase: 'downloading-modpack',
+          phase: 'downloading-files',
           baseProgress: { modpackName: pack.name }
         });
         progressTracker.start(`准备下载 ${tasks.length} 个整合包文件`);
@@ -355,25 +385,34 @@ class ModpackManager {
           loaderType: pack.loaderType,
           loaderVersion: pack.loaderVersion,
           fileCount: tasks.length,
+          optionalFilesInstalled: installOptionalFiles,
+          warnings,
           installedAt: new Date().toISOString()
         };
-        await writeJsonAtomic(
-          safePath(stagingDirectory, '.melody-instance.json'),
-          metadata
-        );
-        await fs.mkdir(instancesRoot, { recursive: true });
-        await fs.rename(stagingDirectory, instanceDirectory);
+        onProgress({ phase: 'committing-instance', message: '正在保存实例配置…' });
+        try {
+          await writeJsonAtomic(
+            safePath(stagingDirectory, '.melody-instance.json'),
+            metadata
+          );
+          await fs.mkdir(instancesRoot, { recursive: true });
+          await fs.rename(stagingDirectory, instanceDirectory);
+        } catch (error) {
+          throw new Error(`实例配置保存失败：${error.message}`);
+        }
         const result = {
           ...publicPackInfo(pack),
           instanceId,
           targetId: `instance-${instanceId}`,
-          profileId: loaderResult.profileId
+          profileId: loaderResult.profileId,
+          warnings
         };
         onProgress({
           phase: 'complete',
           message: `${pack.name} 安装完成`,
           completedFiles: tasks.length,
           totalFiles: tasks.length,
+          warnings,
           ...result
         });
         return result;
@@ -413,6 +452,7 @@ module.exports = {
   parseExtractedPack,
   parseModrinthIndex,
   publicPackInfo,
+  resolveCurseForgeFile,
   safeRelativePath,
   validateModpackFile
 };

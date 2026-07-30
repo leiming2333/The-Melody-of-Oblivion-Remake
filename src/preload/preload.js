@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     listVersions: (options = {}) => ipcRenderer.invoke('minecraft:list-versions', options),
     listLocalVersions: () => ipcRenderer.invoke('minecraft:list-local-versions'),
     inspectModpack: (filePath) => ipcRenderer.invoke('minecraft:inspect-modpack', filePath),
-    installModpack: (filePath) => ipcRenderer.invoke('minecraft:install-modpack', filePath),
+    installModpack: (filePath, options = {}) => ipcRenderer.invoke('minecraft:install-modpack', filePath, options),
     downloadVersion: (versionId) => ipcRenderer.invoke('minecraft:download-version', versionId),
     listLoaders: (gameVersion, loaderType, options = {}) => ipcRenderer.invoke(
       'minecraft:list-loaders',

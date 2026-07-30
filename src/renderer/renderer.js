@@ -726,9 +726,15 @@ function updateBackgroundDownloadBar(progress) {
   } else if (downloadCancelRequested) {
     bgDownloadLabel.textContent = `正在取消 ${activeDownloadLabel}…`;
     bgDownloadSpeed.textContent = '取消中';
-  } else if (progress.phase === 'preparing') {
+  } else if (progress.phase === 'preparing' || progress.phase === 'installing-base') {
     bgDownloadLabel.textContent = progress.message ?? `正在准备 ${activeDownloadLabel}…`;
     bgDownloadSpeed.textContent = '准备中';
+  } else if (progress.phase === 'copying-overrides' || progress.phase === 'committing-instance') {
+    bgDownloadLabel.textContent = progress.message ?? `正在整理 ${activeDownloadLabel}…`;
+    bgDownloadSpeed.textContent = '整理中';
+  } else if (progress.phase === 'resolving-files') {
+    bgDownloadLabel.textContent = progress.message ?? `正在解析 ${activeDownloadLabel} 的文件…`;
+    bgDownloadSpeed.textContent = '解析中';
   } else {
     bgDownloadLabel.textContent = progress.message ?? `正在下载 ${activeDownloadLabel}…`;
     const bytesPerSecond = Number(progress.bytesPerSecond);
@@ -1606,10 +1612,20 @@ async function installDroppedModpack(filePath) {
           fileCount: 0
         };
     const formatName = info.format === 'modrinth' ? 'Modrinth' : 'CurseForge';
-    const confirmed = window.confirm(
-      `安装整合包「${info.name}」？\n\n${formatName} · Minecraft ${info.gameVersion} · ${loaderNames[info.loaderType] ?? info.loaderType}\n需要下载 ${info.fileCount} 个整合包文件。`
-    );
-    if (!confirmed) return;
+    const optionalCount = Number(info.optionalFileCount ?? 0);
+    const requiredCount = Number(info.requiredFileCount ?? info.fileCount ?? 0);
+    const optionalLine = optionalCount > 0
+      ? `\n其中必需文件 ${requiredCount} 个，可选文件 ${optionalCount} 个。`
+      : '';
+    const installOptional = optionalCount > 0
+      ? window.confirm(
+          `安装整合包「${info.name}」？\n\n${formatName} · Minecraft ${info.gameVersion} · ${loaderNames[info.loaderType] ?? info.loaderType}\n需要下载 ${info.fileCount} 个整合包文件。${optionalLine}\n\n是否一并安装可选文件？取消则只安装必需文件。`
+        )
+      : window.confirm(
+          `安装整合包「${info.name}」？\n\n${formatName} · Minecraft ${info.gameVersion} · ${loaderNames[info.loaderType] ?? info.loaderType}\n需要下载 ${info.fileCount} 个整合包文件。`
+        );
+    if (optionalCount === 0 && !installOptional) return;
+    const installOptionalFiles = optionalCount > 0 ? installOptional : false;
 
     modpackInstallActive = true;
     versionDownloadActive = true;
@@ -1624,16 +1640,22 @@ async function installDroppedModpack(filePath) {
     updateVersionAction();
 
     const result = minecraft?.installModpack
-      ? await minecraft.installModpack(filePath)
+      ? await minecraft.installModpack(filePath, { installOptionalFiles })
       : await delay(300).then(() => ({
           name: info.name,
-          targetId: `instance-preview-${Date.now()}`
+          targetId: `instance-preview-${Date.now()}`,
+          warnings: []
         }));
     await loadLocalProfiles(true);
     useVersion(result.targetId, result.name);
     gameStatus.textContent = `${result.name} 安装完成`;
     statusBadge.textContent = 'SELECTED';
-    showToast(`${result.name} 已安装并设为当前游戏`);
+    const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+    if (warnings.length > 0) {
+      showToast(`${result.name} 已安装，但 ${warnings.length} 个可选文件未安装：${warnings[0]}`);
+    } else {
+      showToast(`${result.name} 已安装并设为当前游戏`);
+    }
   } catch (error) {
     const message = readableError(error);
     const cancelled = downloadCancelRequested || message.includes('下载已取消');
