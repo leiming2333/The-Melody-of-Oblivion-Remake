@@ -32,7 +32,7 @@ const translations = {
     "hero.lead":
       "Melody is a Minecraft launcher rebuilt from zero. Faster downloads, clearer version management, and safer accounts all live inside one quiet, compact window.",
     "hero.primary": "Get for Windows",
-    "hero.primarySub": "Windows x64 · 0.1.0 Preview · Portable build",
+    "hero.primarySub": "Windows x64 · 0.1.0",
     "hero.secondary": "See what it can do",
     "hero.meta1": "download threads",
     "hero.meta2": "loader families",
