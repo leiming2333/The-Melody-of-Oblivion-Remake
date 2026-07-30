@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data: https://textures.minecraft.net https://littleskin.cn https://*.littleskin.cn" />
+    <title>忘却的旋律启动器</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="launcher-app">
+      <div class="background-gallery" aria-hidden="true">
+        <img class="background-slide is-active" src="assets/backgrounds/wp15225187.jpg" alt="" />
+        <img class="background-slide" src="assets/backgrounds/wp15225191.jpg" alt="" />
+        <img class="background-slide" src="assets/backgrounds/NjGW245.jpg" alt="" />
+        <img
+          class="background-slide"
+          src="assets/backgrounds/640c286f00c515f0fe1c0bc0415bae64~tplv-a9rns2rl98-pc_smart_face_crop-v1_512_384.jpg"
+          alt=""
+        />
+      </div>
+
+      <header class="titlebar">
+        <div class="window-actions">
+          <button id="minimizeButton" class="window-button" type="button" aria-label="最小化">
+            <span class="minimize-icon" aria-hidden="true"></span>
+          </button>
+          <button id="closeButton" class="window-button close-button" type="button" aria-label="关闭">
+            <span class="close-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+      </header>
+
+      <main class="launcher-stage">
+        <aside class="account-panel" aria-label="当前游戏账户">
+          <button id="accountButton" class="account-chip" type="button">
+            <span id="playerAvatar" class="avatar" aria-hidden="true"><i></i></span>
+            <span class="account-copy">
+              <small id="accountType">游戏账户</small>
+              <strong id="accountName">未添加账户</strong>
+            </span>
+            <span class="account-action">管理</span>
+          </button>
+        </aside>
+
+        <section class="launch-deck" aria-label="游戏启动控制">
+          <div class="deck-status">
+            <span class="status-light" aria-hidden="true"></span>
+            <span id="gameStatus">请选择游戏版本</span>
+            <strong id="statusBadge">READY</strong>
+          </div>
+
+          <div class="launch-actions">
+            <button id="launchButton" class="launch-button" type="button">
+              <span class="play-symbol" aria-hidden="true"></span>
+              <span class="launch-copy">
+                <strong id="launchLabel">启动游戏</strong>
+                <small id="launchHint">准备进入方块世界</small>
+              </span>
+            </button>
+
+            <div class="utility-actions">
+              <button id="versionButton" class="utility-button" type="button">
+                <span class="utility-symbol" aria-hidden="true">⇄</span>
+                <span><strong>切换版本</strong><small id="sourceHint">32 路并发下载</small></span>
+              </button>
+              <button id="settingsButton" class="utility-button" type="button">
+                <span class="utility-symbol" aria-hidden="true">⚙</span>
+                <span><strong>启动设置</strong><small>Java、内存与下载</small></span>
+              </button>
+            </div>
+          </div>
+
+          <div class="instance-row">
+            <label for="versionSelect">游戏列表</label>
+            <div class="select-wrap">
+              <select id="versionSelect" aria-label="选择游戏版本">
+                <option value="">尚未选择已安装版本</option>
+              </select>
+            </div>
+            <button id="manageButton" class="text-button" type="button">打开目录</button>
+          </div>
+        </section>
+      </main>
+
+      <div class="wallpaper-switcher" role="group" aria-label="切换背景">
+        <span>场景</span>
+        <button class="wallpaper-dot is-active" type="button" data-wallpaper-index="0" aria-label="矿井轨道" aria-pressed="true"></button>
+        <button class="wallpaper-dot" type="button" data-wallpaper-index="1" aria-label="繁茂洞穴" aria-pressed="false"></button>
+        <button class="wallpaper-dot" type="button" data-wallpaper-index="2" aria-label="森林冒险" aria-pressed="false"></button>
+        <button class="wallpaper-dot" type="button" data-wallpaper-index="3" aria-label="沙漠湖泊" aria-pressed="false"></button>
+      </div>
+
+      <button id="backgroundDownloadBar" class="background-download-bar" type="button" hidden>
+        <span class="bg-download-symbol" aria-hidden="true">⬇</span>
+        <span class="bg-download-info">
+          <span class="bg-download-label" id="bgDownloadLabel">正在下载…</span>
+          <progress class="bg-download-progress" id="bgDownloadProgress" max="1" value="0"></progress>
+        </span>
+        <span class="bg-download-meta">
+          <strong id="bgDownloadPercent">0%</strong>
+          <small id="bgDownloadSpeed">—</small>
+        </span>
+      </button>
+
+      <footer class="launcher-footer">
+        <div class="footer-meta">
+          <strong>忘却的旋律</strong>
+          <span>Launcher 0.1.0</span>
+          <span id="electronMeta">Electron</span>
+        </div>
+      </footer>
+
+      <dialog id="accountDialog" class="account-dialog">
+        <form method="dialog">
+          <header class="dialog-header account-dialog-header">
+            <div>
+              <p>GAME ACCOUNT</p>
+              <h2>账户管理</h2>
+            </div>
+            <button class="dialog-close" value="cancel" aria-label="关闭账户管理" type="submit">×</button>
+          </header>
+
+          <div id="accountList" class="account-list" aria-label="已添加账户"></div>
+          <p id="accountEmpty" class="account-empty">还没有账户，可选择 Microsoft 正版、离线或 LittleSkin 外置登录。</p>
+
+          <div class="standard-account-methods" aria-label="正版与离线登录">
+          <section class="microsoft-account-form" aria-label="Microsoft 账户">
+            <button id="microsoftLoginButton" class="microsoft-account-button" type="button">
+              <span class="microsoft-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              <span><strong>Microsoft 正版登录</strong><small>Xbox Live · Minecraft Java</small></span>
+              <b>登录</b>
+            </button>
+            <div id="microsoftDevicePanel" class="microsoft-device-panel" hidden>
+              <span>在浏览器中输入代码</span>
+              <div class="microsoft-device-code-row">
+                <strong id="microsoftDeviceCode">—</strong>
+                <button id="microsoftCopyCodeButton" type="button">复制</button>
+              </div>
+              <small id="microsoftLoginHint">等待 Microsoft 授权…</small>
+              <button id="microsoftCancelLoginButton" type="button">取消</button>
+            </div>
+          </section>
+
+          <section class="offline-account-form" aria-labelledby="offlineAccountTitle">
+            <div class="account-section-title">
+              <strong id="offlineAccountTitle">离线账户</strong>
+              <span>无需联网，仅保存玩家名称</span>
+            </div>
+            <div class="offline-account-input">
+              <input
+                id="offlineNameInput"
+                type="text"
+                minlength="3"
+                maxlength="16"
+                pattern="[A-Za-z0-9_]{3,16}"
+                placeholder="输入 3–16 位游戏名"
+                autocomplete="off"
+              />
+              <button id="addOfflineButton" type="button">添加并使用</button>
+            </div>
+            <div class="offline-skin-choice" role="radiogroup" aria-label="默认离线皮肤">
+              <span>默认皮肤</span>
+              <label>
+                <input type="radio" name="offlineSkinModel" value="steve" checked />
+                <span>史蒂夫</span>
+              </label>
+              <label>
+                <input type="radio" name="offlineSkinModel" value="alex" />
+                <span>艾利克斯</span>
+              </label>
+            </div>
+            <p id="accountFormHint">支持英文字母、数字和下划线。</p>
+          </section>
+          </div>
+
+          <section class="yggdrasil-account-form" aria-labelledby="littleSkinAccountTitle">
+            <div class="account-section-title yggdrasil-section-title">
+              <span class="littleskin-mark" aria-hidden="true">LS</span>
+              <span class="yggdrasil-title-copy">
+                <strong id="littleSkinAccountTitle">LittleSkin 外置登录</strong>
+                <small>Yggdrasil · 皮肤与角色同步</small>
+              </span>
+              <span class="yggdrasil-server">littleskin.cn</span>
+            </div>
+            <div class="yggdrasil-login-grid">
+              <input
+                id="littleSkinUsernameInput"
+                type="text"
+                maxlength="254"
+                placeholder="邮箱或角色名"
+                autocomplete="username"
+              />
+              <input
+                id="littleSkinPasswordInput"
+                type="password"
+                maxlength="512"
+                placeholder="LittleSkin 密码"
+                autocomplete="current-password"
+              />
+              <select id="littleSkinProfileSelect" aria-label="选择 LittleSkin 角色" hidden></select>
+              <button id="littleSkinLoginButton" type="button">登录并同步</button>
+            </div>
+            <p id="littleSkinLoginHint">仅用于支持 LittleSkin 外置登录的服务器，不能替代正版验证。</p>
+          </section>
+
+          <footer class="dialog-actions account-dialog-actions">
+            <button class="secondary-dialog-button" value="cancel" type="submit">关闭</button>
+          </footer>
+        </form>
+      </dialog>
+
+      <dialog id="versionDialog" class="version-dialog">
+        <form method="dialog">
+          <header class="dialog-header version-dialog-header">
+            <div>
+              <p>VERSION MANAGER</p>
+              <h2>切换游戏版本</h2>
+            </div>
+            <button class="dialog-close" value="cancel" aria-label="关闭版本管理" type="submit">×</button>
+          </header>
+
+          <div class="version-toolbar">
+            <input id="versionSearch" type="search" placeholder="搜索版本，例如 1.21" autocomplete="off" />
+            <select id="versionTypeFilter" aria-label="版本类型">
+              <option value="release" selected>正式版</option>
+              <option value="snapshot">快照版</option>
+              <option value="all">全部版本</option>
+            </select>
+          </div>
+
+          <div class="loader-toolbar">
+            <label>
+              <span>游戏加载器</span>
+              <select id="loaderTypeSelect" aria-label="游戏加载器">
+                <option value="vanilla">原版 Vanilla</option>
+                <option value="fabric">Fabric</option>
+                <option value="forge">Forge</option>
+                <option value="neoforge">NeoForge</option>
+              </select>
+            </label>
+            <label>
+              <span>加载器版本</span>
+              <select id="loaderVersionSelect" aria-label="加载器版本" disabled>
+                <option value="">跟随 Minecraft 原版</option>
+              </select>
+            </label>
+          </div>
+
+          <select id="versionCatalog" class="version-catalog" size="6" aria-label="可用 Minecraft 版本"></select>
+          <p id="versionEmpty" class="version-empty">点击刷新以获取 Minecraft 版本列表</p>
+
+          <div id="downloadStatus" class="download-status" hidden>
+            <div class="download-status-line">
+              <span id="downloadMessage">正在准备下载…</span>
+              <strong id="downloadPercent">0%</strong>
+            </div>
+            <progress id="downloadProgress" max="1" value="0"></progress>
+            <div class="download-metrics" aria-label="下载速度与剩余时间">
+              <span id="downloadSpeed">速度 —</span>
+              <span id="downloadEta">剩余时间 —</span>
+            </div>
+          </div>
+
+          <footer class="dialog-actions version-dialog-actions">
+            <button id="refreshVersionsButton" class="secondary-dialog-button" type="button">刷新列表</button>
+            <button id="deleteVersionButton" class="delete-version-button" type="button" disabled>删除版本</button>
+            <button id="clearVersionSelectionButton" class="secondary-dialog-button" type="button" disabled>取消选择</button>
+            <span class="dialog-action-spacer"></span>
+            <button id="cancelDownloadButton" class="cancel-download-button" type="button" hidden>取消下载</button>
+            <button class="secondary-dialog-button" value="cancel" type="submit">关闭</button>
+            <button id="downloadVersionButton" class="primary-dialog-button" type="button" disabled>选择版本</button>
+          </footer>
+        </form>
+      </dialog>
+
+      <dialog id="settingsDialog" class="settings-dialog">
+        <form method="dialog">
+          <header class="dialog-header">
+            <div>
+              <p>LAUNCH OPTIONS</p>
+              <h2>启动设置</h2>
+            </div>
+            <button class="dialog-close" value="cancel" aria-label="关闭设置" type="submit">×</button>
+          </header>
+
+          <div class="setting-group">
+            <label for="javaSelect">Java 运行环境</label>
+            <div class="java-path-picker">
+              <select id="javaSelect">
+                <option value="auto">自动查找系统 Java</option>
+                <option value="custom">手动选择路径</option>
+              </select>
+              <button id="javaBrowseButton" type="button">选择</button>
+            </div>
+            <p id="javaPathHint" class="java-path-hint">启动时会从 JAVA_HOME 与系统 PATH 中自动查找 Java。</p>
+          </div>
+
+          <div class="setting-group download-setting-group">
+            <label>下载设置</label>
+            <div class="download-setting-grid">
+              <label for="downloadSourceSelect">
+                <span>下载源</span>
+                <select id="downloadSourceSelect">
+                  <option value="auto" selected>自动测速</option>
+                  <option value="bmclapi">BMCLAPI</option>
+                  <option value="official">Mojang 官方</option>
+                </select>
+              </label>
+              <label for="downloadConcurrencySelect">
+                <span>并发线程</span>
+                <select id="downloadConcurrencySelect">
+                  <option value="4">4 路 · 低占用</option>
+                  <option value="8">8 路</option>
+                  <option value="12">12 路</option>
+                  <option value="16">16 路</option>
+                  <option value="24">24 路</option>
+                  <option value="32" selected>32 路 · 推荐</option>
+                </select>
+              </label>
+            </div>
+            <p>自动模式会进行多连接真实测速，并在持续低速时切换备用线路。</p>
+          </div>
+
+          <div class="setting-group memory-setting">
+            <div class="setting-heading">
+              <label for="memoryRange">游戏内存</label>
+              <output id="memoryValue" for="memoryRange">4096 MB</output>
+            </div>
+            <input id="memoryRange" type="range" min="2048" max="16384" value="4096" step="512" />
+          </div>
+
+          <label class="check-setting">
+            <input id="autoUpdateCheck" type="checkbox" checked />
+            <span aria-hidden="true"></span>
+            启动前自动检查整合包更新
+          </label>
+
+          <footer class="dialog-actions">
+            <button class="secondary-dialog-button" value="cancel" type="submit">取消</button>
+            <button class="primary-dialog-button" value="save" type="submit">保存设置</button>
+          </footer>
+        </form>
+      </dialog>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <div id="modpackDropOverlay" class="modpack-drop-overlay" hidden>
+        <span aria-hidden="true">＋</span>
+        <strong>松开以安装整合包</strong>
+        <small>支持 Modrinth .mrpack 与 CurseForge .zip</small>
+      </div>
+    </div>
+    <script src="renderer.js"></script>
+  </body>
+</html>
