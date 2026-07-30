@@ -41,7 +41,7 @@
 ## 当前限制
 
 - 当前开发和发布目标是 Windows 10/11。部分底层代码包含 macOS 和 Linux 处理，但尚未作为受支持平台发布。
-- 尚无打包后的可执行文件、安装程序、更新器或公开下载。
+- 当前公开版本为 Windows x64 便携式可执行文件，不提供 NSIS 安装程序或更新器。
 - Microsoft 登录依赖启动器的 Azure 应用注册通过 Minecraft Services 审核；服务方策略或注册状态变化可能导致预览版无法登录。
 - LittleSkin 外置登录仅适用于客户端和服务端均正确配置 Yggdrasil 的环境，不能替代正版，也不能进入仅支持正版的服务器。详见 [LittleSkin 用户手册](https://manual.littlesk.in/yggdrasil/)。
 - CurseForge 安装依赖 CurseTools 提供可下载的文件信息；配置 `CURSEFORGE_API_KEY` 后也可尝试官方接口。包含受限或已下架文件的整合包可能安装失败。

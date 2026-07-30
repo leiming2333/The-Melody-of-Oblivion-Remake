@@ -32,7 +32,7 @@ const translations = {
     "hero.lead":
       "Melody is a Minecraft launcher rebuilt from zero. Faster downloads, clearer version management, and safer accounts all live inside one quiet, compact window.",
     "hero.primary": "Get for Windows",
-    "hero.primarySub": "Windows x64 · 0.1.0 Preview · Coming soon",
+    "hero.primarySub": "Windows x64 · 0.1.0 Preview · Portable build",
     "hero.secondary": "See what it can do",
     "hero.meta1": "download threads",
     "hero.meta2": "loader families",
@@ -138,7 +138,7 @@ document.querySelectorAll("[data-i18n]").forEach((element) => {
 });
 chinese["meta.title"] = document.title;
 chinese["meta.description"] = document.querySelector('meta[name="description"]').content;
-chinese["toast.preview"] = "预览版安装包暂未发布，完成后会在这里提供下载。";
+chinese["toast.preview"] = "Windows x64 便携版已在 GitHub Releases 发布。";
 chinese["menu.open"] = "打开导航菜单";
 chinese["menu.close"] = "关闭导航菜单";
 
@@ -336,10 +336,6 @@ sceneButtons.forEach((button) => {
     showScene(Number(button.dataset.sceneTarget));
     startSceneRotation();
   });
-});
-
-downloadButton.addEventListener("click", () => {
-  showToast(languageDictionary()["toast.preview"]);
 });
 
 window.addEventListener("scroll", updateHeader, { passive: true });

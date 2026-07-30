@@ -9,7 +9,7 @@ English · [简体中文](README.zh-CN.md)
 </div>
 
 > [!IMPORTANT]
-> This repository is a **development preview** at version `0.1.0`. There is no public installer or stable release yet. Build it from source only if you are comfortable testing unfinished software, and back up your Minecraft data first.
+> This repository is a **development preview** at version `0.1.0`. The public download is a Windows x64 portable build, not an installer. Build it from source only if you are comfortable testing unfinished software, and back up your Minecraft data first.
 
 ## About this project
 
@@ -41,7 +41,7 @@ The automated test suite currently covers 60 cases across accounts, authenticati
 ## Current limitations
 
 - Windows 10/11 is the current development and release target. Some internals contain macOS and Linux handling, but those platforms are not yet supported releases.
-- No packaged executable, installer, updater, or public download is available.
+- The current public build is a Windows x64 portable executable; no NSIS installer or updater is provided.
 - Microsoft sign-in depends on the launcher's Azure application registration being accepted by Minecraft Services. Provider-side policy or registration changes can make the preview login unavailable.
 - LittleSkin Yggdrasil works only when both client and server are configured for the same authentication service. It does not replace a premium account or grant access to premium-only servers. See the [LittleSkin manual](https://manual.littlesk.in/yggdrasil/).
 - CurseForge installation depends on downloadable file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Packs containing restricted or unavailable files may fail.
