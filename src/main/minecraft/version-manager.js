@@ -126,11 +126,18 @@ class MinecraftVersionManager {
         }
       }))).filter(Boolean);
 
-    const allProfiles = [...instances, ...publicProfiles].sort((left, right) => (
-      Number(right.complete) - Number(left.complete)
-      || Number(right.valid) - Number(left.valid)
-      || collator.compare(right.displayName ?? right.profileId, left.displayName ?? left.profileId)
-    ));
+    const allProfiles = [...instances, ...publicProfiles].sort((left, right) => {
+      if (left.isInstance !== right.isInstance) {
+        return Number(right.isInstance) - Number(left.isInstance);
+      }
+      const completeDiff = Number(right.complete) - Number(left.complete);
+      if (completeDiff !== 0) return completeDiff;
+      const validDiff = Number(right.valid) - Number(left.valid);
+      if (validDiff !== 0) return validDiff;
+      const leftName = left.displayName ?? left.profileId;
+      const rightName = right.displayName ?? right.profileId;
+      return collator.compare(String(leftName), String(rightName));
+    });
     return { gameDirectory: this.gameDirectory, profiles: allProfiles };
   }
 

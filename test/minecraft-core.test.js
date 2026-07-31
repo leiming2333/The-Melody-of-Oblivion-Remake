@@ -302,14 +302,14 @@ test('持续低速时中止当前源并切换备用地址', async (t) => {
     }
     let offset = 0;
     const timer = setInterval(() => {
-      const chunk = content.subarray(offset, offset + 4 * 1024);
+      const chunk = content.subarray(offset, offset + 1 * 1024);
       offset += chunk.length;
       response.write(chunk);
       if (offset >= content.length) {
         clearInterval(timer);
         response.end();
       }
-    }, 25);
+    }, 30);
     response.once('close', () => clearInterval(timer));
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -330,9 +330,9 @@ test('持续低速时中止当前源并切换备用地址', async (t) => {
     size: content.length,
     sha1: crypto.createHash('sha1').update(content).digest('hex'),
     slowMinimumSize: 1,
-    slowGraceMs: 80,
-    slowCheckIntervalMs: 20,
-    slowThresholdBytesPerSecond: 1024 * 1024,
+    slowGraceMs: 200,
+    slowCheckIntervalMs: 40,
+    slowThresholdBytesPerSecond: 200 * 1024,
     onSourceSwitch: (event) => switches.push(event)
   });
 
