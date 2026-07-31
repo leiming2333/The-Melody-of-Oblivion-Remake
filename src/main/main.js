@@ -1,5 +1,5 @@
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, shell } = require('electron');
 const { registerAccountIpc } = require('./accounts/ipc');
 const { AccountStore } = require('./accounts/account-store');
 const { MicrosoftAuthManager } = require('./accounts/microsoft-auth');
@@ -52,6 +52,19 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const items = [];
+    if (params.isTextSelected) {
+      items.push({ role: 'copy' });
+    }
+    if (params.editFlags.canPaste) {
+      items.push({ role: 'paste' });
+    }
+    items.push({ role: 'selectAll' });
+    Menu.buildFromTemplate(items).popup(mainWindow);
+  });
+
   mainWindow.once('ready-to-show', () => {
     if (!isSmokeTest) {
       mainWindow.show();

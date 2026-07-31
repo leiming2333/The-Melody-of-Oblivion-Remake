@@ -32,6 +32,18 @@ body {
   margin: 0;
   overflow: hidden;
   background: transparent;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button,
+select,
+.account-chip,
+.wallpaper-dot,
+.window-button,
+.brand-cube {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .launcher-app {

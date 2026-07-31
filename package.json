@@ -2,6 +2,10 @@
   "name": "melody-of-oblivion-launcher",
   "version": "0.1.1",
   "description": "我的世界忘却的旋律启动器",
+  "author": {
+    "name": "leiming2333",
+    "email": "leiming2333@users.noreply.github.com"
+  },
   "main": "src/main/main.js",
   "private": true,
   "scripts": {
@@ -11,7 +15,6 @@
     "build:win": "electron-builder --win portable --x64",
     "build:linux": "electron-builder --linux AppImage deb --x64",
     "build:mac": "electron-builder --mac dmg zip --x64",
-    "build:exe": "electron-builder --win portable --x64",
     "smoke": "electron . --smoke-test",
     "check": "node --check site.js && node --check src/main/main.js && node --check src/main/accounts/account-store.js && node --check src/main/accounts/microsoft-auth.js && node --check src/main/accounts/yggdrasil-auth.js && node --check src/main/accounts/ipc.js && node --check src/main/settings/settings-store.js && node --check src/main/settings/ipc.js && node --check src/main/minecraft/source-manager.js && node --check src/main/minecraft/downloader.js && node --check src/main/minecraft/authlib-injector.js && node --check src/main/minecraft/java-runtime.js && node --check src/main/minecraft/managed-java-runtime.js && node --check src/main/minecraft/launch-core.js && node --check src/main/minecraft/loader-manager.js && node --check src/main/minecraft/modpack-manager.js && node --check src/main/minecraft/version-manager.js && node --check src/main/minecraft/ipc.js && node --check src/preload/preload.js && node --check src/renderer/renderer.js",
     "test": "node --test test/minecraft-core.test.js test/launch-core.test.js test/java-runtime.test.js test/modpack-manager.test.js test/version-manager.test.js test/account-store.test.js test/microsoft-auth.test.js test/yggdrasil-auth.test.js test/authlib-injector.test.js test/settings-store.test.js"
