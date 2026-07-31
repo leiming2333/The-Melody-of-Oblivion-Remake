@@ -21,16 +21,17 @@ test('可以解析新旧 Java 版本输出', () => {
 });
 
 test('启动器只选择游戏要求的 Java 主版本', async () => {
+  const executableName = process.platform === 'win32' ? 'java.exe' : 'java';
   const versions = new Map([
     ['C:/Java/jdk-21/bin/java.exe', 21],
-    ['java.exe', 25]
+    [executableName, 25]
   ]);
   const executable = await findJavaExecutable(
     'C:/Java/jdk-21/bin/java.exe',
     25,
     async (candidate) => versions.get(candidate)
   );
-  assert.equal(executable, 'java.exe');
+  assert.equal(executable, executableName);
   await assert.rejects(
     findJavaExecutable('C:/Java/jdk-21/bin/java.exe', 17, async (candidate) => versions.get(candidate)),
     /需要 Java 17.*检测到 Java 21、25/
