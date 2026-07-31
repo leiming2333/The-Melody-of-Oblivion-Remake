@@ -4,30 +4,23 @@ const minecraft = environment?.minecraft;
 const accountsApi = environment?.accounts;
 const settingsApi = environment?.settings;
 const filesApi = environment?.files;
-const clipboardApi = environment?.clipboard;
 
-// 启用文本复制：Ctrl+C 复制选中文本，Ctrl+V 粘贴，Ctrl+A 全选
-document.addEventListener('keydown', (event) => {
-  const isModifier = event.ctrlKey || event.metaKey;
-  if (!isModifier) return;
-  const key = event.key.toLowerCase();
-  if (key === 'c') {
-    const selection = window.getSelection().toString();
-    if (selection && clipboardApi) {
-      clipboardApi.writeText(selection);
-      event.preventDefault();
-    }
-  } else if (key === 'v' && clipboardApi) {
-    // 仅在非输入框时处理（输入框使用原生粘贴）
-    const tag = event.target?.tagName;
-    if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
-      const text = clipboardApi.readText();
-      if (text) {
-        document.execCommand('insertText', false, text);
-        event.preventDefault();
-      }
-    }
-  }
+// 禁止复制文字：屏蔽右键菜单、复制、剪切（输入框除外）
+document.addEventListener('contextmenu', (event) => {
+  const tag = event.target?.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA') event.preventDefault();
+});
+document.addEventListener('copy', (event) => {
+  const tag = event.target?.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA') event.preventDefault();
+});
+document.addEventListener('cut', (event) => {
+  const tag = event.target?.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA') event.preventDefault();
+});
+document.addEventListener('selectstart', (event) => {
+  const tag = event.target?.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA') event.preventDefault();
 });
 
 const launchButton = document.querySelector('#launchButton');

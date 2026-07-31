@@ -1,10 +1,6 @@
-const { clipboard, contextBridge, ipcRenderer, webUtils } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('launcherEnvironment', {
-  clipboard: Object.freeze({
-    writeText: (text) => clipboard.writeText(String(text)),
-    readText: () => clipboard.readText()
-  }),
   versions: Object.freeze({
     electron: process.versions.electron,
     chromium: process.versions.chrome,
