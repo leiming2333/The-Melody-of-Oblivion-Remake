@@ -22,7 +22,6 @@
   "build": {
     "appId": "com.melodyofoblivion.launcher",
     "productName": "Melody of Oblivion Launcher",
-    "artifactName": "Melody-of-Oblivion-Launcher-v${version}-${os}-${arch}.${ext}",
     "asar": true,
     "compression": "maximum",
     "directories": {
@@ -34,6 +33,7 @@
     ],
     "win": {
       "icon": "src/renderer/assets/app-icon.ico",
+      "artifactName": "Melody-of-Oblivion-Launcher-v${version}-Windows-x64.${ext}",
       "target": [
         {
           "target": "portable",
@@ -45,6 +45,7 @@
     },
     "linux": {
       "icon": "src/renderer/assets/app-icon.png",
+      "artifactName": "Melody-of-Oblivion-Launcher-v${version}-Linux-x64.${ext}",
       "target": [
         "AppImage",
         "deb"
@@ -52,6 +53,7 @@
     },
     "mac": {
       "icon": "src/renderer/assets/app-icon.icns",
+      "artifactName": "Melody-of-Oblivion-Launcher-v${version}-macOS-x64.${ext}",
       "target": [
         "dmg",
         "zip"

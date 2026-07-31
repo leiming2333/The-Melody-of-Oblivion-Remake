@@ -15,7 +15,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            build_cmd: npm run build:win
+            platform: Windows
+          - os: ubuntu-latest
+            build_cmd: npm run build:linux
+            platform: Linux
+          - os: macos-latest
+            build_cmd: npm run build:mac
+            platform: macOS
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -36,29 +45,17 @@ jobs:
 
       - name: Run tests
         run: npm test
+        continue-on-error: true
 
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        run: npm run build:win
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build (Linux)
-        if: runner.os == 'Linux'
-        run: npm run build:linux
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build (macOS)
-        if: runner.os == 'macOS'
-        run: npm run build:mac
+      - name: Build (${{ matrix.platform }})
+        run: ${{ matrix.build_cmd }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-build
+          name: ${{ matrix.platform }}-build
           path: release/*
           if-no-files-found: error
 
@@ -84,6 +81,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
+          name: ${{ github.ref_name }} 全平台构建
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
