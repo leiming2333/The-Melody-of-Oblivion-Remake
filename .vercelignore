@@ -1,0 +1,11 @@
+node_modules
+src
+test
+release
+.git
+.github
+*.md
+LICENSE
+.editorconfig
+package.json
+package-lock.json
