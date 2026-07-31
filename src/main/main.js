@@ -55,12 +55,10 @@ function createWindow() {
 
   mainWindow.webContents.on('context-menu', (_event, params) => {
     const items = [];
-    if (params.isTextSelected) {
-      items.push({ role: 'copy' });
-    }
-    if (params.editFlags.canPaste) {
-      items.push({ role: 'paste' });
-    }
+    if (params.editFlags.canCut) items.push({ role: 'cut' });
+    if (params.editFlags.canCopy) items.push({ role: 'copy' });
+    if (params.editFlags.canPaste) items.push({ role: 'paste' });
+    if (items.length > 0) items.push({ type: 'separator' });
     items.push({ role: 'selectAll' });
     Menu.buildFromTemplate(items).popup(mainWindow);
   });
