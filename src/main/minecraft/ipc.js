@@ -17,7 +17,14 @@ function registerMinecraftIpc({
   microsoftAuth,
   yggdrasilAuth
 }) {
-  const gameDirectory = path.join(app.getPath('appData'), '.minecraft');
+  // Windows: %APPDATA%\.minecraft
+  // macOS:   ~/Library/Application Support/minecraft
+  // Linux:   ~/.minecraft
+  const gameDirectory = process.platform === 'win32'
+    ? path.join(app.getPath('appData'), '.minecraft')
+    : process.platform === 'darwin'
+      ? path.join(app.getPath('home'), 'Library', 'Application Support', 'minecraft')
+      : path.join(app.getPath('home'), '.minecraft');
   const sourceManager = new MinecraftSourceManager();
   const downloader = new MinecraftDownloader({
     gameDirectory,

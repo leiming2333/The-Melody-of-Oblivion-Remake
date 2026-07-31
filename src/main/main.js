@@ -9,11 +9,10 @@ const { registerSettingsIpc } = require('./settings/ipc');
 const { SettingsStore } = require('./settings/settings-store');
 
 const isSmokeTest = process.argv.includes('--smoke-test');
-const appIconPath = path.join(
-  __dirname,
-  '../renderer/assets',
-  'app-icon.ico'
-);
+const iconFile = process.platform === 'win32' ? 'app-icon.ico'
+  : process.platform === 'darwin' ? 'app-icon.icns'
+  : 'app-icon.png';
+const appIconPath = path.join(__dirname, '../renderer/assets', iconFile);
 if (isSmokeTest) {
   app.disableHardwareAcceleration();
   app.setPath('userData', path.join(app.getPath('temp'), 'melody-of-oblivion-smoke'));

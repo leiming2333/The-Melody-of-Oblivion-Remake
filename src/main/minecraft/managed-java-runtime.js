@@ -33,8 +33,9 @@ function selectRuntimePackage(assets, requiredMajorVersion, platform = process.p
   if (!asset) throw new Error(`未找到适用于当前系统的 Java ${requiredMajorVersion} 运行时`);
   const link = new URL(String(asset.binary.package.link));
   if (link.protocol !== 'https:') throw new Error('Java 运行时下载地址不安全');
-  const packageName = path.basename(String(asset.binary.package.name ?? `java-${requiredMajorVersion}.zip`));
-  if (platform === 'win32' && path.extname(packageName).toLowerCase() !== '.zip') {
+  const packageName = path.basename(String(asset.binary.package.name ?? `java-${requiredMajorVersion}.${platform === 'win32' ? 'zip' : 'tar.gz'}`));
+  const ext = platform === 'win32' ? '.zip' : '.tar.gz';
+  if (!packageName.toLowerCase().endsWith(ext)) {
     throw new Error('Java 运行时压缩包格式不受支持');
   }
   return {
@@ -153,7 +154,7 @@ class ManagedJavaRuntime {
     } catch {}
     const installed = await this.installedExecutable(requiredMajorVersion);
     if (installed) return installed;
-    if (process.platform !== 'win32') {
+    if (!this.extractArchive) {
       throw new Error(`该游戏版本需要 Java ${requiredMajorVersion}，当前系统暂不支持自动安装`);
     }
     if (!this.installing.has(requiredMajorVersion)) {

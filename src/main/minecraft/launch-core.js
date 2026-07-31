@@ -290,6 +290,49 @@ async function extractNativeArchive(archivePath, destination, excludes = []) {
   }
 }
 
+async function extractTarGz(archivePath, destination) {
+  const gunzip = zlib.createGunzip();
+  const input = require('node:fs').createReadStream(archivePath);
+  await new Promise((resolve, reject) => {
+    const chunks = [];
+    gunzip.on('data', (chunk) => chunks.push(chunk));
+    gunzip.on('end', () => resolve(Buffer.concat(chunks)));
+    gunzip.on('error', reject);
+    input.on('error', reject);
+    input.pipe(gunzip);
+  }).then(async (tar) => {
+    let offset = 0;
+    while (offset + 512 <= tar.length) {
+      // 两块全零表示归档结束
+      if (tar.subarray(offset, offset + 512).every((b) => b === 0)) break;
+      const name = tar.subarray(offset, offset + 100).toString('utf8').replace(/\0/g, '');
+      const sizeOctal = tar.subarray(offset + 124, offset + 136).toString('utf8').replace(/\0/g, '').trim();
+      const size = sizeOctal ? parseInt(sizeOctal, 8) : 0;
+      const typeFlag = tar[offset + 156];
+      offset += 512;
+      // 只处理普通文件（0 或 '\0'）和目录（5）
+      if (name && typeFlag !== 5) {
+        const slashName = name.replaceAll('\\', '/');
+        const segments = slashName.split('/').filter(Boolean);
+        if (segments.length > 0) {
+          const destinationPath = safePath(destination, ...segments);
+          await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+          if (size > 0) await fs.writeFile(destinationPath, tar.subarray(offset, offset + size));
+        }
+      }
+      offset += Math.ceil(size / 512) * 512;
+    }
+  });
+}
+
+async function extractArchive(archivePath, destination, excludes = []) {
+  const lower = archivePath.toLowerCase();
+  if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
+    return extractTarGz(archivePath, destination);
+  }
+  return extractNativeArchive(archivePath, destination, excludes);
+}
+
 function replaceVariables(argument, variables) {
   return String(argument).replace(/\$\{([^}]+)\}/g, (match, name) => (
     Object.hasOwn(variables, name) ? String(variables[name]) : match
@@ -481,7 +524,7 @@ class MinecraftLauncher {
     this.findJava = findJava;
     this.javaRuntime = javaRuntime ?? new ManagedJavaRuntime({
       gameDirectory,
-      extractArchive: extractNativeArchive
+      extractArchive
     });
     this.activeGames = new Map();
   }
@@ -580,7 +623,9 @@ module.exports = {
   DEFAULT_FEATURES,
   MinecraftLauncher,
   expandArgumentEntries,
+  extractArchive,
   extractNativeArchive,
+  extractTarGz,
   launchVariables,
   libraryArtifactPath,
   mergeLibraries,

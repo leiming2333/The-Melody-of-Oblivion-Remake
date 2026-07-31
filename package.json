@@ -7,6 +7,10 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win portable --x64",
+    "build:linux": "electron-builder --linux AppImage deb --x64",
+    "build:mac": "electron-builder --mac dmg zip --x64",
     "build:exe": "electron-builder --win portable --x64",
     "smoke": "electron . --smoke-test",
     "check": "node --check site.js && node --check src/main/main.js && node --check src/main/accounts/account-store.js && node --check src/main/accounts/microsoft-auth.js && node --check src/main/accounts/yggdrasil-auth.js && node --check src/main/accounts/ipc.js && node --check src/main/settings/settings-store.js && node --check src/main/settings/ipc.js && node --check src/main/minecraft/source-manager.js && node --check src/main/minecraft/downloader.js && node --check src/main/minecraft/authlib-injector.js && node --check src/main/minecraft/java-runtime.js && node --check src/main/minecraft/managed-java-runtime.js && node --check src/main/minecraft/launch-core.js && node --check src/main/minecraft/loader-manager.js && node --check src/main/minecraft/modpack-manager.js && node --check src/main/minecraft/version-manager.js && node --check src/main/minecraft/ipc.js && node --check src/preload/preload.js && node --check src/renderer/renderer.js",
@@ -18,7 +22,7 @@
   "build": {
     "appId": "com.melodyofoblivion.launcher",
     "productName": "Melody of Oblivion Launcher",
-    "artifactName": "Melody-of-Oblivion-Launcher-v${version}-Windows-x64.${ext}",
+    "artifactName": "Melody-of-Oblivion-Launcher-v${version}-${os}-${arch}.${ext}",
     "asar": true,
     "compression": "maximum",
     "directories": {
@@ -37,6 +41,20 @@
             "x64"
           ]
         }
+      ]
+    },
+    "linux": {
+      "icon": "src/renderer/assets/app-icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "mac": {
+      "icon": "src/renderer/assets/app-icon.icns",
+      "target": [
+        "dmg",
+        "zip"
       ]
     }
   },
