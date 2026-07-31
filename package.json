@@ -27,6 +27,7 @@
     "directories": {
       "output": "release"
     },
+    "publish": null,
     "files": [
       "src/**/*",
       "package.json"

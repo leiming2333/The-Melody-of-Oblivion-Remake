@@ -51,6 +51,7 @@ jobs:
         run: ${{ matrix.build_cmd }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISH: 'false'
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
