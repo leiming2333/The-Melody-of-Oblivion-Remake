@@ -5,11 +5,11 @@
 
 **A modern, independent remake of the classic Chinese Minecraft: Java Edition launcher “忘却的旋律”.**
 
-English · [简体中文](README.zh-CN.md)
+[English](README.md) · [简体中文](README.zh-CN.md)
 </div>
 
 > [!IMPORTANT]
-> This repository is a **development preview** at version `0.1.0`. The public download is a Windows x64 portable build, not an installer. Build it from source only if you are comfortable testing unfinished software, and back up your Minecraft data first.
+> This repository is at version `1.0.0`. Downloads for Windows, macOS, and Linux x64 are published through GitHub Releases. Back up your Minecraft data before testing a new build.
 
 ## About this project
 
@@ -23,7 +23,7 @@ This is an independent tribute. It is **not** an official update, a continuation
 
 The surviving public record is incomplete and sometimes contradictory—for example, the same encyclopedia entry mentions both 2009 and 2012 as origin dates. This README therefore treats “around 2012”, version `5.31`, and 2014 as community-reported history rather than verified primary-source facts.
 
-The current repository starts a new implementation at version `0.1.0`; its version numbers and code lineage are unrelated to the historical launcher.
+The current repository starts a new implementation; its version numbers and code lineage are unrelated to the historical launcher.
 
 ## What is implemented
 
@@ -36,12 +36,12 @@ The current repository starts a new implementation at version `0.1.0`; its versi
 - **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instance directories, including overrides and supported loaders.
 - **Desktop UI** — a compact frameless Electron window with version, account, download, launch, and settings flows.
 
-The automated test suite currently covers 60 cases across accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, and local version management.
+The automated test suite currently covers 64 cases across accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, and local version management.
 
 ## Current limitations
 
-- Windows 10/11 is the current development and release target. Some internals contain macOS and Linux handling, but those platforms are not yet supported releases.
-- The current public build is a Windows x64 portable executable; no NSIS installer or updater is provided.
+- Public x64 builds are available for Windows, macOS, and Linux. Platform-specific behavior may still vary.
+- No automatic updater is provided; download new versions from GitHub Releases.
 - Microsoft sign-in depends on the launcher's Azure application registration being accepted by Minecraft Services. Provider-side policy or registration changes can make the preview login unavailable.
 - LittleSkin Yggdrasil works only when both client and server are configured for the same authentication service. It does not replace a premium account or grant access to premium-only servers. See the [LittleSkin manual](https://manual.littlesk.in/yggdrasil/).
 - CurseForge installation depends on downloadable file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Packs containing restricted or unavailable files may fail.
@@ -64,7 +64,7 @@ $env:MELODY_MICROSOFT_CLIENT_ID = "your-public-azure-application-id"
 npm run dev
 ```
 
-The preview uses the operating system's Minecraft application-data directory (`%APPDATA%\.minecraft` on Windows). Modpack instances are created below `.minecraft\melody-instances`. Back up an existing installation before testing.
+The launcher uses the operating system's Minecraft application-data directory (`%APPDATA%\.minecraft` on Windows). Modpack instances are created below `.minecraft\melody-instances`. Back up an existing installation before testing.
 
 ## Development commands
 
@@ -74,7 +74,9 @@ The preview uses the operating system's Minecraft application-data directory (`%
 | `npm run check` | Syntax-check the main, preload, and renderer JavaScript |
 | `npm test` | Run the Node.js test suite |
 | `npm run smoke` | Load the Electron window with temporary user data and exit |
-| `npm run build:exe` | Build the portable Windows x64 executable |
+| `npm run build:win` | Build the portable Windows x64 executable |
+| `npm run build:linux` | Build Linux x64 AppImage and deb packages |
+| `npm run build:mac` | Build macOS x64 dmg and zip packages |
 
 ## Repository layout
 
@@ -106,7 +108,7 @@ The landing page in the repository root and the Electron renderer under `src/ren
 
 Security-sensitive reports should not include account files, access tokens, refresh tokens, device codes, or personal Minecraft data.
 
-## Road to the first preview
+## Next steps
 
 - Finish modpack compatibility and recovery paths.
 - Improve error messages and cancellation behavior across the UI.

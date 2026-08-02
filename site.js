@@ -4,7 +4,7 @@ const header = document.querySelector("#site-header");
 const navigation = document.querySelector("#site-nav");
 const menuButton = document.querySelector("#menu-button");
 const languageButton = document.querySelector("#language-button");
-const downloadButton = document.querySelector("#download-button");
+const downloadLinks = [...document.querySelectorAll("[data-download-link]")];
 const partnerWindow = document.querySelector("#partner-window");
 const partnerWindowClose = document.querySelector("#partner-window-close");
 const toast = document.querySelector("#toast");
@@ -14,6 +14,25 @@ const launcherSceneIndicators = [...document.querySelectorAll(".mock-scene-switc
 const sceneButtons = [...document.querySelectorAll("[data-scene-target]")];
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const sceneRotationInterval = 6000;
+const releaseVersion = "1.0.0";
+const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
+const releaseTargets = {
+  windows: {
+    name: "Windows",
+    system: "Windows 10 / 11",
+    asset: `Melody-of-Oblivion-Launcher-v${releaseVersion}-Windows-x64.exe`,
+  },
+  macos: {
+    name: "macOS",
+    system: "macOS",
+    asset: `Melody-of-Oblivion-Launcher-v${releaseVersion}-macOS-x64.dmg`,
+  },
+  linux: {
+    name: "Linux",
+    system: "Linux",
+    asset: `Melody-of-Oblivion-Launcher-v${releaseVersion}-Linux-x64.AppImage`,
+  },
+};
 
 const translations = {
   en: {
@@ -26,13 +45,13 @@ const translations = {
     "nav.features": "Capabilities",
     "nav.roadmap": "Roadmap",
     "nav.download": "Get the launcher",
-    "header.preview": "Preview in development",
+    "header.preview": "v1.0.0 available",
     "hero.eyebrow": "Retuning the way into the block world",
     "hero.title": "Leave the waiting to the launcher.<br />Keep the adventure for yourself.",
     "hero.lead":
       "Melody is a Minecraft launcher rebuilt from zero. Faster downloads, clearer version management, and safer accounts all live inside one quiet, compact window.",
-    "hero.primary": "Get for Windows",
-    "hero.primarySub": "Windows x64 · 0.1.0",
+    "hero.primary": "Get the matching build",
+    "hero.primarySub": "Automatic system detection · v1.0.0",
     "hero.secondary": "See what it can do",
     "hero.meta1": "download threads",
     "hero.meta2": "loader families",
@@ -109,23 +128,23 @@ const translations = {
     "roadmap.phase2Body": "Microsoft and LittleSkin sign-in, multi-source downloads, integrity checks, and background tasks.",
     "roadmap.phase3Title": "Modpacks and experience polish",
     "roadmap.phase3Body": "Modrinth and CurseForge instances now separate required and optional files, surface restricted-file warnings, and report failures by install phase.",
-    "roadmap.phase4Title": "First public preview",
-    "roadmap.phase4Body": "The Windows x64 build is available from GitHub Releases.",
+    "roadmap.phase4Title": "First public release",
+    "roadmap.phase4Body": "Windows, macOS, and Linux x64 builds are available from GitHub Releases.",
     "roadmap.complete": "Complete",
     "roadmap.active": "In progress",
     "roadmap.planned": "Planned",
-    "download.title": "Windows x64 public preview.",
+    "download.title": "Automatically select the build for your system.",
     "download.body":
-      "Download and run after extraction. Configure the public Microsoft Client ID before starting Microsoft sign-in.",
+      "A recognized system downloads its matching build directly; otherwise you will be sent to GitHub Releases.",
     "download.system": "System",
     "download.arch": "Architecture",
     "download.version": "Version",
-    "download.button": "Download Windows x64",
-    "download.buttonSub": "GitHub Release v0.1.0",
+    "download.button": "Download the matching build",
+    "download.buttonSub": "GitHub Release v1.0.0",
     "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft.",
     "footer.slogan": "Hear the way back into the block world again.",
     "footer.backTop": "Back to top ↑",
-    "toast.preview": "The Windows x64 portable build is available from GitHub Releases.",
+    "toast.preview": "Version 1.0.0 is available from GitHub Releases.",
     "menu.open": "Open navigation menu",
     "menu.close": "Close navigation menu",
   },
@@ -138,7 +157,7 @@ document.querySelectorAll("[data-i18n]").forEach((element) => {
 });
 chinese["meta.title"] = document.title;
 chinese["meta.description"] = document.querySelector('meta[name="description"]').content;
-chinese["toast.preview"] = "Windows x64 版已在 GitHub Releases 发布。";
+chinese["toast.preview"] = "v1.0.0 已在 GitHub Releases 发布。";
 chinese["menu.open"] = "打开导航菜单";
 chinese["menu.close"] = "关闭导航菜单";
 
@@ -191,7 +210,61 @@ function applyLanguage(language) {
     currentLanguage === "en" ? "切换为中文" : "Switch language",
   );
   updateMenuLabel();
+  updateDownloadExperience();
   storeLanguage(currentLanguage);
+}
+
+function detectReleaseTarget() {
+  const userAgent = navigator.userAgent?.toLowerCase() || "";
+  const reportedPlatform = navigator.userAgentData?.platform || navigator.platform || "";
+  const platform = reportedPlatform.toLowerCase();
+
+  if (/android|iphone|ipad|ipod|cros/.test(`${userAgent} ${platform}`)) return null;
+  if (platform.includes("win") || userAgent.includes("windows")) return releaseTargets.windows;
+  if (platform.includes("mac") || userAgent.includes("macintosh")) return releaseTargets.macos;
+  if (platform.includes("linux") || /linux|x11/.test(userAgent)) return releaseTargets.linux;
+  return null;
+}
+
+function updateDownloadExperience() {
+  const target = detectReleaseTarget();
+  const isEnglish = currentLanguage === "en";
+  const targetUrl = target
+    ? `${releasesUrl}/download/v${releaseVersion}/${target.asset}`
+    : releasesUrl;
+
+  downloadLinks.forEach((link) => {
+    link.href = targetUrl;
+    link.dataset.detectedPlatform = target?.name || "unknown";
+  });
+
+  const copy = target
+    ? {
+        heroLabel: isEnglish ? `Get for ${target.name}` : `获取 ${target.name} 版`,
+        heroDetail: `${target.name} x64 · ${releaseVersion}`,
+        title: isEnglish ? `${target.name} x64 public release.` : `${target.name} x64 正式版。`,
+        system: target.system,
+        arch: "x64",
+        button: isEnglish ? `Download ${target.name} x64` : `下载 ${target.name} x64`,
+        detail: `GitHub Release v${releaseVersion}`,
+      }
+    : {
+        heroLabel: isEnglish ? "View all releases" : "查看全部版本",
+        heroDetail: isEnglish ? "System not recognized · GitHub Releases" : "未识别系统 · GitHub Releases",
+        title: isEnglish ? "Choose a build from GitHub Releases." : "请从 GitHub Releases 选择版本。",
+        system: isEnglish ? "Not recognized" : "未识别",
+        arch: "—",
+        button: isEnglish ? "View all releases" : "查看全部版本",
+        detail: "GitHub Releases",
+      };
+
+  document.querySelector("#hero-download-label").textContent = copy.heroLabel;
+  document.querySelector("#hero-download-detail").textContent = copy.heroDetail;
+  document.querySelector("#download-title").textContent = copy.title;
+  document.querySelector("#download-system").textContent = copy.system;
+  document.querySelector("#download-arch").textContent = copy.arch;
+  document.querySelector("#download-button-label").textContent = copy.button;
+  document.querySelector("#download-button-detail").textContent = copy.detail;
 }
 
 function updateMenuLabel() {
