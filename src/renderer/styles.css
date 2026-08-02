@@ -185,15 +185,16 @@ textarea {
 
 .window-actions {
   -webkit-app-region: no-drag;
+  position: absolute;
+  top: 0;
+  right: 0;
   display: flex;
-  margin-left: auto;
-  align-items: center;
 }
 
 .window-button {
   display: grid;
-  width: 34px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   place-items: center;
   border: 0;
   background: transparent;
@@ -207,9 +208,16 @@ textarea {
   opacity: 1;
 }
 
-.close-button:hover {
+.close-button {
+  color: #ffffff;
+  opacity: 0;
+}
+
+.close-button:hover,
+.close-button:focus-visible {
   border-top-right-radius: 11px;
   background: #c84d4d;
+  opacity: 1;
 }
 
 .minimize-icon {
