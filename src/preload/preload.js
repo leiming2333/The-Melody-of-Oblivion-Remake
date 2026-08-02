@@ -1,3 +1,4 @@
+
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('launcherEnvironment', {
