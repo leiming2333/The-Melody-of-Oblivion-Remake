@@ -9,7 +9,7 @@
 </div>
 
 > [!IMPORTANT]
-> This repository is at version `1.0.0`. Downloads for Windows, macOS, and Linux x64 are published through GitHub Releases. Back up your Minecraft data before testing a new build.
+> This repository is at version `1.0.1`. Downloads for Windows, macOS, and Linux x64 are published through GitHub Releases. Back up your Minecraft data before testing a new build.
 
 ## About this project
 

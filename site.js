@@ -14,7 +14,7 @@ const launcherSceneIndicators = [...document.querySelectorAll(".mock-scene-switc
 const sceneButtons = [...document.querySelectorAll("[data-scene-target]")];
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const sceneRotationInterval = 6000;
-const releaseVersion = "1.0.0";
+const releaseVersion = "1.0.1";
 const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
 const releaseTargets = {
   windows: {
@@ -45,13 +45,13 @@ const translations = {
     "nav.features": "Capabilities",
     "nav.roadmap": "Roadmap",
     "nav.download": "Get the launcher",
-    "header.preview": "v1.0.0 available",
+    "header.preview": "v1.0.1 available",
     "hero.eyebrow": "Retuning the way into the block world",
     "hero.title": "Leave the waiting to the launcher.<br />Keep the adventure for yourself.",
     "hero.lead":
       "Melody is a Minecraft launcher rebuilt from zero. Faster downloads, clearer version management, and safer accounts all live inside one quiet, compact window.",
     "hero.primary": "Get the matching build",
-    "hero.primarySub": "Automatic system detection · v1.0.0",
+    "hero.primarySub": "Automatic system detection · v1.0.1",
     "hero.secondary": "See what it can do",
     "hero.meta1": "download threads",
     "hero.meta2": "loader families",
@@ -140,11 +140,11 @@ const translations = {
     "download.arch": "Architecture",
     "download.version": "Version",
     "download.button": "Download the matching build",
-    "download.buttonSub": "GitHub Release v1.0.0",
+    "download.buttonSub": "GitHub Release v1.0.1",
     "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft.",
     "footer.slogan": "Hear the way back into the block world again.",
     "footer.backTop": "Back to top ↑",
-    "toast.preview": "Version 1.0.0 is available from GitHub Releases.",
+    "toast.preview": "Version 1.0.1 is available from GitHub Releases.",
     "menu.open": "Open navigation menu",
     "menu.close": "Close navigation menu",
   },
@@ -157,7 +157,7 @@ document.querySelectorAll("[data-i18n]").forEach((element) => {
 });
 chinese["meta.title"] = document.title;
 chinese["meta.description"] = document.querySelector('meta[name="description"]').content;
-chinese["toast.preview"] = "v1.0.0 已在 GitHub Releases 发布。";
+chinese["toast.preview"] = "v1.0.1 已在 GitHub Releases 发布。";
 chinese["menu.open"] = "打开导航菜单";
 chinese["menu.close"] = "关闭导航菜单";
 
