@@ -19,7 +19,7 @@ const SOURCES = Object.freeze({
 
 const DEFAULT_HEADERS = Object.freeze({
   Accept: 'application/json, application/octet-stream;q=0.9, */*;q=0.8',
-  'User-Agent': 'MelodyOfOblivionLauncher/0.1.0'
+  'User-Agent': 'MelodyOfOblivionLauncher/1.1.1'
 });
 
 const DOWNLOAD_SOURCE_OPTIONS = Object.freeze(['auto', 'bmclapi', 'official']);

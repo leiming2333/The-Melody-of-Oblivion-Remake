@@ -141,6 +141,17 @@ const loaderNames = Object.freeze({
   custom: '自定义'
 });
 
+const versionTypeNames = Object.freeze({
+  release: '正式版',
+  snapshot: '快照',
+  old_beta: '早期测试版',
+  old_alpha: '早期版本'
+});
+
+function versionTypeName(type) {
+  return versionTypeNames[type] ?? '其他版本';
+}
+
 const skinModelNames = Object.freeze({
   steve: '史蒂夫',
   alex: '艾利克斯'
@@ -1134,7 +1145,7 @@ function renderVersionCatalog(preferredId) {
     for (const version of installedVersions) {
       const option = document.createElement('option');
       option.value = version.id;
-      option.textContent = version.id;
+      option.textContent = `${version.id}  ·  ${versionTypeName(version.type)}`;
       installedGroup.append(option);
     }
     versionCatalog.append(installedGroup);
@@ -1146,7 +1157,7 @@ function renderVersionCatalog(preferredId) {
     for (const version of availableVersions) {
       const option = document.createElement('option');
       option.value = version.id;
-      option.textContent = version.id;
+      option.textContent = `${version.id}  ·  ${versionTypeName(version.type)}`;
       option.disabled = version.localOnly === true;
       availableGroup.append(option);
     }

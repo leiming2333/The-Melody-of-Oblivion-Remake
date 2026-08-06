@@ -844,8 +844,9 @@ textarea {
   padding: 0 9px;
   border: 1px solid var(--control-border);
   border-radius: 2px;
-  color: var(--control-ink);
-  background: linear-gradient(180deg, var(--control-surface-start), var(--control-surface-end));
+  color: #242220;
+  background-color: #e7e3da;
+  background-image: linear-gradient(180deg, #fffdf7, #d6d0c6);
   box-shadow: inset 0 0 0 1px rgba(30, 30, 30, 0.12), 0 7px 18px rgba(0, 0, 0, 0.25);
   cursor: pointer;
   font-size: 9px;
@@ -853,8 +854,9 @@ textarea {
 }
 
 .text-button:hover {
-  color: #161514;
-  filter: brightness(1.03);
+  color: #171614;
+  background-image: linear-gradient(180deg, #ffffff, #e3ded5);
+  filter: none;
 }
 
 .launcher-footer {

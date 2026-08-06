@@ -260,27 +260,6 @@ body.menu-open .site-header {
   gap: 10px;
 }
 
-.build-status {
-  display: inline-flex;
-  padding: 8px 11px;
-  border: 1px solid rgba(215, 255, 99, 0.18);
-  border-radius: 999px;
-  align-items: center;
-  gap: 7px;
-  color: rgba(232, 255, 165, 0.83);
-  background: rgba(215, 255, 99, 0.055);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--signal);
-  box-shadow: 0 0 0 4px rgba(215, 255, 99, 0.08), 0 0 12px var(--signal);
-}
-
 .language-button,
 .menu-button {
   display: grid;
@@ -878,8 +857,8 @@ body.menu-open .menu-button span:last-child {
   padding: 0 5px;
   border: 1px solid rgba(255, 255, 255, 0.42);
   align-items: center;
-  color: #2b2929;
-  background: linear-gradient(180deg, rgba(250, 250, 247, 0.93), rgba(207, 205, 200, 0.9));
+  color: #242220;
+  background: linear-gradient(180deg, #fffdf7, #d6d0c6);
 }
 
 .mock-scene-switcher {
@@ -1887,10 +1866,6 @@ body.menu-open .menu-button span:last-child {
 @media (max-width: 1050px) {
   :root {
     --shell: min(100% - 40px, 920px);
-  }
-
-  .build-status {
-    display: none;
   }
 
   .site-nav {

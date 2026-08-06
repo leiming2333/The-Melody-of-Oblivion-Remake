@@ -15,7 +15,7 @@ const { offlineUuidForSkinModel } = require('../accounts/account-store');
 
 const inflateRaw = promisify(zlib.inflateRaw);
 const LAUNCHER_NAME = 'melody-of-oblivion';
-const LAUNCHER_VERSION = '0.1.0';
+const LAUNCHER_VERSION = '1.1.1';
 const DEFAULT_FEATURES = Object.freeze({
   has_custom_resolution: false,
   has_quick_plays_support: false,
