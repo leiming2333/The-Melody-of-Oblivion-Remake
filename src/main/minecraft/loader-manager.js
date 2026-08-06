@@ -32,6 +32,7 @@ const FORGE_METADATA_PATH = 'net/minecraftforge/forge/maven-metadata.xml';
 const NEOFORGE_METADATA_PATH = 'net/neoforged/neoforge/maven-metadata.xml';
 const LOADER_TYPES = Object.freeze(['vanilla', 'fabric', 'forge', 'neoforge']);
 const VERSION_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+const LOADER_METADATA_TIMEOUT_MS = 10000;
 
 function validateGameVersion(gameVersion) {
   if (!/^[0-9A-Za-z._-]{1,80}$/.test(gameVersion)) {
@@ -139,7 +140,11 @@ async function fetchFirst(candidates, parser, signal) {
   for (const candidate of candidates) {
     try {
       throwIfAborted(signal);
-      const response = await fetchWithTimeout(candidate.url, { signal }, 18000);
+      const response = await fetchWithTimeout(
+        candidate.url,
+        { signal },
+        LOADER_METADATA_TIMEOUT_MS
+      );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return {
         data: await parser(response, candidate),
@@ -152,6 +157,44 @@ async function fetchFirst(candidates, parser, signal) {
     }
   }
   throw new Error(`加载器版本获取失败\n${errors.join('\n')}`);
+}
+
+async function fetchFastest(candidates, parser, signal) {
+  throwIfAborted(signal);
+  const controllers = candidates.map(() => new AbortController());
+  const requests = candidates.map(async (candidate, index) => {
+    const requestSignal = signal
+      ? AbortSignal.any([signal, controllers[index].signal])
+      : controllers[index].signal;
+    try {
+      const response = await fetchWithTimeout(
+        candidate.url,
+        { signal: requestSignal },
+        LOADER_METADATA_TIMEOUT_MS
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return {
+        data: await parser(response, candidate),
+        source: candidate.source,
+        url: candidate.url
+      };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      throw new Error(`${candidate.url}: ${error.message}`, { cause: error });
+    }
+  });
+
+  try {
+    return await Promise.any(requests);
+  } catch (error) {
+    throwIfAborted(signal);
+    const errors = error instanceof AggregateError
+      ? error.errors.map((item) => item.message)
+      : [error.message];
+    throw new Error(`加载器版本获取失败\n${errors.join('\n')}`);
+  } finally {
+    for (const controller of controllers) controller.abort();
+  }
 }
 
 class MinecraftLoaderManager {
@@ -170,6 +213,12 @@ class MinecraftLoaderManager {
     this.javaPath = '';
     this.cache = new Map();
     this.cacheDurationMs = 5 * 60 * 1000;
+  }
+
+  fetchMetadata(candidates, parser, signal) {
+    return this.sourceManager.downloadPreference === 'auto' && candidates.length > 1
+      ? fetchFastest(candidates, parser, signal)
+      : fetchFirst(candidates, parser, signal);
   }
 
   async preferredSource() {
@@ -230,7 +279,7 @@ class MinecraftLoaderManager {
       return this.withInstalledState(cached.result, installedIds);
     }
 
-    const installedIds = await this.installedProfileIds();
+    const installedIdsPromise = this.installedProfileIds();
     if (loaderType === 'vanilla') {
       const result = {
         gameVersion,
@@ -238,15 +287,17 @@ class MinecraftLoaderManager {
         source: { id: 'local', label: 'Minecraft' },
         versions: [{ version: gameVersion, artifactVersion: gameVersion, stable: true }]
       };
-      return this.withInstalledState(result, installedIds);
+      return this.withInstalledState(result, await installedIdsPromise);
     }
 
-    const preferred = await this.preferredSource();
+    const preferred = this.sourceManager.downloadPreference === 'auto'
+      ? SOURCES.official
+      : await this.preferredSource();
     let fetched;
     let versions;
 
     if (loaderType === 'fabric') {
-      fetched = await fetchFirst(
+      fetched = await this.fetchMetadata(
         this.sourceCandidates(
           (sourceId) => `${FABRIC_META_BASES[sourceId]}/versions/loader/${encodeURIComponent(gameVersion)}`,
           preferred.id
@@ -259,7 +310,7 @@ class MinecraftLoaderManager {
         stable: entry.loader.stable === true
       }));
     } else if (loaderType === 'forge') {
-      fetched = await fetchFirst(
+      fetched = await this.fetchMetadata(
         this.sourceCandidates(
           (sourceId) => sourceId === 'bmclapi'
             ? `${BMCLAPI_BASE}/forge/minecraft/${encodeURIComponent(gameVersion)}`
@@ -278,7 +329,7 @@ class MinecraftLoaderManager {
     } else {
       const metadataPath = loaderType === 'forge' ? FORGE_METADATA_PATH : NEOFORGE_METADATA_PATH;
       const officialBase = loaderType === 'forge' ? FORGE_MAVEN_BASE : NEOFORGE_MAVEN_BASE;
-      fetched = await fetchFirst(
+      fetched = await this.fetchMetadata(
         this.sourceCandidates(
           (sourceId) => sourceId === 'bmclapi'
             ? `${BMCLAPI_BASE}/maven/${metadataPath}`
@@ -298,7 +349,7 @@ class MinecraftLoaderManager {
       versions
     };
     this.cache.set(cacheKey, { fetchedAt: Date.now(), result });
-    return this.withInstalledState(result, installedIds);
+    return this.withInstalledState(result, await installedIdsPromise);
   }
 
   withInstalledState(result, installedIds) {
@@ -330,7 +381,7 @@ class MinecraftLoaderManager {
   async installFabric(gameVersion, loaderVersion, preferredSourceId, onProgress, signal) {
     throwIfAborted(signal);
     onProgress({ phase: 'preparing', message: '正在获取 Fabric 启动配置…', versionId: gameVersion });
-    const fetched = await fetchFirst(
+    const fetched = await this.fetchMetadata(
       this.sourceCandidates(
         (sourceId) => `${FABRIC_META_BASES[sourceId]}/versions/loader/${encodeURIComponent(gameVersion)}/${encodeURIComponent(loaderVersion)}/profile/json`,
         preferredSourceId
@@ -546,6 +597,7 @@ module.exports = {
   NEOFORGE_METADATA_PATH,
   forgeLoaderVersions,
   forgeLoaderVersionsFromBmclapi,
+  fetchFastest,
   loaderArtifact,
   loaderProfileCandidates,
   neoForgeLoaderVersions,

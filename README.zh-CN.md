@@ -9,7 +9,7 @@
 </div>
 
 > [!IMPORTANT]
-> 当前仓库版本为 `1.1.1`。Windows、macOS 与 Linux x64 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
+> 当前仓库版本为 `1.1.2`。Windows、macOS 与 Linux x64 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
 
 ## 项目简介
 

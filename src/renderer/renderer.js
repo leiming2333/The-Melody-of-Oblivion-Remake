@@ -103,6 +103,7 @@ let remoteVersions = [];
 let filteredVersions = [];
 let versionCatalogLoaded = false;
 let versionCatalogLoading = false;
+let versionCatalogLoadToken = 0;
 let versionDownloadActive = false;
 let versionDeleteActive = false;
 let versionVerifyActive = false;
@@ -977,8 +978,7 @@ function renderLoaderCatalog(preferredVersion) {
     for (const loader of group.loaders) {
       const option = document.createElement('option');
       option.value = loader.version;
-      const stability = loader.stable ? '' : ' · 测试版';
-      option.textContent = `${loader.version}${stability}`;
+      option.textContent = loader.version;
       optionGroup.append(option);
     }
     loaderVersionSelect.append(optionGroup);
@@ -1179,12 +1179,43 @@ function renderVersionCatalog(preferredId) {
   updateVersionAction();
 }
 
+function invalidateVersionCatalogForDirectoryChange() {
+  // 安装状态只对当前游戏目录有效。切换目录后不能继续复用上一个目录的
+  // 版本和加载器状态，否则旧目录中的版本会被错误显示为“已安装”。
+  loaderLoadToken += 1;
+  versionCatalogLoadToken += 1;
+  localProfilesLoaded = false;
+  remoteVersions = [];
+  filteredVersions = [];
+  loaderVersions = [];
+  versionCatalogLoaded = false;
+  versionCatalog.replaceChildren();
+  loaderVersionSelect.replaceChildren();
+  versionEmpty.textContent = '游戏目录已切换，打开版本列表时将重新检查已安装版本';
+  updateVersionAction();
+}
+
+async function reloadLocalProfilesForDirectoryChange() {
+  // 如果旧目录的扫描尚未返回，先让它结束，再强制扫描新目录，避免复用
+  // loadLocalProfiles 的并发请求结果。
+  if (localProfilesLoadingPromise) {
+    try {
+      await localProfilesLoadingPromise;
+    } catch {
+      // 新目录的强制扫描会提供最终状态和错误信息。
+    }
+  }
+  localProfilesLoaded = false;
+  return loadLocalProfiles(true);
+}
+
 async function loadVersionCatalog(force = false) {
   if (versionCatalogLoading) {
     return;
   }
 
   versionCatalogLoading = true;
+  const requestToken = ++versionCatalogLoadToken;
   versionCatalog.disabled = true;
   versionSearch.disabled = true;
   versionTypeFilter.disabled = true;
@@ -1194,12 +1225,14 @@ async function loadVersionCatalog(force = false) {
 
   try {
     await loadLocalProfiles(force);
+    if (requestToken !== versionCatalogLoadToken) return;
     seedCatalogWithLocalProfiles();
     renderVersionCatalog(versionSelect.value);
     versionEmpty.textContent = `已检查 ${localProfiles.length} 个启动配置，正在加载全部版本…`;
     const result = minecraft
       ? await minecraft.listVersions({ force })
       : await delay(250).then(fallbackVersionResult);
+    if (requestToken !== versionCatalogLoadToken) return;
     remoteVersions = mergeRemoteAndLocalVersions(result.versions);
     versionCatalogLoaded = true;
     renderVersionCatalog(versionSelect.value);
@@ -1497,7 +1530,8 @@ settingsDialog.addEventListener('close', async () => {
       launcherSettings = settingsApi ? await settingsApi.update(patch) : patch;
       applySettingsToForm();
       if (launcherSettings.gameDirectoryMode !== previousDirectoryMode) {
-        await loadLocalProfiles(true);
+        invalidateVersionCatalogForDirectoryChange();
+        await reloadLocalProfilesForDirectoryChange();
       }
       const sourceLabel = {
         auto: '自动选择',

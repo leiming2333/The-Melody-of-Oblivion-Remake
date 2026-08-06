@@ -23,6 +23,7 @@ const {
   safePath
 } = require('../src/main/minecraft/downloader');
 const {
+  fetchFastest,
   forgeLoaderVersions,
   forgeLoaderVersionsFromBmclapi,
   loaderArtifact,
@@ -353,6 +354,38 @@ test('Maven 元数据可以解析 Forge 与 NeoForge 版本', () => {
     neoForgeLoaderVersions('1.21.1', versions).map((entry) => entry.version),
     ['21.1.243']
   );
+});
+
+test('自动模式并行获取加载器版本并采用先返回的有效来源', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const requested = [];
+  global.fetch = (url, { signal } = {}) => new Promise((resolve, reject) => {
+    requested.push(url);
+    const fast = url.endsWith('/fast');
+    const timer = setTimeout(() => resolve(new Response(
+      JSON.stringify({ version: fast ? 'fast' : 'slow' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )), fast ? 5 : 100);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      const error = new Error('请求已取消');
+      error.name = 'AbortError';
+      reject(error);
+    }, { once: true });
+  });
+
+  const result = await fetchFastest([
+    { source: { id: 'slow' }, url: 'https://loader.test/slow' },
+    { source: { id: 'fast' }, url: 'https://loader.test/fast' }
+  ], (response) => response.json());
+
+  assert.equal(result.source.id, 'fast');
+  assert.equal(result.data.version, 'fast');
+  assert.deepEqual(new Set(requested), new Set([
+    'https://loader.test/slow',
+    'https://loader.test/fast'
+  ]));
 });
 
 test('BMCLAPI Forge 列表只保留带 installer 的当前游戏版本', () => {
