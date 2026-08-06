@@ -8,6 +8,30 @@ const { MinecraftSourceManager } = require('./source-manager');
 const { MinecraftVersionManager } = require('./version-manager');
 const { AuthlibInjectorManager } = require('./authlib-injector');
 
+function systemGameDirectory(app, platform = process.platform) {
+  if (platform === 'win32') return path.join(app.getPath('appData'), '.minecraft');
+  if (platform === 'darwin') {
+    return path.join(app.getPath('home'), 'Library', 'Application Support', 'minecraft');
+  }
+  return path.join(app.getPath('home'), '.minecraft');
+}
+
+function launcherDirectory(app, {
+  env = process.env,
+  platform = process.platform
+} = {}) {
+  if (env.PORTABLE_EXECUTABLE_DIR) return path.resolve(env.PORTABLE_EXECUTABLE_DIR);
+  if (platform === 'linux' && env.APPIMAGE) return path.dirname(path.resolve(env.APPIMAGE));
+  if (!app.isPackaged) return path.resolve(app.getAppPath());
+  return path.dirname(path.resolve(app.getPath('exe')));
+}
+
+function resolveGameDirectory(app, mode, options) {
+  return mode === 'system'
+    ? systemGameDirectory(app, options?.platform)
+    : path.join(launcherDirectory(app, options), '.minecraft');
+}
+
 function registerMinecraftIpc({
   app,
   ipcMain,
@@ -17,46 +41,61 @@ function registerMinecraftIpc({
   microsoftAuth,
   yggdrasilAuth
 }) {
-  // Windows: %APPDATA%\.minecraft
-  // macOS:   ~/Library/Application Support/minecraft
-  // Linux:   ~/.minecraft
-  const gameDirectory = process.platform === 'win32'
-    ? path.join(app.getPath('appData'), '.minecraft')
-    : process.platform === 'darwin'
-      ? path.join(app.getPath('home'), 'Library', 'Application Support', 'minecraft')
-      : path.join(app.getPath('home'), '.minecraft');
-  const sourceManager = new MinecraftSourceManager();
-  const downloader = new MinecraftDownloader({
-    gameDirectory,
-    sourceManager,
-    concurrency: 32,
-    segmentConcurrency: 8
-  });
-  const loaderManager = new MinecraftLoaderManager({
-    gameDirectory,
-    sourceManager,
-    downloader,
-    concurrency: 32,
-    segmentConcurrency: 8
-  });
-  const versionManager = new MinecraftVersionManager({
-    gameDirectory,
-    trashItem: (targetPath) => shell.trashItem(targetPath)
-  });
-  const modpackManager = new ModpackManager({
-    gameDirectory,
-    loaderManager,
-    concurrency: 32,
-    segmentConcurrency: 8
-  });
-  const launcher = new MinecraftLauncher({ gameDirectory });
-  const authlibInjector = new AuthlibInjectorManager({ gameDirectory });
   const activeDownloads = new Map();
+  let gameDirectory;
+  let sourceManager;
+  let downloader;
+  let loaderManager;
+  let versionManager;
+  let modpackManager;
+  let launcher;
+  let authlibInjector;
+
+  async function ensureMinecraftServices(settings) {
+    const currentSettings = settings ?? (settingsStore
+      ? await settingsStore.getState()
+      : { gameDirectoryMode: 'local' });
+    const requestedDirectory = resolveGameDirectory(app, currentSettings.gameDirectoryMode);
+    if (gameDirectory === requestedDirectory) return currentSettings;
+    if (activeDownloads.size > 0) {
+      throw new Error('请先等待下载完成或取消下载，再切换游戏目录');
+    }
+
+    gameDirectory = requestedDirectory;
+    sourceManager = new MinecraftSourceManager();
+    downloader = new MinecraftDownloader({
+      gameDirectory,
+      sourceManager,
+      concurrency: 32,
+      segmentConcurrency: 8
+    });
+    loaderManager = new MinecraftLoaderManager({
+      gameDirectory,
+      sourceManager,
+      downloader,
+      concurrency: 32,
+      segmentConcurrency: 8
+    });
+    versionManager = new MinecraftVersionManager({
+      gameDirectory,
+      trashItem: (targetPath) => shell.trashItem(targetPath)
+    });
+    modpackManager = new ModpackManager({
+      gameDirectory,
+      loaderManager,
+      concurrency: 32,
+      segmentConcurrency: 8
+    });
+    launcher = new MinecraftLauncher({ gameDirectory });
+    authlibInjector = new AuthlibInjectorManager({ gameDirectory });
+    return currentSettings;
+  }
 
   async function applyDownloadSettings() {
     const settings = settingsStore
       ? await settingsStore.getState()
-      : { downloadConcurrency: 32, downloadSource: 'auto' };
+      : { gameDirectoryMode: 'local', downloadConcurrency: 32, downloadSource: 'auto' };
+    await ensureMinecraftServices(settings);
     const concurrency = settings.downloadConcurrency;
     sourceManager.setDownloadPreference(settings.downloadSource);
     const segmentConcurrency = Math.min(12, Math.max(4, Math.floor(concurrency / 2)));
@@ -100,11 +139,15 @@ function registerMinecraftIpc({
     return downloader.listVersions({ force: options.force === true });
   });
 
-  ipcMain.handle('minecraft:list-local-versions', () => versionManager.listLocalProfiles());
+  ipcMain.handle('minecraft:list-local-versions', async () => {
+    await ensureMinecraftServices();
+    return versionManager.listLocalProfiles();
+  });
 
-  ipcMain.handle('minecraft:inspect-modpack', (_event, filePath) => (
-    modpackManager.inspect(filePath)
-  ));
+  ipcMain.handle('minecraft:inspect-modpack', async (_event, filePath) => {
+    await ensureMinecraftServices();
+    return modpackManager.inspect(filePath);
+  });
 
   ipcMain.handle('minecraft:install-modpack', async (event, filePath) => {
     await applyDownloadSettings();
@@ -176,6 +219,7 @@ function registerMinecraftIpc({
     if (activeDownloads.size > 0) {
       throw new Error('请先等待下载完成或取消下载，再删除游戏版本');
     }
+    await ensureMinecraftServices();
     return versionManager.deleteProfile(profileId);
   });
 
@@ -192,7 +236,8 @@ function registerMinecraftIpc({
     }
     const settings = settingsStore
       ? await settingsStore.getState()
-      : { memoryMb: 4096 };
+      : { gameDirectoryMode: 'local', memoryMb: 4096 };
+    await ensureMinecraftServices(settings);
     const sendStatus = (status) => {
       if (!event.sender.isDestroyed()) event.sender.send('minecraft:launch-status', status);
     };
@@ -230,6 +275,7 @@ function registerMinecraftIpc({
   });
 
   ipcMain.handle('minecraft:open-directory', async () => {
+    await ensureMinecraftServices();
     await fs.mkdir(gameDirectory, { recursive: true });
     const error = await shell.openPath(gameDirectory);
     if (error) {
@@ -239,4 +285,9 @@ function registerMinecraftIpc({
   });
 }
 
-module.exports = { registerMinecraftIpc };
+module.exports = {
+  launcherDirectory,
+  registerMinecraftIpc,
+  resolveGameDirectory,
+  systemGameDirectory
+};

@@ -4,8 +4,9 @@ const path = require('node:path');
 const DOWNLOAD_CONCURRENCY_OPTIONS = Object.freeze([4, 8, 12, 16, 24, 32]);
 const DOWNLOAD_SOURCE_OPTIONS = Object.freeze(['auto', 'bmclapi', 'official']);
 const DEFAULT_SETTINGS = Object.freeze({
-  version: 1,
+  version: 2,
   javaPath: '',
+  gameDirectoryMode: 'local',
   downloadSource: 'auto',
   downloadConcurrency: 32,
   memoryMb: 4096,
@@ -19,10 +20,11 @@ function normalizeSettings(value = {}) {
     ? value.javaPath.trim()
     : '';
   return {
-    version: 1,
+    version: 2,
     javaPath: requestedJavaPath && path.isAbsolute(requestedJavaPath)
       ? path.normalize(requestedJavaPath)
       : DEFAULT_SETTINGS.javaPath,
+    gameDirectoryMode: value.gameDirectoryMode === 'system' ? 'system' : 'local',
     downloadSource: DOWNLOAD_SOURCE_OPTIONS.includes(value.downloadSource)
       ? value.downloadSource
       : DEFAULT_SETTINGS.downloadSource,

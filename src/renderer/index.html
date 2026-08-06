@@ -296,6 +296,15 @@
             <p id="javaPathHint" class="java-path-hint">启动时会从 JAVA_HOME 与系统 PATH 中自动查找 Java。</p>
           </div>
 
+          <div class="setting-group">
+            <label for="gameDirectoryModeSelect">游戏目录</label>
+            <select id="gameDirectoryModeSelect">
+              <option value="local" selected>本地目录（启动器旁）</option>
+              <option value="system">系统默认目录</option>
+            </select>
+            <p id="gameDirectoryHint">游戏文件将生成在启动器所在目录的 .minecraft 文件夹中。</p>
+          </div>
+
           <div class="setting-group download-setting-group">
             <label>下载设置</label>
             <div class="download-setting-grid">

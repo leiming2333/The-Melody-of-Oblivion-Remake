@@ -71,9 +71,12 @@ const downloadProgress = document.querySelector('#downloadProgress');
 const downloadSpeed = document.querySelector('#downloadSpeed');
 const downloadEta = document.querySelector('#downloadEta');
 const settingsDialog = document.querySelector('#settingsDialog');
+const launcherApp = document.querySelector('.launcher-app');
 const javaSelect = document.querySelector('#javaSelect');
 const javaBrowseButton = document.querySelector('#javaBrowseButton');
 const javaPathHint = document.querySelector('#javaPathHint');
+const gameDirectoryModeSelect = document.querySelector('#gameDirectoryModeSelect');
+const gameDirectoryHint = document.querySelector('#gameDirectoryHint');
 const memoryRange = document.querySelector('#memoryRange');
 const memoryValue = document.querySelector('#memoryValue');
 const downloadConcurrencySelect = document.querySelector('#downloadConcurrencySelect');
@@ -116,6 +119,7 @@ const activeGameProfiles = new Set();
 let accountState = { currentId: null, current: null, accounts: [] };
 let launcherSettings = {
   javaPath: '',
+  gameDirectoryMode: 'local',
   downloadSource: 'auto',
   downloadConcurrency: 16,
   memoryMb: 4096,
@@ -372,6 +376,10 @@ function applySettingsToForm() {
   selectedJavaPath = launcherSettings.javaPath ?? '';
   selectedJavaMajorVersion = undefined;
   renderJavaPathSetting();
+  gameDirectoryModeSelect.value = launcherSettings.gameDirectoryMode ?? 'local';
+  gameDirectoryHint.textContent = gameDirectoryModeSelect.value === 'local'
+    ? '游戏文件将生成在启动器所在目录的 .minecraft 文件夹中。'
+    : '使用操作系统的 Minecraft 默认游戏目录。';
   downloadSourceSelect.value = launcherSettings.downloadSource;
   downloadConcurrencySelect.value = String(launcherSettings.downloadConcurrency);
   memoryRange.value = String(launcherSettings.memoryMb);
@@ -623,6 +631,12 @@ async function beginLittleSkinLogin() {
 
 function selectWallpaper(index) {
   wallpaperIndex = index;
+
+  const selectedSlide = wallpaperSlides[index];
+  if (selectedSlide) {
+    const sceneUrl = new URL(selectedSlide.getAttribute('src'), document.baseURI).href;
+    launcherApp.style.setProperty('--launcher-dialog-scene', `url("${sceneUrl}")`);
+  }
 
   wallpaperSlides.forEach((slide, slideIndex) => {
     slide.classList.toggle('is-active', slideIndex === index);
@@ -1460,8 +1474,10 @@ backgroundDownloadBar.addEventListener('click', () => {
 settingsDialog.addEventListener('close', async () => {
   if (settingsDialog.returnValue === 'save') {
     try {
+      const previousDirectoryMode = launcherSettings.gameDirectoryMode ?? 'local';
       const patch = {
         javaPath: selectedJavaPath,
+        gameDirectoryMode: gameDirectoryModeSelect.value,
         downloadSource: downloadSourceSelect.value,
         downloadConcurrency: Number(downloadConcurrencySelect.value),
         memoryMb: Number(memoryRange.value),
@@ -1469,16 +1485,26 @@ settingsDialog.addEventListener('close', async () => {
       };
       launcherSettings = settingsApi ? await settingsApi.update(patch) : patch;
       applySettingsToForm();
+      if (launcherSettings.gameDirectoryMode !== previousDirectoryMode) {
+        await loadLocalProfiles(true);
+      }
       const sourceLabel = {
         auto: '自动选择',
         bmclapi: 'BMCLAPI',
         official: 'Mojang 官方'
       }[launcherSettings.downloadSource];
-      showToast(`设置已保存：${sourceLabel} · ${launcherSettings.downloadConcurrency} 路线程`);
+      const directoryLabel = launcherSettings.gameDirectoryMode === 'local' ? '本地目录' : '系统目录';
+      showToast(`设置已保存：${directoryLabel} · ${sourceLabel} · ${launcherSettings.downloadConcurrency} 路线程`);
     } catch (error) {
       showToast(`设置保存失败：${readableError(error)}`);
     }
   }
+});
+
+gameDirectoryModeSelect.addEventListener('change', () => {
+  gameDirectoryHint.textContent = gameDirectoryModeSelect.value === 'local'
+    ? '游戏文件将生成在启动器所在目录的 .minecraft 文件夹中。'
+    : '使用操作系统的 Minecraft 默认游戏目录。';
 });
 
 javaSelect.addEventListener('change', async () => {

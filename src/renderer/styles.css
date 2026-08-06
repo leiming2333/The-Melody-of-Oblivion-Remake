@@ -43,14 +43,15 @@ textarea {
 }
 
 .launcher-app {
+  --launcher-dialog-scene: url("assets/backgrounds/wp15225187.jpg");
   position: relative;
   width: 100vw;
   height: 100vh;
   min-width: 680px;
   min-height: 417px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
+  border: 0;
+  border-radius: 8px;
   background: #171012;
 }
 
@@ -59,8 +60,8 @@ textarea {
   inset: 0;
   z-index: 0;
   background:
-    linear-gradient(90deg, rgba(10, 7, 8, 0.52) 0%, rgba(10, 7, 8, 0.12) 47%, rgba(10, 7, 8, 0.22) 65%, rgba(10, 7, 8, 0.58) 100%),
-    linear-gradient(180deg, rgba(8, 6, 7, 0.36), transparent 28%, transparent 62%, rgba(8, 7, 8, 0.56));
+    linear-gradient(90deg, rgba(10, 7, 8, 0.28) 0%, rgba(10, 7, 8, 0.08) 47%, rgba(10, 7, 8, 0.14) 65%, rgba(10, 7, 8, 0.3) 100%),
+    linear-gradient(180deg, rgba(8, 6, 7, 0.22), transparent 28%, transparent 70%, rgba(8, 7, 8, 0.34));
   content: "";
   pointer-events: none;
 }
@@ -71,8 +72,8 @@ textarea {
   z-index: 6;
   pointer-events: none;
   background:
-    linear-gradient(180deg, rgba(8, 5, 6, 0.32), transparent 18%, transparent 72%, rgba(7, 8, 9, 0.72)),
-    radial-gradient(ellipse at center, transparent 38%, rgba(10, 7, 9, 0.56) 100%);
+    linear-gradient(180deg, rgba(8, 5, 6, 0.18), transparent 18%, transparent 76%, rgba(7, 8, 9, 0.34)),
+    radial-gradient(ellipse at center, transparent 52%, rgba(10, 7, 9, 0.2) 100%);
   content: "";
 }
 
@@ -215,7 +216,7 @@ textarea {
 
 .close-button:hover,
 .close-button:focus-visible {
-  border-top-right-radius: 11px;
+  border-top-right-radius: 7px;
   background: #c84d4d;
   opacity: 1;
 }
@@ -839,21 +840,21 @@ textarea {
 }
 
 .text-button {
-  height: 24px;
-  padding: 0 7px;
+  height: 26px;
+  padding: 0 9px;
   border: 1px solid var(--control-border);
   border-radius: 2px;
   color: var(--control-ink);
   background: linear-gradient(180deg, var(--control-surface-start), var(--control-surface-end));
-  box-shadow: inset 0 0 0 1px rgba(30, 30, 30, 0.1), 0 5px 14px rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(30, 30, 30, 0.12), 0 7px 18px rgba(0, 0, 0, 0.25);
   cursor: pointer;
-  font-size: 8px;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.75);
+  font-size: 9px;
+  text-shadow: none;
 }
 
 .text-button:hover {
   color: #161514;
-  filter: brightness(1.08);
+  filter: brightness(1.03);
 }
 
 .launcher-footer {
@@ -1035,10 +1036,13 @@ textarea {
   width: min(520px, calc(100vw - 48px));
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 6px;
+  border-radius: 8px;
+  overflow: hidden;
   color: #f2ede7;
-  background: #1d191b;
-  box-shadow: 0 35px 100px rgba(0, 0, 0, 0.68);
+  background:
+    linear-gradient(100deg, rgba(19, 13, 15, 0.94), rgba(19, 13, 15, 0.76)),
+    var(--launcher-dialog-scene) center / cover;
+  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.42);
 }
 
 .version-dialog {
@@ -1052,14 +1056,34 @@ textarea {
 .settings-dialog::backdrop,
 .account-dialog::backdrop,
 .version-dialog::backdrop {
-  background: rgba(8, 6, 7, 0.7);
-  backdrop-filter: blur(7px);
+  border-radius: 10px;
+  background: rgba(8, 6, 7, 0.48);
+  clip-path: inset(0 round 10px);
+  backdrop-filter: blur(5px);
 }
 
 .settings-dialog form,
 .account-dialog form,
 .version-dialog form {
   padding: 28px;
+}
+
+.settings-dialog form {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  scrollbar-color: rgba(221, 145, 107, 0.5) transparent;
+  scrollbar-width: thin;
+}
+
+.settings-dialog form::-webkit-scrollbar,
+.account-dialog form::-webkit-scrollbar {
+  width: 6px;
+}
+
+.settings-dialog form::-webkit-scrollbar-thumb,
+.account-dialog form::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(221, 145, 107, 0.48);
 }
 
 .version-dialog form {
@@ -1793,10 +1817,20 @@ textarea {
   height: 42px;
   padding: 0 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
+  border-radius: 5px;
   outline: none;
   color: #e8e2dc;
-  background: #292426;
+  appearance: none;
+  padding-right: 38px;
+  background-color: rgba(34, 29, 31, 0.92);
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(239, 170, 131, 0.82) 50%),
+    linear-gradient(135deg, rgba(239, 170, 131, 0.82) 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) 18px,
+    calc(100% - 12px) 18px;
+  background-repeat: no-repeat;
+  background-size: 5px 5px;
   font-size: 12px;
 }
 
@@ -1811,7 +1845,7 @@ textarea {
   height: 42px;
   padding: 0 14px;
   border: 1px solid rgba(221, 145, 107, 0.42);
-  border-radius: 3px;
+  border-radius: 5px;
   color: #efaa83;
   background: rgba(221, 145, 107, 0.08);
   cursor: pointer;
@@ -1858,7 +1892,7 @@ textarea {
   min-width: 0;
   padding-left: 9px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
+  border-radius: 5px;
   color: rgba(255, 255, 255, 0.42);
   background: #252123;
   font-size: 9px;
@@ -1867,9 +1901,9 @@ textarea {
 .download-setting-grid select {
   min-width: 0;
   height: 36px;
-  padding: 0 7px;
+  padding: 0 28px 0 7px;
   border: 0;
-  background: #292426;
+  background-color: #292426;
   font-size: 10px;
 }
 

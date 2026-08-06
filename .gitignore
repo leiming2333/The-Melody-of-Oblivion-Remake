@@ -4,6 +4,7 @@ out/
 release*/
 pet-diagnostics/
 site-backup/
+remotion-promo/
 
 .env
 .env.*

@@ -29,6 +29,12 @@ test('Java 设置仅保留绝对路径', () => {
   assert.equal(normalizeSettings().javaPath, DEFAULT_SETTINGS.javaPath);
 });
 
+test('游戏目录默认使用启动器本地目录且只接受受支持的模式', () => {
+  assert.equal(normalizeSettings().gameDirectoryMode, 'local');
+  assert.equal(normalizeSettings({ gameDirectoryMode: 'system' }).gameDirectoryMode, 'system');
+  assert.equal(normalizeSettings({ gameDirectoryMode: 'other' }).gameDirectoryMode, 'local');
+});
+
 test('启动设置可以持久化并自动规范内存值', async (t) => {
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-settings-test-'));
   t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
@@ -43,8 +49,9 @@ test('启动设置可以持久化并自动规范内存值', async (t) => {
     autoUpdate: false
   });
   assert.deepEqual(saved, {
-    version: 1,
+    version: 2,
     javaPath: path.resolve(temporaryRoot, 'runtime', 'bin', 'java.exe'),
+    gameDirectoryMode: 'local',
     downloadSource: 'official',
     downloadConcurrency: 12,
     memoryMb: 5120,
