@@ -37,7 +37,8 @@
     },
     "files": [
       "src/**/*",
-      "package.json"
+      "package.json",
+      "src/main/accounts/microsoft-client-id.json"
     ],
     "win": {
       "icon": "src/renderer/assets/app-icon.ico",
