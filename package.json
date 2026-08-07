@@ -13,8 +13,8 @@
     "dev": "electron .",
     "build": "electron-builder",
     "build:win": "node scripts/generate-client-id.js && electron-builder --win --x64 --publish never",
-    "build:linux": "node scripts/generate-client-id.js && electron-builder --linux AppImage deb --x64 --publish never",
-    "build:mac": "node scripts/generate-client-id.js && electron-builder --mac dmg zip --x64 --publish never",
+    "build:linux": "node scripts/generate-client-id.js && electron-builder --linux AppImage --x64 --publish never",
+    "build:mac": "node scripts/generate-client-id.js && electron-builder --mac zip --x64 --publish never",
     "smoke": "electron . --smoke-test",
     "check": "node --check site.js && node --check src/main/main.js && node --check src/main/accounts/account-store.js && node --check src/main/accounts/microsoft-auth.js && node --check src/main/accounts/yggdrasil-auth.js && node --check src/main/accounts/ipc.js && node --check src/main/settings/settings-store.js && node --check src/main/settings/ipc.js && node --check src/main/updater/update-manager.js && node --check src/main/minecraft/source-manager.js && node --check src/main/minecraft/downloader.js && node --check src/main/minecraft/authlib-injector.js && node --check src/main/minecraft/java-runtime.js && node --check src/main/minecraft/managed-java-runtime.js && node --check src/main/minecraft/launch-core.js && node --check src/main/minecraft/loader-manager.js && node --check src/main/minecraft/modpack-manager.js && node --check src/main/minecraft/version-manager.js && node --check src/main/minecraft/ipc.js && node --check src/preload/preload.js && node --check src/renderer/renderer.js",
     "test": "node --test test/minecraft-core.test.js test/launch-core.test.js test/java-runtime.test.js test/modpack-manager.test.js test/version-manager.test.js test/account-store.test.js test/microsoft-auth.test.js test/yggdrasil-auth.test.js test/authlib-injector.test.js test/settings-store.test.js test/update-manager.test.js test/game-directory.test.js"
@@ -43,23 +43,12 @@
       "icon": "src/renderer/assets/app-icon.ico",
       "target": [
         {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
           "target": "portable",
           "arch": [
             "x64"
           ]
         }
       ]
-    },
-    "nsis": {
-      "artifactName": "Melody-of-Oblivion-Launcher-v${version}-Windows-x64-Setup.${ext}",
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
     },
     "portable": {
       "artifactName": "Melody-of-Oblivion-Launcher-v${version}-Windows-x64-Portable.${ext}"
@@ -68,15 +57,13 @@
       "icon": "src/renderer/assets/app-icon.png",
       "artifactName": "Melody-of-Oblivion-Launcher-v${version}-Linux-x64.${ext}",
       "target": [
-        "AppImage",
-        "deb"
+        "AppImage"
       ]
     },
     "mac": {
       "icon": "src/renderer/assets/app-icon.icns",
       "artifactName": "Melody-of-Oblivion-Launcher-v${version}-macOS-x64.${ext}",
       "target": [
-        "dmg",
         "zip"
       ]
     }
