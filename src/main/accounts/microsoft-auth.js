@@ -357,6 +357,29 @@ class MicrosoftAuthManager {
     await this.accountStore.upsertMicrosoft(refreshed);
     return this.accountStore.getAccount(refreshed.id);
   }
+
+  async uploadSkin(account, skinDataBase64, skinModel) {
+    if (!account || account.type !== 'microsoft') {
+      throw new Error('仅 Microsoft 账户支持皮肤上传');
+    }
+    const validAccount = await this.ensureAccount(account);
+    const variant = skinModel === 'alex' ? 'slim' : 'classic';
+    const result = await fetchJson(this.fetchImpl, 'https://api.minecraftservices.com/minecraft/profile/skins', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${validAccount.accessToken}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        skin: { data: skinDataBase64, variant }
+      })
+    }, 20000);
+    if (!result.response.ok) {
+      throw new Error(providerError(result.payload, `皮肤上传失败（HTTP ${result.response.status}）`));
+    }
+    await this.accountStore.refreshMicrosoftSkin(account.id, this.fetchImpl);
+    return this.accountStore.getState();
+  }
 }
 
 module.exports = {

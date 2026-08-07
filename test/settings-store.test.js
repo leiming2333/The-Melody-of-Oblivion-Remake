@@ -46,16 +46,18 @@ test('启动设置可以持久化并自动规范内存值', async (t) => {
     downloadSource: 'official',
     downloadConcurrency: 12,
     memoryMb: 5000,
-    autoUpdate: false
+    autoUpdate: false,
+    launcherAutoUpdate: false
   });
   assert.deepEqual(saved, {
-    version: 2,
+    version: 3,
     javaPath: path.resolve(temporaryRoot, 'runtime', 'bin', 'java.exe'),
     gameDirectoryMode: 'local',
     downloadSource: 'official',
     downloadConcurrency: 12,
     memoryMb: 5120,
-    autoUpdate: false
+    autoUpdate: false,
+    launcherAutoUpdate: false
   });
   assert.deepEqual(await new SettingsStore(filePath).getState(), saved);
 });

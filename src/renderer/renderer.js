@@ -3,6 +3,7 @@ const windowControls = environment?.windowControls;
 const minecraft = environment?.minecraft;
 const accountsApi = environment?.accounts;
 const settingsApi = environment?.settings;
+const updaterApi = environment?.updater;
 const filesApi = environment?.files;
 
 // 禁止复制文字：屏蔽右键菜单、复制、剪切（输入框除外）
@@ -47,9 +48,14 @@ const microsoftLoginHint = document.querySelector('#microsoftLoginHint');
 const microsoftCancelLoginButton = document.querySelector('#microsoftCancelLoginButton');
 const littleSkinUsernameInput = document.querySelector('#littleSkinUsernameInput');
 const littleSkinPasswordInput = document.querySelector('#littleSkinPasswordInput');
-const littleSkinProfileSelect = document.querySelector('#littleSkinProfileSelect');
 const littleSkinLoginButton = document.querySelector('#littleSkinLoginButton');
 const littleSkinLoginHint = document.querySelector('#littleSkinLoginHint');
+const skinUploadDialog = document.querySelector('#skinUploadDialog');
+const skinFilePickerButton = document.querySelector('#skinFilePickerButton');
+const skinFileName = document.querySelector('#skinFileName');
+const skinModelSelect = document.querySelector('#skinModelSelect');
+const skinUploadHint = document.querySelector('#skinUploadHint');
+const skinFileInput = document.querySelector('#skinFileInput');
 const versionSelect = document.querySelector('#versionSelect');
 const versionDialog = document.querySelector('#versionDialog');
 const versionCloseButtons = [...versionDialog.querySelectorAll('[value="cancel"]')];
@@ -82,6 +88,10 @@ const memoryValue = document.querySelector('#memoryValue');
 const downloadConcurrencySelect = document.querySelector('#downloadConcurrencySelect');
 const downloadSourceSelect = document.querySelector('#downloadSourceSelect');
 const autoUpdateCheck = document.querySelector('#autoUpdateCheck');
+const launcherAutoUpdateCheck = document.querySelector('#launcherAutoUpdateCheck');
+const launcherUpdateStatus = document.querySelector('#launcherUpdateStatus');
+const launcherUpdateProgress = document.querySelector('#launcherUpdateProgress');
+const launcherUpdateButton = document.querySelector('#launcherUpdateButton');
 const sourceHint = document.querySelector('#sourceHint');
 const toast = document.querySelector('#toast');
 const modpackDropOverlay = document.querySelector('#modpackDropOverlay');
@@ -124,15 +134,50 @@ let launcherSettings = {
   downloadSource: 'auto',
   downloadConcurrency: 16,
   memoryMb: 4096,
-  autoUpdate: true
+  autoUpdate: true,
+  launcherAutoUpdate: true
 };
 let launcherSettingsLoaded = false;
 let selectedJavaPath = '';
 let selectedJavaMajorVersion;
 let microsoftLoginSessionId;
 let microsoftLoginActive = false;
-let littleSkinLoginSessionId;
 let littleSkinLoginActive = false;
+let skinUploadAccountId = null;
+let skinUploadFilePath = null;
+let launcherUpdateState = { status: 'idle', progress: 0, message: '尚未检查更新' };
+
+function renderLauncherUpdate(state = launcherUpdateState) {
+  launcherUpdateState = state;
+  launcherUpdateStatus.textContent = state.message ?? '尚未检查更新';
+  const showProgress = state.status === 'downloading';
+  launcherUpdateProgress.hidden = !showProgress;
+  launcherUpdateProgress.value = Number(state.progress) || 0;
+  launcherUpdateButton.disabled = ['checking', 'downloading', 'unavailable'].includes(state.status);
+  launcherUpdateButton.textContent = state.status === 'available'
+    ? `下载 ${state.availableVersion ?? '更新'}`
+    : state.status === 'downloaded'
+      ? '重启并安装'
+      : state.status === 'checking'
+        ? '正在检查…'
+        : state.status === 'downloading'
+          ? `${state.progress ?? 0}%`
+          : '检查更新';
+}
+
+async function handleLauncherUpdate() {
+  try {
+    if (launcherUpdateState.status === 'available') {
+      renderLauncherUpdate(await updaterApi.download());
+    } else if (launcherUpdateState.status === 'downloaded') {
+      await updaterApi.install();
+    } else {
+      renderLauncherUpdate(await updaterApi.check());
+    }
+  } catch (error) {
+    showToast(readableError(error));
+  }
+}
 
 const loaderNames = Object.freeze({
   vanilla: '原版',
@@ -238,7 +283,7 @@ function updateAccountCard() {
   if (accountState.current) {
     accountName.textContent = accountState.current.name;
     accountType.textContent = accountState.current.type === 'microsoft'
-      ? 'Microsoft 正版'
+      ? 'Microsoft'
       : accountState.current.type === 'yggdrasil'
         ? 'LittleSkin 外置登录'
         : '离线账户';
@@ -331,31 +376,94 @@ function renderAccountList() {
 
     const copy = document.createElement('span');
     copy.className = 'account-row-copy';
-    const name = document.createElement('strong');
-    name.textContent = account.name;
+    if (account.type === 'offline') {
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'account-row-name-input';
+      nameInput.value = account.name;
+      nameInput.maxLength = 16;
+      nameInput.title = '点击修改玩家 ID（3–16 位英文字母、数字或下划线）';
+      nameInput.spellcheck = false;
+      const commitRename = async () => {
+        const newName = nameInput.value.trim();
+        if (!newName || newName === account.name) {
+          nameInput.value = account.name;
+          return;
+        }
+        try {
+          if (accountsApi?.rename) {
+            accountState = await accountsApi.rename(account.id, newName);
+          } else {
+            accountState.accounts = accountState.accounts.map((item) => (
+              item.id === account.id ? { ...item, name: newName } : item
+            ));
+            accountState.current = accountState.accounts.find((a) => a.id === accountState.currentId) ?? null;
+          }
+          updateAccountCard();
+          showToast(`已改名：${newName}`);
+        } catch (error) {
+          nameInput.value = account.name;
+          showToast(readableError(error));
+        }
+      };
+      nameInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          nameInput.blur();
+        }
+      });
+      nameInput.addEventListener('blur', commitRename, { once: true });
+      copy.append(nameInput);
+    } else {
+      const name = document.createElement('strong');
+      name.textContent = account.name;
+      copy.append(name);
+    }
     const detail = document.createElement('small');
     detail.textContent = account.type === 'offline'
       ? `离线账户 · ${account.uuid}`
       : account.type === 'yggdrasil'
         ? `LittleSkin 外置 · ${account.uuid}`
-        : `Microsoft 正版 · ${account.uuid}`;
-    copy.append(name, detail);
+        : `Microsoft · ${account.uuid}`;
+    copy.append(detail);
+
+    const actions = document.createElement('span');
+    actions.className = 'account-row-actions';
 
     const selectButton = document.createElement('button');
     selectButton.type = 'button';
     selectButton.textContent = account.id === accountState.currentId ? '当前' : '使用';
     selectButton.disabled = account.id === accountState.currentId;
     selectButton.addEventListener('click', () => selectAccount(account.id));
+    actions.append(selectButton);
 
-    let skinButton;
     if (account.type === 'offline') {
-      skinButton = document.createElement('button');
+      const skinButton = document.createElement('button');
       skinButton.type = 'button';
       skinButton.className = 'skin-model-button';
       const nextSkinModel = account.skinModel === 'alex' ? 'steve' : 'alex';
       skinButton.textContent = '切换';
       skinButton.title = `切换为${skinModelNames[nextSkinModel]}`;
       skinButton.addEventListener('click', () => setAccountSkinModel(account.id, nextSkinModel));
+      actions.append(skinButton);
+    }
+
+    if (account.type === 'microsoft' && accountsApi?.uploadSkin) {
+      const uploadSkinButton = document.createElement('button');
+      uploadSkinButton.type = 'button';
+      uploadSkinButton.className = 'upload-skin-button';
+      uploadSkinButton.textContent = '上传皮肤';
+      uploadSkinButton.title = '上传 PNG 皮肤到 Minecraft';
+      uploadSkinButton.addEventListener('click', () => {
+        skinUploadAccountId = account.id;
+        skinUploadFilePath = null;
+        skinFileName.textContent = '未选择';
+        skinModelSelect.value = account.skinModel === 'alex' ? 'alex' : 'steve';
+        skinUploadHint.textContent = '仅支持 64×32 或 64×64 像素的 PNG 文件';
+        skinUploadHint.classList.remove('is-error');
+        skinUploadDialog.showModal();
+      });
+      actions.append(uploadSkinButton);
     }
 
     const removeButton = document.createElement('button');
@@ -363,10 +471,9 @@ function renderAccountList() {
     removeButton.className = 'remove-account-button';
     removeButton.textContent = '删除';
     removeButton.addEventListener('click', () => removeAccount(account.id));
+    actions.append(removeButton);
 
-    row.append(avatar, copy);
-    if (skinButton) row.append(skinButton);
-    row.append(selectButton, removeButton);
+    row.append(avatar, copy, actions);
     accountList.append(row);
   }
 }
@@ -397,6 +504,7 @@ function applySettingsToForm() {
   memoryRange.value = String(launcherSettings.memoryMb);
   memoryValue.value = `${launcherSettings.memoryMb} MB`;
   autoUpdateCheck.checked = launcherSettings.autoUpdate;
+  launcherAutoUpdateCheck.checked = launcherSettings.launcherAutoUpdate;
   sourceHint.textContent = `${launcherSettings.downloadConcurrency} 路并发下载`;
 }
 
@@ -562,33 +670,21 @@ async function cancelMicrosoftLogin() {
 function setLittleSkinLoginBusy(active) {
   littleSkinLoginActive = active;
   littleSkinLoginButton.disabled = active;
-  littleSkinUsernameInput.disabled = active || Boolean(littleSkinLoginSessionId);
-  littleSkinPasswordInput.disabled = active || Boolean(littleSkinLoginSessionId);
-  littleSkinLoginButton.textContent = active
-    ? '正在登录…'
-    : littleSkinLoginSessionId
-      ? '使用所选角色'
-      : '登录并同步';
-}
-
-function resetLittleSkinProfileSelection() {
-  littleSkinLoginSessionId = undefined;
-  littleSkinProfileSelect.replaceChildren();
-  littleSkinProfileSelect.hidden = true;
-  setLittleSkinLoginBusy(false);
+  littleSkinUsernameInput.disabled = active;
+  littleSkinPasswordInput.disabled = active;
+  littleSkinLoginButton.textContent = active ? '正在登录…' : '登录并同步';
 }
 
 async function beginLittleSkinLogin() {
   if (littleSkinLoginActive) return;
-  if (!accountsApi?.loginLittleSkin || !accountsApi?.selectLittleSkinProfile) {
+  if (!accountsApi?.loginLittleSkin) {
     showToast('请在 Electron 启动器中使用 LittleSkin 登录');
     return;
   }
 
-  const selectingProfile = Boolean(littleSkinLoginSessionId);
   const username = littleSkinUsernameInput.value.trim();
   const password = littleSkinPasswordInput.value;
-  if (!selectingProfile && (!username || !password)) {
+  if (!username || !password) {
     littleSkinLoginHint.textContent = '请输入 LittleSkin 邮箱（或角色名）和密码。';
     littleSkinLoginHint.classList.add('is-error');
     return;
@@ -596,45 +692,19 @@ async function beginLittleSkinLogin() {
 
   setLittleSkinLoginBusy(true);
   littleSkinLoginHint.classList.remove('is-error');
-  littleSkinLoginHint.textContent = selectingProfile
-    ? '正在切换到所选角色…'
-    : '正在验证账户并同步角色材质…';
+  littleSkinLoginHint.textContent = '正在验证账户并同步角色材质…';
   try {
-    let nextState;
-    if (selectingProfile) {
-      nextState = await accountsApi.selectLittleSkinProfile(
-        littleSkinLoginSessionId,
-        littleSkinProfileSelect.value
-      );
-    } else {
-      const result = await accountsApi.loginLittleSkin(username, password);
-      littleSkinPasswordInput.value = '';
-      if (result.needsProfileSelection) {
-        littleSkinLoginSessionId = result.sessionId;
-        for (const profile of result.profiles) {
-          const option = document.createElement('option');
-          option.value = profile.id;
-          option.textContent = profile.name;
-          littleSkinProfileSelect.append(option);
-        }
-        littleSkinProfileSelect.hidden = false;
-        littleSkinLoginHint.textContent = '此账户有多个角色，请选择本次使用的角色。';
-        return;
-      }
-      nextState = result.state;
-    }
-
-    accountState = nextState;
+    const result = await accountsApi.loginLittleSkin(username, password);
+    littleSkinPasswordInput.value = '';
+    accountState = result.state;
     updateAccountCard();
     renderAccountList();
     littleSkinLoginHint.textContent = `已同步角色：${accountState.current?.name ?? 'LittleSkin 玩家'}`;
     showToast(`LittleSkin 登录成功：${accountState.current?.name ?? 'Minecraft 玩家'}`);
-    resetLittleSkinProfileSelection();
   } catch (error) {
     const message = readableError(error);
     littleSkinLoginHint.textContent = message;
     littleSkinLoginHint.classList.add('is-error');
-    if (/过期|重新登录/.test(message)) resetLittleSkinProfileSelection();
     showToast(message);
   } finally {
     setLittleSkinLoginBusy(false);
@@ -1480,10 +1550,6 @@ littleSkinPasswordInput.addEventListener('keydown', (event) => {
     beginLittleSkinLogin();
   }
 });
-littleSkinProfileSelect.addEventListener('change', () => {
-  littleSkinLoginHint.classList.remove('is-error');
-  littleSkinLoginHint.textContent = '点击“使用所选角色”完成登录。';
-});
 
 accountsApi?.onMicrosoftProgress?.((progress) => {
   if (!microsoftLoginActive || progress?.sessionId !== microsoftLoginSessionId) return;
@@ -1494,6 +1560,12 @@ document.querySelector('#settingsButton').addEventListener('click', async () => 
   if (!launcherSettingsLoaded) await loadLauncherSettings();
   applySettingsToForm();
   settingsDialog.showModal();
+});
+
+launcherUpdateButton.addEventListener('click', handleLauncherUpdate);
+updaterApi?.onState?.((state) => renderLauncherUpdate(state));
+updaterApi?.getState?.().then(renderLauncherUpdate).catch((error) => {
+  renderLauncherUpdate({ status: 'error', message: readableError(error), progress: 0 });
 });
 
 document.querySelector('#versionButton').addEventListener('click', () => {
@@ -1515,6 +1587,41 @@ backgroundDownloadBar.addEventListener('click', () => {
   }
 });
 
+skinFilePickerButton.addEventListener('click', () => skinFileInput.click());
+
+skinFileInput.addEventListener('change', () => {
+  const file = skinFileInput.files?.[0];
+  if (!file) return;
+  const filePath = environment?.files?.getPath?.(file);
+  if (!filePath) {
+    skinUploadHint.textContent = '无法获取文件路径，请在 Electron 启动器中使用';
+    skinUploadHint.classList.add('is-error');
+    return;
+  }
+  skinUploadFilePath = filePath;
+  skinFileName.textContent = file.name;
+  skinUploadHint.textContent = '仅支持 64×32 或 64×64 像素的 PNG 文件';
+  skinUploadHint.classList.remove('is-error');
+});
+
+skinUploadDialog.addEventListener('close', async () => {
+  const accountId = skinUploadAccountId;
+  const filePath = skinUploadFilePath;
+  skinUploadAccountId = null;
+  skinUploadFilePath = null;
+  skinFileInput.value = '';
+  if (skinUploadDialog.returnValue !== 'upload' || !accountId || !filePath) return;
+  skinUploadHint.textContent = '正在上传…';
+  try {
+    accountState = await accountsApi.uploadSkin(accountId, filePath, skinModelSelect.value);
+    updateAccountCard();
+    renderAccountList();
+    showToast('皮肤上传成功');
+  } catch (error) {
+    showToast(readableError(error));
+  }
+});
+
 settingsDialog.addEventListener('close', async () => {
   if (settingsDialog.returnValue === 'save') {
     try {
@@ -1525,7 +1632,8 @@ settingsDialog.addEventListener('close', async () => {
         downloadSource: downloadSourceSelect.value,
         downloadConcurrency: Number(downloadConcurrencySelect.value),
         memoryMb: Number(memoryRange.value),
-        autoUpdate: autoUpdateCheck.checked
+        autoUpdate: autoUpdateCheck.checked,
+        launcherAutoUpdate: launcherAutoUpdateCheck.checked
       };
       launcherSettings = settingsApi ? await settingsApi.update(patch) : patch;
       applySettingsToForm();

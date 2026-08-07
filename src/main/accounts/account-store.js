@@ -331,6 +331,20 @@ class AccountStore {
     });
   }
 
+  async renameAccount(accountId, newName) {
+    const name = validateOfflineName(newName);
+    return this.runExclusive(async () => {
+      const state = await this.read();
+      const account = state.accounts.find((item) => item.id === accountId);
+      if (!account) throw new Error('账户不存在');
+      if (account.type !== 'offline') throw new Error('仅离线账户支持修改玩家 ID');
+      account.name = name;
+      account.updatedAt = new Date().toISOString();
+      await this.write(state);
+      return this.publicState(state);
+    });
+  }
+
   async refreshMicrosoftSkin(accountId, fetchImpl = fetch) {
     return this.runExclusive(async () => {
       const state = await this.read();

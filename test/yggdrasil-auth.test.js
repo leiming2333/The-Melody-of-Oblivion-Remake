@@ -63,7 +63,7 @@ test('LittleSkin 单角色账户会完成 Yggdrasil 登录并同步皮肤', asyn
   assert.equal(request.username, 'player@example.com');
 });
 
-test('LittleSkin 多角色账户可以在不再次提交密码的情况下选择角色', async () => {
+test('LittleSkin 多角色账户自动选择未保存的角色', async () => {
   const profiles = [
     { id: '0123456789abcdef0123456789abcdef', name: 'Player_01' },
     { id: 'fedcba9876543210fedcba9876543210', name: 'Player_02' }
@@ -84,6 +84,13 @@ test('LittleSkin 多角色账户可以在不再次提交密码的情况下选择
   let saved;
   const manager = new YggdrasilAuthManager({
     accountStore: {
+      async read() {
+        return {
+          accounts: [
+            { type: 'yggdrasil', uuid: '01234567-89ab-cdef-0123-456789abcdef' }
+          ]
+        };
+      },
       async upsertYggdrasil(account) {
         saved = account;
         return { currentId: 'littleskin:selected', current: account, accounts: [account] };
@@ -92,11 +99,8 @@ test('LittleSkin 多角色账户可以在不再次提交密码的情况下选择
     fetchImpl: async () => responses.shift()
   });
 
-  const started = await manager.login(9, 'player@example.com', 'password');
-  assert.equal(started.needsProfileSelection, true);
-  assert.equal(started.profiles.length, 2);
-  const state = await manager.selectProfile(started.sessionId, 9, profiles[1].id);
-  assert.equal(state.current.name, 'Player_02');
+  const result = await manager.login(9, 'player@example.com', 'password');
+  assert.equal(result.state.current.name, 'Player_02');
   assert.equal(saved.accessToken, 'selected-access-token');
   assert.equal(manager.sessions.size, 0);
 });

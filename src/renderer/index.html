@@ -122,13 +122,13 @@
           </header>
 
           <div id="accountList" class="account-list" aria-label="已添加账户"></div>
-          <p id="accountEmpty" class="account-empty">还没有账户，可选择 Microsoft 正版、离线或 LittleSkin 外置登录。</p>
+          <p id="accountEmpty" class="account-empty">还没有账户，可选择 Microsoft、离线或 LittleSkin 外置登录。</p>
 
-          <div class="standard-account-methods" aria-label="正版与离线登录">
+          <div class="standard-account-methods" aria-label="Microsoft 与离线登录">
           <section class="microsoft-account-form" aria-label="Microsoft 账户">
             <button id="microsoftLoginButton" class="microsoft-account-button" type="button">
               <span class="microsoft-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-              <span><strong>Microsoft 正版登录</strong><small>Xbox Live · Minecraft Java</small></span>
+              <span><strong>Microsoft 登录</strong><small>Xbox Live · Minecraft Java</small></span>
               <b>登录</b>
             </button>
             <div id="microsoftDevicePanel" class="microsoft-device-panel" hidden>
@@ -198,7 +198,6 @@
                 placeholder="LittleSkin 密码"
                 autocomplete="current-password"
               />
-              <select id="littleSkinProfileSelect" aria-label="选择 LittleSkin 角色" hidden></select>
               <button id="littleSkinLoginButton" type="button">登录并同步</button>
             </div>
             <p id="littleSkinLoginHint">仅用于支持 LittleSkin 外置登录的服务器，不能替代正版验证。</p>
@@ -279,7 +278,7 @@
           <header class="dialog-header">
             <div>
               <p>LAUNCH OPTIONS</p>
-              <h2>启动设置</h2>
+              <h2>启动与更新设置</h2>
             </div>
             <button class="dialog-close" value="cancel" aria-label="关闭设置" type="submit">×</button>
           </header>
@@ -345,12 +344,53 @@
             启动前自动检查整合包更新
           </label>
 
+          <div class="setting-group launcher-update-setting">
+            <div class="launcher-update-copy">
+              <label>启动器更新</label>
+              <p id="launcherUpdateStatus">正在读取更新状态…</p>
+              <progress id="launcherUpdateProgress" max="100" value="0" hidden></progress>
+            </div>
+            <button id="launcherUpdateButton" type="button">检查更新</button>
+          </div>
+
+          <label class="check-setting launcher-update-check">
+            <input id="launcherAutoUpdateCheck" type="checkbox" checked />
+            <span aria-hidden="true"></span>
+            启动时自动检查启动器更新
+          </label>
+
           <footer class="dialog-actions">
             <button class="secondary-dialog-button" value="cancel" type="submit">取消</button>
             <button class="primary-dialog-button" value="save" type="submit">保存设置</button>
           </footer>
         </form>
       </dialog>
+
+      <dialog id="skinUploadDialog" class="rename-dialog">
+        <form method="dialog">
+          <header class="dialog-header">
+            <h2>上传皮肤</h2>
+            <button class="dialog-close" value="cancel" aria-label="关闭" type="submit">×</button>
+          </header>
+          <div class="skin-upload-field">
+            <button id="skinFilePickerButton" type="button">选择文件</button>
+            <span id="skinFileName">未选择</span>
+          </div>
+          <label class="skin-model-select">
+            <span>皮肤模型</span>
+            <select id="skinModelSelect">
+              <option value="steve">Steve（经典）</option>
+              <option value="alex">Alex（纤细）</option>
+            </select>
+          </label>
+          <p id="skinUploadHint" class="rename-hint">仅支持 64×32 或 64×64 像素的 PNG 文件</p>
+          <footer class="dialog-actions">
+            <button class="secondary-dialog-button" value="cancel" type="submit">取消</button>
+            <button id="skinUploadConfirmButton" class="primary-dialog-button" value="upload" type="submit">上传</button>
+          </footer>
+        </form>
+      </dialog>
+      <input id="skinFileInput" type="file" accept="image/png" hidden />
 
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div id="modpackDropOverlay" class="modpack-drop-overlay" hidden>

@@ -163,30 +163,29 @@ class YggdrasilAuthManager {
 
     const profiles = (result.payload.availableProfiles ?? []).map(normalizeProfile);
     if (profiles.length === 0) throw new Error('LittleSkin 账户还没有可用角色，请先在网站创建角色');
-    if (profiles.length === 1) {
-      const refreshed = await this.refreshProfile({
-        accessToken: result.payload.accessToken,
-        clientToken: returnedClientToken,
-        profile: profiles[0]
-      });
-      return {
-        state: await this.saveAccount({
-          accessToken: refreshed.accessToken,
-          clientToken: refreshed.clientToken || returnedClientToken,
-          profile: refreshed.selectedProfile
-        })
-      };
-    }
 
-    const sessionId = crypto.randomUUID();
-    this.sessions.set(sessionId, {
+    const existingState = await this.accountStore.read();
+    const existingUuids = new Set(
+      existingState.accounts
+        .filter((a) => a.type === 'yggdrasil')
+        .map((a) => a.uuid)
+    );
+    const unsavedProfile = profiles.find(
+      (p) => !existingUuids.has(hyphenateProfileId(p.id))
+    );
+    const selectedProfile = unsavedProfile ?? profiles[0];
+    const refreshed = await this.refreshProfile({
       accessToken: result.payload.accessToken,
       clientToken: returnedClientToken,
-      expiresAt: Date.now() + 5 * 60 * 1000,
-      ownerId,
-      profiles
+      profile: selectedProfile
     });
-    return { needsProfileSelection: true, profiles, sessionId };
+    return {
+      state: await this.saveAccount({
+        accessToken: refreshed.accessToken,
+        clientToken: refreshed.clientToken || returnedClientToken,
+        profile: refreshed.selectedProfile
+      })
+    };
   }
 
   session(sessionId, ownerId) {

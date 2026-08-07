@@ -7,6 +7,7 @@ const { YggdrasilAuthManager } = require('./accounts/yggdrasil-auth');
 const { registerMinecraftIpc } = require('./minecraft/ipc');
 const { registerSettingsIpc } = require('./settings/ipc');
 const { SettingsStore } = require('./settings/settings-store');
+const { UpdateManager } = require('./updater/update-manager');
 
 const isSmokeTest = process.argv.includes('--smoke-test');
 const iconFile = process.platform === 'win32' ? 'app-icon.ico'
@@ -88,13 +89,32 @@ function createSecretCodec() {
   };
 }
 
-app.whenReady().then(() => {
+function loadMicrosoftClientId() {
+  // 优先使用环境变量（本地开发/测试覆盖）
+  const envClientId = String(process.env.MELODY_MICROSOFT_CLIENT_ID ?? '').trim();
+  if (/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{4}-[0-9a-f]{12}$/i.test(envClientId)) {
+    return envClientId.toLowerCase();
+  }
+  // 构建时注入的 Client ID（src/main/accounts/microsoft-client-id.json，已 gitignore）
+  try {
+    const { clientId } = require('./accounts/microsoft-client-id.json');
+    if (/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId ?? '')) {
+      return String(clientId).toLowerCase();
+    }
+  } catch {}
+  return undefined;
+}
+
+app.whenReady().then(async () => {
   const settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
   const accountStore = new AccountStore(
     path.join(app.getPath('userData'), 'accounts.json'),
     { secretCodec: createSecretCodec() }
   );
-  const microsoftAuth = new MicrosoftAuthManager({ accountStore });
+  const microsoftAuth = new MicrosoftAuthManager({
+    accountStore,
+    clientId: loadMicrosoftClientId()
+  });
   const yggdrasilAuth = new YggdrasilAuthManager({ accountStore });
   registerAccountIpc({
     app,
@@ -115,7 +135,15 @@ app.whenReady().then(() => {
     microsoftAuth,
     yggdrasilAuth
   });
+  const { autoUpdater } = require('electron-updater');
+  const updateManager = new UpdateManager({ app, autoUpdater, BrowserWindow, ipcMain });
+  updateManager.start();
   createWindow();
+
+  const settings = await settingsStore.getState();
+  if (settings.launcherAutoUpdate) {
+    setTimeout(() => void updateManager.check(), 5000);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

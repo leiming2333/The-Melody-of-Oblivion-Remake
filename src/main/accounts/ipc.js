@@ -1,4 +1,5 @@
 const path = require('node:path');
+const fs = require('node:fs/promises');
 const { AccountStore } = require('./account-store');
 
 function normalizeMicrosoftDeviceCode(value) {
@@ -70,7 +71,20 @@ function registerAccountIpc({
   ipcMain.handle('accounts:set-skin-model', (_event, accountId, skinModel) => (
     store.setSkinModel(accountId, skinModel)
   ));
+  ipcMain.handle('accounts:rename', (_event, accountId, newName) => (
+    store.renameAccount(accountId, newName)
+  ));
   ipcMain.handle('accounts:refresh-skin', (_event, accountId) => store.refreshSkin(accountId));
+  ipcMain.handle('accounts:upload-skin', async (_event, accountId, filePath, skinModel) => {
+    const account = await store.getAccount(accountId);
+    if (!account) throw new Error('账户不存在');
+    if (account.type === 'microsoft') {
+      if (!microsoftAuth) throw new Error('Microsoft 登录服务不可用');
+      const skinData = await fs.readFile(filePath);
+      return microsoftAuth.uploadSkin(account, skinData.toString('base64'), skinModel);
+    }
+    throw new Error('此账户类型不支持皮肤上传');
+  });
   ipcMain.handle('accounts:remove', (_event, accountId) => store.remove(accountId));
   return store;
 }

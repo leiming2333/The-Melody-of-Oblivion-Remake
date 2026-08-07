@@ -1127,10 +1127,9 @@ textarea {
 }
 
 .account-row {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto auto auto;
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-height: 44px;
   padding: 5px 7px;
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -1171,6 +1170,7 @@ textarea {
 .account-row-copy {
   display: flex;
   min-width: 0;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
 }
@@ -1211,6 +1211,33 @@ textarea {
 
 .account-row .skin-model-button {
   color: #e4a37f;
+}
+
+.account-row-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.account-row-name-input {
+  width: 100%;
+  max-width: 160px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f2ede7;
+  font-size: 11px;
+  font-family: Consolas, monospace;
+  outline: none;
+}
+
+.account-row-name-input:focus {
+  border-color: rgba(221, 145, 107, 0.6);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .account-empty {
@@ -1969,6 +1996,60 @@ textarea {
   transform: rotate(45deg);
 }
 
+.launcher-update-setting {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 24px 0 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  background: rgba(20, 17, 18, 0.48);
+}
+
+.launcher-update-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.launcher-update-copy label {
+  display: block;
+  margin-bottom: 5px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+}
+
+.launcher-update-setting .launcher-update-copy p {
+  margin: 0;
+}
+
+.launcher-update-copy progress {
+  width: 100%;
+  height: 4px;
+  margin-top: 8px;
+  accent-color: #ce7953;
+}
+
+.launcher-update-setting > button {
+  min-width: 88px;
+  height: 32px;
+  border: 1px solid rgba(239, 170, 131, 0.45);
+  border-radius: 3px;
+  color: #efaa83;
+  background: rgba(206, 121, 83, 0.12);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.launcher-update-setting > button:disabled {
+  cursor: wait;
+  opacity: 0.48;
+}
+
+.launcher-update-check {
+  margin-top: 0;
+}
+
 .dialog-actions {
   justify-content: flex-end;
   gap: 10px;
@@ -2150,4 +2231,118 @@ textarea {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.rename-dialog {
+  width: min(360px, calc(100vw - 48px));
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  overflow: hidden;
+  color: #f2ede7;
+  background:
+    linear-gradient(100deg, rgba(19, 13, 15, 0.94), rgba(19, 13, 15, 0.76)),
+    var(--launcher-dialog-scene) center / cover;
+  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.42);
+}
+
+.rename-dialog::backdrop {
+  border-radius: 10px;
+  background: rgba(8, 6, 7, 0.48);
+  clip-path: inset(0 round 10px);
+  backdrop-filter: blur(5px);
+}
+
+.rename-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px 28px;
+}
+
+.rename-field input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2ede7;
+  font-size: 14px;
+  outline: none;
+}
+
+.rename-field input:focus {
+  border-color: rgba(221, 145, 107, 0.6);
+}
+
+.rename-hint {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 11px;
+}
+
+.upload-skin-button {
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.upload-skin-button:hover {
+  border-color: rgba(221, 145, 107, 0.5);
+  background: rgba(221, 145, 107, 0.12);
+}
+
+.skin-upload-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.skin-upload-field button {
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2ede7;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.skin-upload-field button:hover {
+  border-color: rgba(221, 145, 107, 0.5);
+}
+
+.skin-upload-field span {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skin-model-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+}
+
+.skin-model-select select {
+  flex: 1;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2ede7;
+  font-size: 12px;
+  outline: none;
 }

@@ -51,6 +51,17 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     update: (patch) => ipcRenderer.invoke('settings:update', patch),
     selectJava: () => ipcRenderer.invoke('settings:select-java')
   }),
+  updater: Object.freeze({
+    getState: () => ipcRenderer.invoke('updater:get-state'),
+    check: () => ipcRenderer.invoke('updater:check'),
+    download: () => ipcRenderer.invoke('updater:download'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    onState: (callback) => {
+      const listener = (_event, state) => callback(state);
+      ipcRenderer.on('updater:state', listener);
+      return () => ipcRenderer.removeListener('updater:state', listener);
+    }
+  }),
   accounts: Object.freeze({
     getState: () => ipcRenderer.invoke('accounts:get-state'),
     addOffline: (playerName, skinModel = 'steve') => (
@@ -75,7 +86,11 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     setSkinModel: (accountId, skinModel) => (
       ipcRenderer.invoke('accounts:set-skin-model', accountId, skinModel)
     ),
+    rename: (accountId, newName) => ipcRenderer.invoke('accounts:rename', accountId, newName),
     refreshSkin: (accountId) => ipcRenderer.invoke('accounts:refresh-skin', accountId),
+    uploadSkin: (accountId, filePath, skinModel) => (
+      ipcRenderer.invoke('accounts:upload-skin', accountId, filePath, skinModel)
+    ),
     remove: (accountId) => ipcRenderer.invoke('accounts:remove', accountId)
   })
 });
