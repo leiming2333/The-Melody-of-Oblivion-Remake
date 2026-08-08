@@ -1,32 +1,43 @@
-name: Build
+name: Build & Release
 
 on:
   push:
-    branches: [main]
     tags:
       - 'v*'
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
+    name: ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
-            build_cmd: npm run build:win
-            platform: Windows
+            script: build:win
+            arch: x64
+          - os: windows-latest
+            script: build:win
+            arch: ia32
+          - os: windows-latest
+            script: build:win
+            arch: arm64
           - os: ubuntu-latest
-            build_cmd: npm run build:linux
-            platform: Linux
+            script: build:linux
+            arch: x64
+          - os: ubuntu-latest
+            script: build:linux
+            arch: arm64
+          - os: ubuntu-latest
+            script: build:linux
+            arch: armv7l
           - os: macos-latest
-            build_cmd: npm run build:mac
-            platform: macOS
-    runs-on: ${{ matrix.os }}
-
+            script: build:mac
+            arch: x64
+          - os: macos-latest
+            script: build:mac
+            arch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,68 +45,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libarchive-tools dpkg fakeroot file
+          node-version: 22
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run syntax check
-        run: npm run check
-
-      - name: Run tests
-        run: npm test
-        continue-on-error: true
-
-      - name: Build (${{ matrix.platform }})
-        run: ${{ matrix.build_cmd }}
+      - name: Build (${{ matrix.arch }})
+        run: npm run ${{ matrix.script }} -- --${{ matrix.arch }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MELODY_MICROSOFT_CLIENT_ID: ${{ secrets.MELODY_MICROSOFT_CLIENT_ID }}
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.platform }}-build
-          path: release/*
-          if-no-files-found: error
-
-  release:
-    name: Create Release
-    needs: build
-    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release
-          merge-multiple: true
-
-      - name: List release assets
-        run: ls -la release/
-
-      - name: Create GitHub Release
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release/*.exe
-            release/*.AppImage
-            release/*.deb
-            release/*.dmg
-            release/*.zip
-          name: ${{ github.ref_name }}
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: release/*
+          fail_on_unmatched_files: false
