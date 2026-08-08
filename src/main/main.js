@@ -92,13 +92,13 @@ function createSecretCodec() {
 function loadMicrosoftClientId() {
   // 优先使用环境变量（本地开发/测试覆盖）
   const envClientId = String(process.env.MELODY_MICROSOFT_CLIENT_ID ?? '').trim();
-  if (/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{4}-[0-9a-f]{12}$/i.test(envClientId)) {
+  if (/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){2}[0-9a-f]{4}-[0-9a-f]{12}$/i.test(envClientId)) {
     return envClientId.toLowerCase();
   }
   // 构建时注入的 Client ID（src/main/accounts/microsoft-client-id.json，已 gitignore）
   try {
     const { clientId } = require('./accounts/microsoft-client-id.json');
-    if (/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId ?? '')) {
+    if (/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){2}[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId ?? '')) {
       return String(clientId).toLowerCase();
     }
   } catch {}
