@@ -87,10 +87,10 @@ jobs:
           done || true
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release-assets/**/*.exe
-            release-assets/**/*.zip
-            release-assets/**/*.AppImage
-          overwrite: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "${{ github.ref_name }}" --json id -q .id >/dev/null 2>&1 || gh release create "${{ github.ref_name }}" --generate-notes
+          find release-assets -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.AppImage' \) \
+            -exec gh release upload "${{ github.ref_name }}" {} --clobber \;
