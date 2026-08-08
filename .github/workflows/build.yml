@@ -89,6 +89,7 @@ jobs:
       - name: Clear stale release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release view "${{ github.ref_name }}" --json assets -q '.assets[].id' 2>/dev/null | while read -r id; do
             echo "deleting asset $id"
@@ -98,6 +99,7 @@ jobs:
       - name: Upload to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -x
           echo "== files found =="
