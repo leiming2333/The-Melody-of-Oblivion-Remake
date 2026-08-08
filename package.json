@@ -52,7 +52,7 @@
       ]
     },
     "portable": {
-      "artifactName": "Melody-of-Oblivion-Launcher-v${version}-Windows-x64-Portable.${ext}"
+      "artifactName": "Melody-of-Oblivion-Launcher-v${version}-Windows-x64.${ext}"
     },
     "linux": {
       "icon": "src/renderer/assets/app-icon.png",
