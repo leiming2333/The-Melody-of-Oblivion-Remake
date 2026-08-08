@@ -78,6 +78,14 @@ jobs:
           path: release-assets
           pattern: dist-*
 
+      - name: Clear stale release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ github.ref_name }}" --json assets -q '.assets[].id' 2>/dev/null | while read -r id; do
+            gh api -X DELETE "/repos/${{ github.repository }}/releases/assets/$id"
+          done || true
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -85,3 +93,4 @@ jobs:
             release-assets/**/*.exe
             release-assets/**/*.zip
             release-assets/**/*.AppImage
+          overwrite: true
