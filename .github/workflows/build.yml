@@ -20,27 +20,35 @@ jobs:
           - os: windows-latest
             script: build:win
             arch: x64
+            pattern: release/*.exe
           - os: windows-latest
             script: build:win
             arch: ia32
+            pattern: release/*.exe
           - os: windows-latest
             script: build:win
             arch: arm64
+            pattern: release/*.exe
           - os: ubuntu-latest
             script: build:linux
             arch: x64
+            pattern: release/*.AppImage
           - os: ubuntu-latest
             script: build:linux
             arch: arm64
+            pattern: release/*.AppImage
           - os: ubuntu-latest
             script: build:linux
             arch: armv7l
+            pattern: release/*.AppImage
           - os: macos-latest
             script: build:mac
             arch: x64
+            pattern: release/*.zip
           - os: macos-latest
             script: build:mac
             arch: arm64
+            pattern: release/*.zip
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,7 +71,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.os }}-${{ matrix.arch }}
-          path: release/*
+          path: ${{ matrix.pattern }}
           if-no-files-found: error
 
   release:
