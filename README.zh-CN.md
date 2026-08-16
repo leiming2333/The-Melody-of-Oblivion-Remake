@@ -6,10 +6,17 @@
 **经典国产 Minecraft Java 版启动器“忘却的旋律”的现代独立重制版。**
 
 [English](README.md) · 简体中文
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Node.js](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
+[![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
+[![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
+[![Release](https://img.shields.io/badge/Release-v1.2.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
 </div>
 
 > [!IMPORTANT]
-> 当前仓库版本为 `1.1.2`。Windows、macOS 与 Linux x64 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
+> 当前仓库版本为 `1.2.0`。Windows、macOS 与 Linux x64 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
 
 ## 项目简介
 

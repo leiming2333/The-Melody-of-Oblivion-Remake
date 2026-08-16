@@ -6,10 +6,17 @@
 **A modern, independent remake of the classic Chinese Minecraft: Java Edition launcher “忘却的旋律”.**
 
 [English](README.md) · [简体中文](README.zh-CN.md)
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Node.js](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
+[![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
+[![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
+[![Release](https://img.shields.io/badge/Release-v1.2.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
 </div>
 
 > [!IMPORTANT]
-> This repository is at version `1.1.2`. Downloads for Windows, macOS, and Linux x64 are published through GitHub Releases. Back up your Minecraft data before testing a new build.
+> This repository is at version `1.2.0`. Downloads for Windows, macOS, and Linux x64 are published through GitHub Releases. Back up your Minecraft data before testing a new build.
 
 ## About this project
 
