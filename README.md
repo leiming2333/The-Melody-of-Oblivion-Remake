@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
-[![Release](https://img.shields.io/badge/Release-v1.2.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
+[![Release](https://img.shields.io/badge/Release-v1.2.1-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
 </div>
 
 > [!IMPORTANT]
-> This repository is at version `1.2.0`. Downloads for Windows, macOS, and Linux x64 are published through GitHub Releases. Back up your Minecraft data before testing a new build.
+> This repository is at version `1.2.1`. Downloads for Windows, macOS, and Linux are published through GitHub Releases. Back up your Minecraft data before testing a new build.
 
 ## About this project
 
@@ -41,14 +41,15 @@ The current repository starts a new implementation; its version numbers and code
 - **Java management** — match the Java major version required by the selected game, prefer an explicit compatible runtime, and otherwise provision an Eclipse Temurin JRE through the Adoptium API.
 - **Launch core** — resolve inherited version metadata, apply platform rules, assemble arguments and classpaths, extract native libraries safely, launch the Java process, and report its status. LittleSkin accounts automatically provision a SHA-256-verified authlib-injector.
 - **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instance directories, including overrides and supported loaders.
-- **Desktop UI** — a compact frameless Electron window with version, account, download, launch, and settings flows.
+- **Launcher updates** — checks GitHub Releases on startup and downloads updates silently in the background; a footer status dot signals updates (blue = up to date, green arrow = new version), a dialog announces new releases, and one click restarts into the new build.
+- **Desktop UI** — a compact fixed-size frameless Electron window with version, account, download, launch, and settings flows.
 
-The automated test suite currently covers 64 cases across accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, and local version management.
+The automated test suite currently covers 83 cases across accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, local version management, and launcher updates.
 
 ## Current limitations
 
-- Public x64 builds are available for Windows, macOS, and Linux. Platform-specific behavior may still vary.
-- No automatic updater is provided; download new versions from GitHub Releases.
+- Public multi-architecture builds are available for Windows, macOS, and Linux. Platform-specific behavior may still vary.
+- Update behavior differs per platform: Linux AppImages replace themselves and restart; the Windows portable build places the new executable next to the old one and launches it (the old file is kept); macOS downloads a zip that must be extracted and replaced manually.
 - Microsoft sign-in depends on the launcher's Azure application registration being accepted by Minecraft Services. Provider-side policy or registration changes can make the preview login unavailable.
 - LittleSkin Yggdrasil works only when both client and server are configured for the same authentication service. It does not replace a premium account or grant access to premium-only servers. See the [LittleSkin manual](https://manual.littlesk.in/yggdrasil/).
 - CurseForge installation depends on downloadable file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Packs containing restricted or unavailable files may fail.
@@ -120,7 +121,7 @@ Security-sensitive reports should not include account files, access tokens, refr
 - Finish modpack compatibility and recovery paths.
 - Improve error messages and cancellation behavior across the UI.
 - Add repeatable Windows packaging and release artifacts.
-- Document release verification, upgrade behavior, and known issues.
+- Polish per-platform update installation (Windows old-file cleanup and automatic macOS replacement).
 
 ## Historical references
 

@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
-[![Release](https://img.shields.io/badge/Release-v1.2.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
+[![Release](https://img.shields.io/badge/Release-v1.2.1-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
 </div>
 
 > [!IMPORTANT]
-> 当前仓库版本为 `1.2.0`。Windows、macOS 与 Linux x64 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
+> 当前仓库版本为 `1.2.1`。Windows、macOS 与 Linux 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -41,14 +41,15 @@
 - **Java 管理**：匹配游戏所需的 Java 主版本，优先使用用户指定且兼容的运行时，否则通过 Adoptium API 安装 Eclipse Temurin JRE。
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
 - **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides 和已兼容的加载器。
-- **桌面界面**：紧凑的无边框 Electron 窗口，覆盖版本、账户、下载、启动及设置流程。
+- **启动器更新**：启动时检测 GitHub Releases 新版本并后台静默下载；页脚状态圆提示更新（蓝色为最新、绿色带箭头为有新版本），发现新版本时弹窗告知，可一键重启完成更新。
+- **桌面界面**：紧凑的固定尺寸无边框 Electron 窗口，覆盖版本、账户、下载、启动及设置流程。
 
-自动化测试目前覆盖账户、身份验证、下载、Java 选择、游戏启动、加载器、整合包、设置及本地版本管理等 64 个测试用例。
+自动化测试目前覆盖账户、身份验证、下载、Java 选择、游戏启动、加载器、整合包、设置、本地版本管理及启动器更新等 83 个测试用例。
 
 ## 当前限制
 
-- 提供 Windows、macOS 与 Linux 的 x64 公开构建，不同平台的细节表现仍可能存在差异。
-- 暂无自动更新功能；新版本需从 GitHub Releases 下载。
+- 提供 Windows、macOS 与 Linux 的多架构公开构建，不同平台的细节表现仍可能存在差异。
+- 更新行为因平台而异：Linux AppImage 自动替换并重启；Windows 便携版会在同目录生成新版并启动新版（旧文件保留）；macOS 下载压缩包后需手动解压替换。
 - Microsoft 登录依赖启动器的 Azure 应用注册获得 Minecraft Services 接受。服务方策略或注册状态改变可能导致登录暂时不可用。
 - LittleSkin Yggdrasil 仅在客户端和服务端使用相同验证服务时生效；它不能代替正版账户，也不会授予进入正版验证服务器的权限。参见 [LittleSkin 用户使用手册](https://manual.littlesk.in/yggdrasil/)。
 - CurseForge 安装依赖 CurseTools 提供的可下载文件元数据，或配置 `CURSEFORGE_API_KEY`。包含受限或已下架文件的整合包可能安装失败。
@@ -120,7 +121,7 @@ styles.css                落地页样式
 - 继续完善整合包兼容性和错误恢复流程。
 - 改进界面中的错误提示及取消操作。
 - 完善多平台的可重复构建与发布产物。
-- 补充发布校验、升级行为和已知问题文档。
+- 优化各平台更新安装体验（尤其是 Windows 旧文件清理与 macOS 自动替换）。
 
 ## 历史资料
 

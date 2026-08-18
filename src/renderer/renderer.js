@@ -92,6 +92,9 @@ const launcherAutoUpdateCheck = document.querySelector('#launcherAutoUpdateCheck
 const launcherUpdateStatus = document.querySelector('#launcherUpdateStatus');
 const launcherUpdateProgress = document.querySelector('#launcherUpdateProgress');
 const launcherUpdateButton = document.querySelector('#launcherUpdateButton');
+const launcherVersionMeta = document.querySelector('#launcherVersionMeta');
+const updateStatusBadge = document.querySelector('#updateStatusBadge');
+const updateBadgeArrow = document.querySelector('#updateBadgeArrow');
 const sourceHint = document.querySelector('#sourceHint');
 const toast = document.querySelector('#toast');
 const modpackDropOverlay = document.querySelector('#modpackDropOverlay');
@@ -145,11 +148,18 @@ let microsoftLoginActive = false;
 let littleSkinLoginActive = false;
 let skinUploadAccountId = null;
 let skinUploadFilePath = null;
-let launcherUpdateState = { status: 'idle', progress: 0, message: '尚未检查更新' };
+let launcherUpdateState = { status: 'idle', progress: 0, installAction: null, message: '尚未检查更新' };
 
 function renderLauncherUpdate(state = launcherUpdateState) {
   launcherUpdateState = state;
   launcherUpdateStatus.textContent = state.message ?? '尚未检查更新';
+  if (state.currentVersion) {
+    launcherVersionMeta.textContent = `Launcher ${state.currentVersion}`;
+  }
+  const hasUpdate = ['available', 'downloading', 'downloaded'].includes(state.status);
+  updateStatusBadge.classList.toggle('has-update', hasUpdate);
+  updateStatusBadge.title = state.message ?? '尚未检查更新';
+  updateBadgeArrow.hidden = !hasUpdate;
   const showProgress = state.status === 'downloading';
   launcherUpdateProgress.hidden = !showProgress;
   launcherUpdateProgress.value = Number(state.progress) || 0;
@@ -157,7 +167,7 @@ function renderLauncherUpdate(state = launcherUpdateState) {
   launcherUpdateButton.textContent = state.status === 'available'
     ? `下载 ${state.availableVersion ?? '更新'}`
     : state.status === 'downloaded'
-      ? '重启并安装'
+      ? (state.installAction === 'open-folder' ? '打开下载位置' : '重启并安装')
       : state.status === 'checking'
         ? '正在检查…'
         : state.status === 'downloading'
@@ -1969,10 +1979,6 @@ document.querySelector('#manageButton').addEventListener('click', async () => {
     showToast(readableError(error));
   }
 });
-
-if (environment?.versions?.electron) {
-  document.querySelector('#electronMeta').textContent = `Electron ${environment.versions.electron}`;
-}
 
 loadAccountState();
 loadLauncherSettings();

@@ -34,12 +34,13 @@ function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 760,
     height: 466,
-    minWidth: 680,
-    minHeight: 417,
     show: false,
     frame: false,
     transparent: true,
     hasShadow: false,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     autoHideMenuBar: true,
     backgroundColor: '#00000000',
     icon: appIconPath,
@@ -55,6 +56,9 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
   mainWindow.once('ready-to-show', () => {
+    if (process.platform !== 'darwin') {
+      mainWindow.setIcon(appIconPath);
+    }
     if (!isSmokeTest) {
       mainWindow.show();
     }
@@ -135,8 +139,29 @@ app.whenReady().then(async () => {
     microsoftAuth,
     yggdrasilAuth
   });
-  const { autoUpdater } = require('electron-updater');
-  const updateManager = new UpdateManager({ app, autoUpdater, BrowserWindow, ipcMain });
+  const updateManager = new UpdateManager({
+    app,
+    BrowserWindow,
+    ipcMain,
+    shell,
+    onUpdateAvailable: (version, releaseUrl) => {
+      const parentWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
+      dialog.showMessageBox(parentWindow, {
+        type: 'info',
+        title: '启动器更新',
+        message: `发现新版本 v${version}`,
+        detail: '启动器已在后台下载更新，完成后可在「启动器设置」中重启安装。',
+        buttons: ['稍后提醒', '查看发布页'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      }).then(({ response }) => {
+        if (response === 1 && releaseUrl) {
+          shell.openExternal(releaseUrl);
+        }
+      }).catch(() => {});
+    }
+  });
   updateManager.start();
   createWindow();
 

@@ -14,23 +14,23 @@ const launcherSceneIndicators = [...document.querySelectorAll(".mock-scene-switc
 const sceneButtons = [...document.querySelectorAll("[data-scene-target]")];
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const sceneRotationInterval = 6000;
-const releaseVersion = "1.1.2";
+const releaseVersion = "1.2.1";
 const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
 const releaseTargets = {
   windows: {
     name: "Windows",
     system: "Windows 10 / 11",
-    asset: `Melody-of-Oblivion-Launcher-v${releaseVersion}-Windows-x64.exe`,
+    asset: `The-Melody-of-Oblivion-Remake-v${releaseVersion}-Windows-x64.exe`,
   },
   macos: {
     name: "macOS",
     system: "macOS",
-    asset: `Melody-of-Oblivion-Launcher-v${releaseVersion}-macOS-x64.dmg`,
+    asset: `The-Melody-of-Oblivion-Remake-v${releaseVersion}-macOS-x64.zip`,
   },
   linux: {
     name: "Linux",
     system: "Linux",
-    asset: `Melody-of-Oblivion-Launcher-v${releaseVersion}-Linux-x64.AppImage`,
+    asset: `The-Melody-of-Oblivion-Remake-v${releaseVersion}-Linux-x64.AppImage`,
   },
 };
 
@@ -50,7 +50,7 @@ const translations = {
     "hero.lead":
       "Melody is a Minecraft launcher rebuilt from zero. Faster downloads, clearer version management, and safer accounts all live inside one quiet, compact window.",
     "hero.primary": "Get the matching build",
-    "hero.primarySub": "Automatic system detection · v1.1.2",
+    "hero.primarySub": "Automatic system detection · v1.2.1",
     "hero.secondary": "See what it can do",
     "hero.meta1": "download threads",
     "hero.meta2": "loader families",
@@ -129,6 +129,8 @@ const translations = {
     "roadmap.phase3Body": "Modrinth and CurseForge instances now separate required and optional files, surface restricted-file warnings, and report failures by install phase.",
     "roadmap.phase4Title": "First public release",
     "roadmap.phase4Body": "Windows, macOS, and Linux x64 builds are available from GitHub Releases.",
+    "roadmap.phase5Title": "Launcher self-update",
+    "roadmap.phase5Body": "Checks GitHub Releases on startup, downloads updates in the background, and restarts to apply them in one click.",
     "roadmap.complete": "Complete",
     "roadmap.active": "In progress",
     "roadmap.planned": "Planned",
@@ -137,8 +139,8 @@ const translations = {
     "download.arch": "Architecture",
     "download.version": "Version",
     "download.button": "Download the matching build",
-    "download.buttonSub": "GitHub Release v1.1.2",
-    "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft.",
+    "download.buttonSub": "GitHub Release v1.2.1",
+    "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft. Since v1.2.1 the launcher detects and installs updates automatically.",
     "footer.slogan": "Hear the way back into the block world again.",
     "footer.backTop": "Back to top ↑",
     "menu.open": "Open navigation menu",

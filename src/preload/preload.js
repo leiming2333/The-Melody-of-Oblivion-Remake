@@ -2,11 +2,6 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('launcherEnvironment', {
-  versions: Object.freeze({
-    electron: process.versions.electron,
-    chromium: process.versions.chrome,
-    node: process.versions.node
-  }),
   windowControls: Object.freeze({
     minimize: () => ipcRenderer.send('window:minimize'),
     close: () => ipcRenderer.send('window:close')
