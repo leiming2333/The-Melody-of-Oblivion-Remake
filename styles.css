@@ -908,6 +908,15 @@ body.menu-open .menu-button span:last-child {
   font-size: 5px;
 }
 
+.mock-update-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 4px rgba(59, 130, 246, 0.55);
+}
+
 .floating-chip {
   position: absolute;
   z-index: 3;

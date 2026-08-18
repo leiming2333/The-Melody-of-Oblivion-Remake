@@ -1009,10 +1009,33 @@ textarea {
   font-size: 11px;
 }
 
-.footer-meta span + span::before {
-  margin-right: 8px;
-  color: rgba(255, 255, 255, 0.16);
-  content: "/";
+.update-status-badge {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+}
+
+.update-status-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.update-status-badge circle {
+  fill: #3b82f6;
+}
+
+.update-status-badge path {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.update-status-badge.has-update circle {
+  fill: #22c55e;
 }
 
 .footer-actions {
