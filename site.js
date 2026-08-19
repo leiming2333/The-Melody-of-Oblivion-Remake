@@ -14,7 +14,7 @@ const launcherSceneIndicators = [...document.querySelectorAll(".mock-scene-switc
 const sceneButtons = [...document.querySelectorAll("[data-scene-target]")];
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const sceneRotationInterval = 6000;
-const releaseVersion = "1.2.1";
+const releaseVersion = "1.2.2";
 const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
 const releaseTargets = {
   windows: {
@@ -50,7 +50,7 @@ const translations = {
     "hero.lead":
       "Melody is a Minecraft launcher rebuilt from zero. Faster downloads, clearer version management, and safer accounts all live inside one quiet, compact window.",
     "hero.primary": "Get the matching build",
-    "hero.primarySub": "Automatic system detection · v1.2.1",
+    "hero.primarySub": "Automatic system detection · v1.2.2",
     "hero.secondary": "See what it can do",
     "hero.meta1": "download threads",
     "hero.meta2": "loader families",
@@ -139,7 +139,7 @@ const translations = {
     "download.arch": "Architecture",
     "download.version": "Version",
     "download.button": "Download the matching build",
-    "download.buttonSub": "GitHub Release v1.2.1",
+    "download.buttonSub": "GitHub Release v1.2.2",
     "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft. Since v1.2.1 the launcher detects and installs updates automatically.",
     "footer.slogan": "Hear the way back into the block world again.",
     "footer.backTop": "Back to top ↑",

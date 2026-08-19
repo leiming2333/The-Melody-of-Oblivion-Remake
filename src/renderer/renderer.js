@@ -94,6 +94,7 @@ const launcherUpdateProgress = document.querySelector('#launcherUpdateProgress')
 const launcherUpdateButton = document.querySelector('#launcherUpdateButton');
 const launcherVersionMeta = document.querySelector('#launcherVersionMeta');
 const updateStatusBadge = document.querySelector('#updateStatusBadge');
+const updateBadgeEqual = document.querySelector('#updateBadgeEqual');
 const updateBadgeArrow = document.querySelector('#updateBadgeArrow');
 const sourceHint = document.querySelector('#sourceHint');
 const toast = document.querySelector('#toast');
@@ -160,6 +161,7 @@ function renderLauncherUpdate(state = launcherUpdateState) {
   updateStatusBadge.classList.toggle('has-update', hasUpdate);
   updateStatusBadge.title = state.message ?? '尚未检查更新';
   updateBadgeArrow.hidden = !hasUpdate;
+  updateBadgeEqual.hidden = hasUpdate;
   const showProgress = state.status === 'downloading';
   launcherUpdateProgress.hidden = !showProgress;
   launcherUpdateProgress.value = Number(state.progress) || 0;

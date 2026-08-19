@@ -1026,16 +1026,20 @@ textarea {
   fill: #3b82f6;
 }
 
+.update-status-badge.has-update circle {
+  fill: #22c55e;
+}
+
 .update-status-badge path {
   fill: none;
   stroke: #ffffff;
-  stroke-width: 1.6;
+  stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.update-status-badge.has-update circle {
-  fill: #22c55e;
+.update-status-badge path[hidden] {
+  display: none;
 }
 
 .footer-actions {

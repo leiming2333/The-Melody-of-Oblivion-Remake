@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
-[![Release](https://img.shields.io/badge/Release-v1.2.1-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
+[![Release](https://img.shields.io/badge/Release-v1.2.2-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
 </div>
 
 > [!IMPORTANT]
-> This repository is at version `1.2.1`. Downloads for Windows, macOS, and Linux are published through GitHub Releases. Back up your Minecraft data before testing a new build.
+> This repository is at version `1.2.2`. Downloads for Windows, macOS, and Linux are published through GitHub Releases. Back up your Minecraft data before testing a new build.
 
 ## About this project
 
