@@ -9,12 +9,12 @@ const {
 } = require('../src/main/updater/update-manager');
 
 const releaseAssets = [
-  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-x64.exe', browser_download_url: 'https://example.com/win-x64.exe' },
-  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-ia32.exe', browser_download_url: 'https://example.com/win-ia32.exe' },
-  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-arm64.exe', browser_download_url: 'https://example.com/win-arm64.exe' },
-  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Linux-x64.AppImage', browser_download_url: 'https://example.com/linux-x64.AppImage' },
-  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Linux-armv7l.AppImage', browser_download_url: 'https://example.com/linux-armv7l.AppImage' },
-  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-macOS-arm64.zip', browser_download_url: 'https://example.com/mac-arm64.zip' }
+  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-x64.exe', browser_download_url: 'https://example.com/win-x64.exe', size: 1024 },
+  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-ia32.exe', browser_download_url: 'https://example.com/win-ia32.exe', size: 1024 },
+  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-arm64.exe', browser_download_url: 'https://example.com/win-arm64.exe', size: 1024 },
+  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Linux-x64.AppImage', browser_download_url: 'https://example.com/linux-x64.AppImage', size: 1024 },
+  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Linux-armv7l.AppImage', browser_download_url: 'https://example.com/linux-armv7l.AppImage', size: 1024 },
+  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-macOS-arm64.zip', browser_download_url: 'https://example.com/mac-arm64.zip', size: 1024 }
 ];
 
 function fixture({
@@ -59,6 +59,8 @@ function fixture({
     },
     fileSystem: {
       mkdir: async () => {},
+      statfs: async () => ({ bavail: 1024n * 1024n * 8n, bsize: 1024n }),
+      stat: async () => ({ size: 1024 }),
       chmod: async () => {},
       rename: async () => {},
       rm: async () => {}
@@ -147,7 +149,7 @@ test('下载失败会报告错误', async () => {
 test('Windows 安装更新会启动新版本并退出', async () => {
   const { manager, calls } = fixture();
   await manager.check();
-  assert.equal(manager.install().installing, true);
+  assert.equal((await manager.install()).installing, true);
   assert.equal(calls.spawn.length, 1);
   assert.equal(calls.quit, 1);
 });
@@ -155,7 +157,7 @@ test('Windows 安装更新会启动新版本并退出', async () => {
 test('Linux 安装更新会重启自身', async () => {
   const { manager, calls } = fixture({ platform: 'linux', arch: 'x64' });
   await manager.check();
-  manager.install();
+  await manager.install();
   assert.equal(calls.relaunch, 1);
   assert.equal(calls.quit, 1);
   assert.equal(calls.spawn.length, 0);
@@ -165,12 +167,12 @@ test('macOS 下载完成后打开所在文件夹且不退出', async () => {
   const { manager, calls } = fixture({ platform: 'darwin', arch: 'arm64' });
   const state = await manager.check();
   assert.equal(state.installAction, 'open-folder');
-  manager.install();
+  await manager.install();
   assert.equal(calls.showItemInFolder.length, 1);
   assert.equal(calls.quit, 0);
 });
 
-test('未下载完成时不允许安装', () => {
+test('未下载完成时不允许安装', async () => {
   const { manager } = fixture();
-  assert.throws(() => manager.install(), /尚未下载完成/);
+  await assert.rejects(() => manager.install(), /尚未下载完成/);
 });

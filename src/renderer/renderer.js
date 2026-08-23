@@ -81,6 +81,7 @@ const launcherApp = document.querySelector('.launcher-app');
 const javaSelect = document.querySelector('#javaSelect');
 const javaBrowseButton = document.querySelector('#javaBrowseButton');
 const javaPathHint = document.querySelector('#javaPathHint');
+const javaRedetectButton = document.querySelector('#javaRedetectButton');
 const gameDirectoryModeSelect = document.querySelector('#gameDirectoryModeSelect');
 const gameDirectoryHint = document.querySelector('#gameDirectoryHint');
 const memoryRange = document.querySelector('#memoryRange');
@@ -96,16 +97,17 @@ const launcherVersionMeta = document.querySelector('#launcherVersionMeta');
 const updateStatusBadge = document.querySelector('#updateStatusBadge');
 const updateBadgeEqual = document.querySelector('#updateBadgeEqual');
 const updateBadgeArrow = document.querySelector('#updateBadgeArrow');
+const updateStatusBadgeSvg = updateStatusBadge.querySelector('svg');
 const sourceHint = document.querySelector('#sourceHint');
 const toast = document.querySelector('#toast');
 const modpackDropOverlay = document.querySelector('#modpackDropOverlay');
-const backgroundDownloadBar = document.querySelector('#backgroundDownloadBar');
-const bgDownloadLabel = document.querySelector('#bgDownloadLabel');
-const bgDownloadProgress = document.querySelector('#bgDownloadProgress');
-const bgDownloadPercent = document.querySelector('#bgDownloadPercent');
-const bgDownloadSpeed = document.querySelector('#bgDownloadSpeed');
 const wallpaperSlides = [...document.querySelectorAll('.background-slide')];
 const wallpaperDots = [...document.querySelectorAll('.wallpaper-dot')];
+const javaCheckDialog = document.querySelector('#javaCheckDialog');
+const javaCheckHint = document.querySelector('#javaCheckHint');
+const javaCheckSkipButton = document.querySelector('#javaCheckSkipButton');
+const javaCheckRetryButton = document.querySelector('#javaCheckRetryButton');
+const javaCheckDownloadButton = document.querySelector('#javaCheckDownloadButton');
 
 let toastTimer;
 let wallpaperIndex = 0;
@@ -119,6 +121,7 @@ let versionCatalogLoaded = false;
 let versionCatalogLoading = false;
 let versionCatalogLoadToken = 0;
 let versionDownloadActive = false;
+let lastDownloadFailed = false;
 let versionDeleteActive = false;
 let versionVerifyActive = false;
 let modpackInstallActive = false;
@@ -126,7 +129,6 @@ let launchRequestActive = false;
 let downloadCancelRequested = false;
 let activeDownloadLabel = '';
 let lastDownloadProgress = null;
-let backgroundDownloadHideTimer;
 let loaderVersions = [];
 let loaderCatalogLoading = false;
 let loaderLoadToken = 0;
@@ -151,27 +153,44 @@ let skinUploadAccountId = null;
 let skinUploadFilePath = null;
 let launcherUpdateState = { status: 'idle', progress: 0, installAction: null, message: '尚未检查更新' };
 
+function setUpdateStatusBadgeSpinning(spinning) {
+  if (!updateStatusBadgeSvg) return;
+  if (spinning) {
+    updateStatusBadgeSvg.style.transform = '';
+    updateStatusBadge.classList.add('is-spinning');
+    return;
+  }
+  if (updateStatusBadge.classList.contains('is-spinning')) {
+    const transform = window.getComputedStyle(updateStatusBadgeSvg).transform;
+    updateStatusBadgeSvg.style.transform = transform === 'none' ? '' : transform;
+  }
+  updateStatusBadge.classList.remove('is-spinning');
+}
+
 function renderLauncherUpdate(state = launcherUpdateState) {
   launcherUpdateState = state;
   launcherUpdateStatus.textContent = state.message ?? '尚未检查更新';
   if (state.currentVersion) {
     launcherVersionMeta.textContent = `Launcher ${state.currentVersion}`;
   }
-  const hasUpdate = ['available', 'downloading', 'downloaded'].includes(state.status);
+  const hasUpdate = ['available', 'downloading', 'verifying', 'downloaded'].includes(state.status);
   updateStatusBadge.classList.toggle('has-update', hasUpdate);
   updateStatusBadge.title = state.message ?? '尚未检查更新';
   updateBadgeArrow.hidden = !hasUpdate;
   updateBadgeEqual.hidden = hasUpdate;
-  const showProgress = state.status === 'downloading';
+  setUpdateStatusBadgeSpinning(state.status === 'checking');
+  const showProgress = ['downloading', 'verifying'].includes(state.status);
   launcherUpdateProgress.hidden = !showProgress;
   launcherUpdateProgress.value = Number(state.progress) || 0;
-  launcherUpdateButton.disabled = ['checking', 'downloading', 'unavailable'].includes(state.status);
+  launcherUpdateButton.disabled = ['checking', 'downloading', 'verifying', 'unavailable'].includes(state.status);
   launcherUpdateButton.textContent = state.status === 'available'
     ? `下载 ${state.availableVersion ?? '更新'}`
     : state.status === 'downloaded'
       ? (state.installAction === 'open-folder' ? '打开下载位置' : '重启并安装')
       : state.status === 'checking'
         ? '正在检查…'
+        : state.status === 'verifying'
+          ? '正在校验…'
         : state.status === 'downloading'
           ? `${state.progress ?? 0}%`
           : '检查更新';
@@ -189,6 +208,21 @@ async function handleLauncherUpdate() {
   } catch (error) {
     showToast(readableError(error));
   }
+}
+
+async function openSettingsForLauncherUpdate() {
+  if (!settingsDialog.open) {
+    if (!launcherSettingsLoaded) await loadLauncherSettings();
+    applySettingsToForm();
+    settingsDialog.showModal();
+  }
+  settingsDialog.querySelector('.launcher-update-setting')?.scrollIntoView({ block: 'center' });
+  launcherUpdateButton.focus();
+}
+
+async function handleLauncherUpdateFromBadge() {
+  await openSettingsForLauncherUpdate();
+  await handleLauncherUpdate();
 }
 
 const loaderNames = Object.freeze({
@@ -222,6 +256,7 @@ const defaultSkinUrls = Object.freeze({
 });
 
 const selectedGameStorageKey = 'melody.selected-game-target';
+const JAVA_CHECK_SKIP_KEY = 'melody.java-check-skip';
 
 function normalizedOnlineSkinUrl(value) {
   try {
@@ -806,73 +841,9 @@ function fallbackLoaderResult(gameVersion, loaderType) {
   };
 }
 
-function formatSpeed(bytesPerSecond) {
-  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-  let value = bytesPerSecond;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
-}
-
-function scheduleHideBackgroundDownloadBar() {
-  window.clearTimeout(backgroundDownloadHideTimer);
-  backgroundDownloadHideTimer = window.setTimeout(() => {
-    backgroundDownloadBar.hidden = true;
-  }, 4000);
-}
-
-function updateBackgroundDownloadBar(progress) {
-  if (!progress) return;
-  backgroundDownloadBar.hidden = false;
-  backgroundDownloadBar.classList.remove('is-complete', 'is-error');
-
-  const totalFiles = progress.totalFiles ?? 0;
-  const completedFiles = progress.completedFiles ?? 0;
-  const totalBytes = progress.totalBytes ?? 0;
-  const completedBytes = progress.completedBytes ?? 0;
-  const useByteProgress = totalBytes > 0;
-  const progressTotal = useByteProgress ? totalBytes : totalFiles;
-  const progressValue = useByteProgress ? completedBytes : completedFiles;
-  const percent = progressTotal > 0
-    ? Math.min(100, Math.round((progressValue / progressTotal) * 100))
-    : 0;
-
-  bgDownloadProgress.max = Math.max(progressTotal, 1);
-  bgDownloadProgress.value = Math.min(progressValue, bgDownloadProgress.max);
-  bgDownloadPercent.textContent = progress.phase === 'complete' ? '100%' : `${percent}%`;
-
-  if (progress.phase === 'complete') {
-    bgDownloadLabel.textContent = `${activeDownloadLabel} 已完成`;
-    backgroundDownloadBar.classList.add('is-complete');
-    bgDownloadSpeed.textContent = '已完成';
-    scheduleHideBackgroundDownloadBar();
-  } else if (downloadCancelRequested) {
-    bgDownloadLabel.textContent = `正在取消 ${activeDownloadLabel}…`;
-    bgDownloadSpeed.textContent = '取消中';
-  } else if (progress.phase === 'preparing' || progress.phase === 'installing-base') {
-    bgDownloadLabel.textContent = progress.message ?? `正在准备 ${activeDownloadLabel}…`;
-    bgDownloadSpeed.textContent = '准备中';
-  } else if (progress.phase === 'copying-overrides' || progress.phase === 'committing-instance') {
-    bgDownloadLabel.textContent = progress.message ?? `正在整理 ${activeDownloadLabel}…`;
-    bgDownloadSpeed.textContent = '整理中';
-  } else if (progress.phase === 'resolving-files') {
-    bgDownloadLabel.textContent = progress.message ?? `正在解析 ${activeDownloadLabel} 的文件…`;
-    bgDownloadSpeed.textContent = '解析中';
-  } else {
-    bgDownloadLabel.textContent = progress.message ?? `正在下载 ${activeDownloadLabel}…`;
-    const bytesPerSecond = Number(progress.bytesPerSecond);
-    bgDownloadSpeed.textContent = Number.isFinite(bytesPerSecond) && bytesPerSecond > 0
-      ? formatSpeed(bytesPerSecond)
-      : '—';
-  }
-}
-
 function updateDownloadProgress(progress) {
   lastDownloadProgress = progress;
-  updateBackgroundDownloadBar(progress);
+  if (!versionDownloadActive) return;
   if (downloadCancelRequested && progress.phase !== 'complete') return;
   downloadStatus.hidden = false;
   downloadMessage.textContent = progress.message ?? '正在准备下载…';
@@ -890,6 +861,22 @@ function updateDownloadProgress(progress) {
   downloadProgress.max = Math.max(progressTotal, 1);
   downloadProgress.value = Math.min(progressValue, downloadProgress.max);
   downloadPercent.textContent = progress.phase === 'complete' ? '100%' : `${percent}%`;
+
+  // 主页状态条同步显示实时下载进度，避免下载进行中误显"下载失败"
+  if (activeDownloadLabel) {
+    if (progress.phase === 'complete') {
+      gameStatus.textContent = `${activeDownloadLabel} 下载完成`;
+    } else if (progress.phase === 'preparing' || progress.phase === 'installing-base') {
+      gameStatus.textContent = `正在准备 ${activeDownloadLabel}`;
+    } else if (progress.phase === 'copying-overrides' || progress.phase === 'committing-instance') {
+      gameStatus.textContent = `正在整理 ${activeDownloadLabel}`;
+    } else if (progress.phase === 'resolving-files') {
+      gameStatus.textContent = `正在解析 ${activeDownloadLabel} 文件`;
+    } else {
+      gameStatus.textContent = `正在下载 ${activeDownloadLabel} · ${percent}%`;
+    }
+    statusBadge.textContent = 'DOWNLOAD';
+  }
 
   const bytesPerSecond = Number(progress.bytesPerSecond);
   if (progress.phase === 'complete') {
@@ -1159,6 +1146,10 @@ function updateVersionAction() {
     downloadVersionButton.textContent = '使用此版本';
     return;
   }
+  if (lastDownloadFailed) {
+    downloadVersionButton.textContent = '重试';
+    return;
+  }
   downloadVersionButton.textContent = loaderType === 'vanilla'
     ? '下载原版'
     : `安装 ${loaderNames[loaderType]}`;
@@ -1383,8 +1374,8 @@ async function installSelectedVersion() {
 
   versionDownloadActive = true;
   downloadCancelRequested = false;
+  lastDownloadFailed = false;
   activeDownloadLabel = loaderLabel;
-  window.clearTimeout(backgroundDownloadHideTimer);
   versionCatalog.disabled = true;
   versionSearch.disabled = true;
   versionTypeFilter.disabled = true;
@@ -1432,23 +1423,18 @@ async function installSelectedVersion() {
   } catch (error) {
     const message = readableError(error);
     const cancelled = downloadCancelRequested || message.includes('下载已取消');
-    downloadMessage.textContent = cancelled ? '下载已取消' : `下载失败：${message}`;
+    downloadMessage.textContent = cancelled
+      ? '下载已取消'
+      : `下载失败：${message}。可重新点击「重试」再次下载。`;
     downloadPercent.textContent = cancelled ? '—' : downloadPercent.textContent;
     statusBadge.textContent = cancelled ? 'READY' : 'ERROR';
-    gameStatus.textContent = cancelled ? '下载已取消' : '下载失败';
-    backgroundDownloadBar.classList.remove('is-complete');
-    if (cancelled) {
-      backgroundDownloadBar.classList.remove('is-error');
-      bgDownloadLabel.textContent = `${activeDownloadLabel} 已取消`;
-      bgDownloadPercent.textContent = '—';
-      bgDownloadSpeed.textContent = '已取消';
+    gameStatus.textContent = cancelled ? '下载已取消' : '下载失败，可重试';
+    if (!cancelled) {
+      lastDownloadFailed = true;
+      showToast(`${message}，可点击「重试」重新下载`);
     } else {
-      backgroundDownloadBar.classList.add('is-error');
-      bgDownloadLabel.textContent = `${activeDownloadLabel} 下载失败`;
-      bgDownloadSpeed.textContent = '失败';
+      showToast('已取消下载，并清理临时文件');
     }
-    scheduleHideBackgroundDownloadBar();
-    showToast(cancelled ? '已取消下载，并清理临时文件' : message);
   } finally {
     versionDownloadActive = false;
     downloadCancelRequested = false;
@@ -1574,6 +1560,17 @@ document.querySelector('#settingsButton').addEventListener('click', async () => 
   settingsDialog.showModal();
 });
 
+updateStatusBadge.addEventListener('click', () => {
+  void handleLauncherUpdateFromBadge();
+});
+
+updateStatusBadge.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    void handleLauncherUpdateFromBadge();
+  }
+});
+
 launcherUpdateButton.addEventListener('click', handleLauncherUpdate);
 updaterApi?.onState?.((state) => renderLauncherUpdate(state));
 updaterApi?.getState?.().then(renderLauncherUpdate).catch((error) => {
@@ -1586,14 +1583,6 @@ document.querySelector('#versionButton').addEventListener('click', () => {
     loadVersionCatalog();
   }
   // 下载进行中时，恢复对话框内的进度显示
-  if (versionDownloadActive && lastDownloadProgress) {
-    updateDownloadProgress(lastDownloadProgress);
-  }
-});
-
-backgroundDownloadBar.addEventListener('click', () => {
-  if (versionDialog.open) return;
-  versionDialog.showModal();
   if (versionDownloadActive && lastDownloadProgress) {
     updateDownloadProgress(lastDownloadProgress);
   }
@@ -1686,10 +1675,36 @@ javaBrowseButton.addEventListener('click', () => {
   void chooseJavaPath();
 });
 
+javaRedetectButton.addEventListener('click', async () => {
+  javaRedetectButton.disabled = true;
+  javaPathHint.textContent = '正在重新检测 Java…';
+  try {
+    const result = settingsApi?.detectJava
+      ? await settingsApi.detectJava()
+      : { available: false };
+    if (result.available) {
+      window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
+      selectedJavaPath = '';
+      selectedJavaMajorVersion = result.majorVersion;
+      renderJavaPathSetting();
+      showToast(`已检测到 Java ${result.majorVersion}`);
+    } else {
+      javaPathHint.textContent = '未检测到可用的 Java，请手动选择或安装 Java 后重试。';
+      window.localStorage.removeItem(JAVA_CHECK_SKIP_KEY);
+      showToast('未检测到 Java，可手动选择路径或安装后重新检测');
+    }
+  } catch (error) {
+    javaPathHint.textContent = `检测失败：${readableError(error)}`;
+    showToast(readableError(error));
+  } finally {
+    javaRedetectButton.disabled = false;
+  }
+});
+
 versionDialog.addEventListener('cancel', (event) => {
   if (versionDownloadActive) {
-    // 不阻止关闭：下载在后台继续，用户可通过底部状态条返回
-    showToast('下载将在后台继续，点击底部状态条可返回查看');
+    // 不阻止关闭：下载在后台继续，主页状态条会实时显示进度
+    showToast('下载将在后台继续，点击「切换版本」可返回查看');
     return;
   }
   if (versionDeleteActive) {
@@ -1711,9 +1726,9 @@ function filterVersionCatalog() {
 
 versionSearch.addEventListener('input', filterVersionCatalog);
 versionTypeFilter.addEventListener('change', filterVersionCatalog);
-versionCatalog.addEventListener('change', () => loadLoaderCatalog());
-loaderTypeSelect.addEventListener('change', () => loadLoaderCatalog());
-loaderVersionSelect.addEventListener('change', updateVersionAction);
+versionCatalog.addEventListener('change', () => { lastDownloadFailed = false; loadLoaderCatalog(); });
+loaderTypeSelect.addEventListener('change', () => { lastDownloadFailed = false; loadLoaderCatalog(); });
+loaderVersionSelect.addEventListener('change', () => { lastDownloadFailed = false; updateVersionAction(); });
 refreshVersionsButton.addEventListener('click', () => loadVersionCatalog(true));
 deleteVersionButton.addEventListener('click', deleteSelectedVersion);
 clearVersionSelectionButton.addEventListener('click', clearVersionSelection);
@@ -1868,10 +1883,9 @@ async function installDroppedModpack(filePath) {
   } catch (error) {
     const message = readableError(error);
     const cancelled = downloadCancelRequested || message.includes('下载已取消');
-    gameStatus.textContent = cancelled ? '整合包安装已取消' : '整合包安装失败';
+    gameStatus.textContent = cancelled ? '整合包安装已取消' : '整合包安装失败，可重新拖入重试';
     statusBadge.textContent = cancelled ? 'READY' : 'ERROR';
-    backgroundDownloadBar.classList.toggle('is-error', !cancelled);
-    showToast(cancelled ? '整合包安装已取消' : message);
+    showToast(cancelled ? '整合包安装已取消' : `${message}，可重新拖入整合包重试`);
   } finally {
     modpackInstallActive = false;
     versionDownloadActive = false;
@@ -1986,3 +2000,53 @@ loadAccountState();
 loadLauncherSettings();
 loadLocalProfiles().catch((error) => showToast(`版本检查失败：${readableError(error)}`));
 updateLaunchButtonState();
+
+// —— 首次启动 Java 环境检测 ——
+async function performJavaCheck() {
+  if (!settingsApi?.detectJava) return;
+  if (window.localStorage.getItem(JAVA_CHECK_SKIP_KEY) === '1') return;
+  try {
+    const result = await settingsApi.detectJava();
+    if (result.available) {
+      window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
+      return;
+    }
+  } catch {
+    // 检测失败时继续弹出引导，不阻断使用
+  }
+  if (javaCheckDialog.open) return;
+  javaCheckHint.textContent = '当前未在系统中检测到可用的 Java，请先安装后再继续使用启动器。安装完成后点击「重新检测」。';
+  javaCheckDialog.showModal();
+}
+
+javaCheckSkipButton.addEventListener('click', () => {
+  window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
+  showToast('已跳过 Java 检测，可在「启动设置」中手动选择 Java 路径');
+});
+
+javaCheckRetryButton.addEventListener('click', async () => {
+  javaCheckRetryButton.disabled = true;
+  javaCheckHint.textContent = '正在重新检测 Java…';
+  try {
+    const result = settingsApi?.detectJava
+      ? await settingsApi.detectJava()
+      : { available: false };
+    if (result.available) {
+      window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
+      javaCheckDialog.close();
+      showToast(`已检测到 Java ${result.majorVersion}`);
+    } else {
+      javaCheckHint.textContent = '仍未检测到可用的 Java，请先安装后再点击「重新检测」。';
+    }
+  } catch (error) {
+    javaCheckHint.textContent = `检测失败：${readableError(error)}`;
+  } finally {
+    javaCheckRetryButton.disabled = false;
+  }
+});
+
+javaCheckDownloadButton.addEventListener('click', () => {
+  void environment?.shell?.openExternal?.('https://www.azul.com/downloads/?package=jdk-fx');
+});
+
+performJavaCheck();

@@ -875,121 +875,6 @@ textarea {
   backdrop-filter: blur(12px);
 }
 
-.background-download-bar {
-  position: absolute;
-  right: 12px;
-  bottom: 38px;
-  left: 12px;
-  z-index: 19;
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  height: 30px;
-  padding: 0 12px;
-  border: 1px solid rgba(221, 145, 107, 0.42);
-  border-radius: 3px;
-  background: rgba(28, 20, 19, 0.88);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
-  backdrop-filter: blur(10px);
-  color: #f2ede7;
-  cursor: pointer;
-  font-size: 10px;
-  text-align: left;
-  transition: border-color 160ms ease, background 160ms ease, opacity 220ms ease;
-}
-
-.background-download-bar:hover {
-  border-color: rgba(221, 145, 107, 0.85);
-  background: rgba(38, 26, 24, 0.94);
-}
-
-.background-download-bar[hidden] {
-  display: none;
-}
-
-.background-download-bar.is-complete {
-  border-color: rgba(143, 211, 166, 0.55);
-  background: rgba(22, 32, 26, 0.92);
-}
-
-.background-download-bar.is-error {
-  border-color: rgba(224, 104, 95, 0.6);
-  background: rgba(34, 20, 20, 0.92);
-}
-
-.bg-download-symbol {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  border: 1px solid rgba(221, 145, 107, 0.55);
-  border-radius: 50%;
-  color: #ef9b6d;
-  font-size: 10px;
-}
-
-.is-complete .bg-download-symbol {
-  border-color: rgba(143, 211, 166, 0.6);
-  color: #8fd3a6;
-}
-
-.is-error .bg-download-symbol {
-  border-color: rgba(224, 104, 95, 0.6);
-  color: #efaaa4;
-}
-
-.bg-download-info {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 3px;
-  min-width: 0;
-}
-
-.bg-download-label {
-  overflow: hidden;
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bg-download-progress {
-  width: 100%;
-  height: 4px;
-  border: 0;
-  accent-color: #d6815a;
-}
-
-.bg-download-meta {
-  display: grid;
-  grid-template-columns: auto auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.bg-download-meta strong {
-  color: #e49a73;
-  font-family: Consolas, monospace;
-  font-size: 11px;
-}
-
-.is-complete .bg-download-meta strong {
-  color: #8fd3a6;
-}
-
-.is-error .bg-download-meta strong {
-  color: #efaaa4;
-}
-
-.bg-download-meta small {
-  min-width: 64px;
-  color: rgba(255, 255, 255, 0.42);
-  font-family: Consolas, monospace;
-  font-size: 8px;
-  text-align: right;
-}
-
 .footer-meta,
 .footer-actions {
   display: flex;
@@ -1015,11 +900,34 @@ textarea {
   height: 14px;
   align-items: center;
   justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: filter 140ms ease, transform 120ms ease;
 }
 
 .update-status-badge svg {
   width: 14px;
   height: 14px;
+  transform-origin: 50% 50%;
+  backface-visibility: hidden;
+}
+
+.update-status-badge:hover {
+  filter: brightness(1.08);
+}
+
+.update-status-badge:active {
+  transform: scale(0.92);
+}
+
+.update-status-badge:focus-visible {
+  outline: 2px solid rgba(239, 170, 131, 0.74);
+  outline-offset: 2px;
+}
+
+.update-status-badge.is-spinning svg {
+  animation: spin 900ms linear infinite;
+  will-change: transform;
 }
 
 .update-status-badge circle {
@@ -1934,6 +1842,22 @@ textarea {
   color: rgba(239, 170, 131, 0.7);
 }
 
+.text-link-button {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(239, 170, 131, 0.7);
+  cursor: pointer;
+  font-size: 10px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.text-link-button:hover {
+  color: #efaa83;
+}
+
 .download-setting-grid {
   display: grid;
   grid-template-columns: 0.9fr 1.1fr;
@@ -2145,6 +2069,65 @@ textarea {
 
 .cancel-download-button[hidden] {
   display: none;
+}
+
+.java-check-dialog {
+  width: min(440px, calc(100vw - 48px));
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  overflow: hidden;
+  color: #f2ede7;
+  background:
+    linear-gradient(100deg, rgba(19, 13, 15, 0.94), rgba(19, 13, 15, 0.76)),
+    var(--launcher-dialog-scene) center / cover;
+  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.42);
+}
+
+.java-check-dialog::backdrop {
+  border-radius: 10px;
+  background: rgba(8, 6, 7, 0.48);
+  clip-path: inset(0 round 10px);
+  backdrop-filter: blur(5px);
+}
+
+.java-check-dialog form {
+  padding: 26px 28px 22px;
+}
+
+.java-check-header {
+  margin-bottom: 18px;
+}
+
+.java-check-body {
+  display: grid;
+  gap: 12px;
+}
+
+.java-check-hint {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.java-check-guide {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(221, 145, 107, 0.28);
+  border-radius: 5px;
+  background: rgba(221, 145, 107, 0.08);
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.java-check-guide strong {
+  color: #efaa83;
+}
+
+.java-check-actions {
+  margin-top: 22px;
 }
 
 .toast {

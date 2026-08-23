@@ -91,23 +91,11 @@
         <button class="wallpaper-dot" type="button" data-wallpaper-index="3" aria-label="沙漠湖泊" aria-pressed="false"></button>
       </div>
 
-      <button id="backgroundDownloadBar" class="background-download-bar" type="button" hidden>
-        <span class="bg-download-symbol" aria-hidden="true">⬇</span>
-        <span class="bg-download-info">
-          <span class="bg-download-label" id="bgDownloadLabel">正在下载…</span>
-          <progress class="bg-download-progress" id="bgDownloadProgress" max="1" value="0"></progress>
-        </span>
-        <span class="bg-download-meta">
-          <strong id="bgDownloadPercent">0%</strong>
-          <small id="bgDownloadSpeed">—</small>
-        </span>
-      </button>
-
       <footer class="launcher-footer">
         <div class="footer-meta">
           <strong>忘却的旋律</strong>
           <span id="launcherVersionMeta">Launcher</span>
-          <span id="updateStatusBadge" class="update-status-badge" title="尚未检查更新">
+          <span id="updateStatusBadge" class="update-status-badge" title="尚未检查更新" role="button" tabindex="0" aria-label="检查启动器更新">
             <svg viewBox="0 0 14 14" aria-hidden="true">
               <circle cx="7" cy="7" r="6"></circle>
               <path id="updateBadgeEqual" d="M4.4 5.9h5.2M4.4 8.1h5.2"></path>
@@ -299,6 +287,7 @@
               <button id="javaBrowseButton" type="button">选择</button>
             </div>
             <p id="javaPathHint" class="java-path-hint">启动时会从 JAVA_HOME 与系统 PATH 中自动查找 Java。</p>
+            <button id="javaRedetectButton" class="text-link-button" type="button">重新检测 Java 环境</button>
           </div>
 
           <div class="setting-group">
@@ -404,6 +393,31 @@
         <strong>松开以安装整合包</strong>
         <small>支持 Modrinth .mrpack 与 CurseForge .zip</small>
       </div>
+
+      <dialog id="javaCheckDialog" class="java-check-dialog">
+        <form method="dialog">
+          <header class="dialog-header java-check-header">
+            <div>
+              <p>JAVA RUNTIME</p>
+              <h2>未检测到 Java</h2>
+            </div>
+          </header>
+          <div class="java-check-body">
+            <p id="javaCheckHint" class="java-check-hint">
+              启动 Minecraft 需要 Java 运行环境。当前未在系统中检测到可用的 Java，请先安装后再继续使用启动器。
+            </p>
+            <p class="java-check-guide">
+              推荐安装 <strong>AZUL Zulu JDK</strong>（免费）或 <strong>Oracle JDK</strong>，版本 17 或更高。
+            </p>
+          </div>
+          <footer class="dialog-actions java-check-actions">
+            <button id="javaCheckSkipButton" class="secondary-dialog-button" type="submit">跳过检测</button>
+            <button id="javaCheckRetryButton" class="secondary-dialog-button" type="button">重新检测</button>
+            <span class="dialog-action-spacer"></span>
+            <button id="javaCheckDownloadButton" class="primary-dialog-button" type="button">打开下载页面</button>
+          </footer>
+        </form>
+      </dialog>
     </div>
     <script src="renderer.js"></script>
   </body>

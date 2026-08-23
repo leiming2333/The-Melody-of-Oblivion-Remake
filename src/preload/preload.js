@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     minimize: () => ipcRenderer.send('window:minimize'),
     close: () => ipcRenderer.send('window:close')
   }),
+  shell: Object.freeze({
+    openExternal: (url) => ipcRenderer.invoke('shell:open-external', url)
+  }),
   files: Object.freeze({
     getPath: (file) => webUtils.getPathForFile(file)
   }),
@@ -44,6 +47,7 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
   settings: Object.freeze({
     getState: () => ipcRenderer.invoke('settings:get-state'),
     update: (patch) => ipcRenderer.invoke('settings:update', patch),
+    detectJava: () => ipcRenderer.invoke('settings:detect-java'),
     selectJava: () => ipcRenderer.invoke('settings:select-java')
   }),
   updater: Object.freeze({

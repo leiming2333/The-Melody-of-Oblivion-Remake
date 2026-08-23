@@ -1,9 +1,13 @@
 const path = require('node:path');
-const { javaMajorVersion } = require('../minecraft/java-runtime');
+const { detectJava, javaMajorVersion } = require('../minecraft/java-runtime');
 
 function registerSettingsIpc({ BrowserWindow, dialog, ipcMain, settingsStore }) {
   ipcMain.handle('settings:get-state', () => settingsStore.getState());
   ipcMain.handle('settings:update', (_event, patch = {}) => settingsStore.update(patch));
+  ipcMain.handle('settings:detect-java', async () => {
+    const settings = await settingsStore.getState();
+    return detectJava(settings.javaPath);
+  });
   ipcMain.handle('settings:select-java', async (event) => {
     const options = {
       title: '选择 Java 可执行文件',

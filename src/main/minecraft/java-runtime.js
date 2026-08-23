@@ -77,6 +77,16 @@ async function findJavaExecutable(explicitPath, requiredMajorVersion, probe = ja
   throw new Error('未找到可用的 Java。请先安装 Java，或在 JAVA_HOME 中配置 Java 路径');
 }
 
+async function detectJava(explicitPath, probe = javaMajorVersion) {
+  for (const candidate of javaCandidates(explicitPath)) {
+    const majorVersion = await probe(candidate);
+    if (Number.isInteger(majorVersion)) {
+      return { available: true, majorVersion, path: candidate };
+    }
+  }
+  return { available: false, majorVersion: undefined, path: undefined };
+}
+
 function buildInstallerArguments(installerPath, gameDirectory) {
   return ['-jar', installerPath, '--installClient', gameDirectory];
 }
@@ -150,6 +160,7 @@ async function runJavaInstaller({
 
 module.exports = {
   buildInstallerArguments,
+  detectJava,
   findJavaExecutable,
   javaMajorFromVersionOutput,
   javaMajorVersion,

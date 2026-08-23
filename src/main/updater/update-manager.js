@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
-const { createWriteStream } = require('node:fs');
+const { createWriteStream, createReadStream } = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { spawn } = require('node:child_process');
@@ -51,6 +52,46 @@ function pickAsset(assets, platform, arch) {
     if (hit) return hit;
   }
   return candidates[0];
+}
+
+function errorMessage(error) {
+  return error?.message ?? String(error);
+}
+
+function errorCode(error) {
+  return error?.code ?? error?.cause?.code ?? null;
+}
+
+function isNetworkError(error) {
+  const code = errorCode(error);
+  if (code && ['ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'ENETUNREACH'].includes(code)) {
+    return true;
+  }
+  const message = errorMessage(error).toLowerCase();
+  return message.includes('fetch failed') || message.includes('network') || message.includes('socket hang up');
+}
+
+function formatBytes(bytes) {
+  const value = typeof bytes === 'bigint' ? bytes : BigInt(Math.max(0, Number(bytes) || 0));
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let current = value;
+  let unitIndex = 0;
+  while (current >= 1024n && unitIndex < units.length - 1) {
+    current /= 1024n;
+    unitIndex += 1;
+  }
+  return `${current}${units[unitIndex]}`;
+}
+
+function parseSha256(text) {
+  const match = String(text ?? '').match(/[a-f0-9]{64}/i);
+  return match ? match[0].toLowerCase() : null;
+}
+
+async function sha256File(filePath) {
+  const hash = crypto.createHash('sha256');
+  await pipeline(createReadStream(filePath), hash);
+  return hash.digest('hex');
 }
 
 async function downloadToFile(url, targetPath, onProgress) {
@@ -139,6 +180,12 @@ class UpdateManager {
     return response.json();
   }
 
+  async fetchText(url) {
+    const response = await this.fetchImpl(url, { headers: { 'User-Agent': USER_AGENT } });
+    if (!response.ok) throw new Error(`下载校验文件失败（HTTP ${response.status}）`);
+    return response.text();
+  }
+
   getUpdateDirectory() {
     if (this.platform === 'win32') {
       return this.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath);
@@ -147,6 +194,52 @@ class UpdateManager {
       return this.env.APPIMAGE ? path.dirname(this.env.APPIMAGE) : path.dirname(process.execPath);
     }
     return this.app.getPath('downloads');
+  }
+
+  async assertEnoughStorage(directory, size) {
+    if (!this.fileSystem.statfs) return;
+    const required = BigInt(Math.max(0, Number(size) || 0)) + 64n * 1024n * 1024n;
+    const stats = await this.fileSystem.statfs(directory, { bigint: true });
+    const available = stats.bavail * stats.bsize;
+    if (available < required) {
+      const error = new Error(`存储空间不足，无法下载更新（可用 ${formatBytes(available)}，需要 ${formatBytes(required)}）`);
+      error.code = 'ENOSPC';
+      throw error;
+    }
+  }
+
+  checksumAssetFor(updateAsset) {
+    const name = String(updateAsset?.name ?? '');
+    const candidates = [
+      `${name}.sha256`,
+      `${name}.sha256.txt`,
+      `${name}.sha256sum`,
+      `${name}.sha256sum.txt`
+    ].map((candidate) => candidate.toLowerCase());
+    const assets = Array.isArray(this.release?.assets) ? this.release.assets : [];
+    return assets.find((asset) => (
+      typeof asset?.name === 'string'
+      && candidates.includes(asset.name.toLowerCase())
+      && typeof asset?.browser_download_url === 'string'
+    )) ?? null;
+  }
+
+  async verifyDownloadedFile(updateAsset, filePath) {
+    const expectedSize = Number(updateAsset?.size) || 0;
+    if (this.fileSystem.stat && expectedSize > 0) {
+      const stat = await this.fileSystem.stat(filePath);
+      const actual = Number(stat?.size) || 0;
+      if (actual !== expectedSize) throw new Error(`更新包校验失败：文件大小不匹配（期望 ${formatBytes(expectedSize)}，实际 ${formatBytes(actual)}）`);
+    }
+
+    const checksumAsset = this.checksumAssetFor(updateAsset);
+    if (!checksumAsset) return;
+
+    const checksumText = await this.fetchText(checksumAsset.browser_download_url);
+    const expectedSha256 = parseSha256(checksumText);
+    if (!expectedSha256) throw new Error('更新包校验失败：校验文件内容无效');
+    const actualSha256 = await sha256File(filePath);
+    if (expectedSha256 !== actualSha256) throw new Error('更新包校验失败：SHA-256 不匹配，请重试下载');
   }
 
   async check({ autoDownload = true } = {}) {
@@ -179,7 +272,10 @@ class UpdateManager {
         if (autoDownload) await this.download();
       }
     } catch (error) {
-      this.setState({ status: 'error', message: `更新检查失败：${error?.message ?? String(error)}` });
+      const message = isNetworkError(error)
+        ? '网络异常，无法检查更新，请检查网络连接'
+        : `更新检查失败：${errorMessage(error)}`;
+      this.setState({ status: 'error', message });
     }
     return this.publicState();
   }
@@ -195,6 +291,7 @@ class UpdateManager {
     this.setState({ status: 'downloading', progress: 0, message: '正在后台下载更新 0%' });
     try {
       await this.fileSystem.mkdir(directory, { recursive: true });
+      await this.assertEnoughStorage(directory, asset.size);
       await this.downloadFile(asset.browser_download_url, targetPath, (value) => {
         const downloaded = percent(value);
         this.setState({
@@ -203,6 +300,8 @@ class UpdateManager {
           message: `正在后台下载更新 ${downloaded}%`
         });
       });
+      this.setState({ status: 'verifying', progress: 100, message: '正在校验更新包…' });
+      await this.verifyDownloadedFile(asset, targetPath);
       this.updateFilePath = await this.finalizeDownload(targetPath);
       this.setState({
         status: 'downloaded',
@@ -213,7 +312,20 @@ class UpdateManager {
           : '新版本已就绪，重启启动器即可完成更新'
       });
     } catch (error) {
-      this.setState({ status: 'error', message: `更新下载失败：${error?.message ?? String(error)}` });
+      const code = errorCode(error);
+      const message = String(errorMessage(error));
+      const friendly = message.startsWith('更新包校验失败')
+        ? message
+        : code === 'ENOSPC'
+          ? '存储空间不足，无法下载更新'
+          : ['EACCES', 'EPERM', 'EROFS'].includes(code)
+            ? '没有写入权限，无法保存更新文件'
+            : isNetworkError(error)
+              ? '网络异常，无法下载更新，请检查网络连接'
+              : message.startsWith('下载更新失败')
+                ? message
+                : `更新下载失败：${message}`;
+      this.setState({ status: 'error', message: friendly });
     }
     return this.publicState();
   }
@@ -230,8 +342,10 @@ class UpdateManager {
     return currentAppImage;
   }
 
-  install() {
+  async install() {
     if (this.state.status !== 'downloaded') throw new Error('更新尚未下载完成');
+    if (!this.updateFilePath) throw new Error('更新文件路径无效，请重新下载更新');
+    if (this.fileSystem.stat) await this.fileSystem.stat(this.updateFilePath);
     if (this.state.installAction === 'open-folder') {
       this.shell?.showItemInFolder?.(this.updateFilePath);
       return { installing: true };

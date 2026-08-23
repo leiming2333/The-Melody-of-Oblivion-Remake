@@ -30,6 +30,15 @@ ipcMain.on('window:close', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
 });
 
+ipcMain.handle('shell:open-external', async (_event, url) => {
+  const target = String(url ?? '');
+  if (/^https?:\/\//i.test(target)) {
+    await shell.openExternal(target);
+    return true;
+  }
+  return false;
+});
+
 function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 760,
