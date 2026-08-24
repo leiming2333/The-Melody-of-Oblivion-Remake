@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
-[![Release](https://img.shields.io/badge/Release-v1.2.2-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
+[![Release](https://img.shields.io/badge/Release-v1.2.4-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
 </div>
 
 > [!IMPORTANT]
-> 当前仓库版本为 `1.2.2`。Windows、macOS 与 Linux 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
+> 当前仓库版本为 `1.2.4`。Windows、macOS 与 Linux 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
 
 ## 项目简介
 
