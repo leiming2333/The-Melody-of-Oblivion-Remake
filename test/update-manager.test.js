@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  GITHUB_MIRRORS,
   UpdateManager,
   isNewerVersion,
   normalizeVersion,
@@ -17,15 +18,23 @@ const releaseAssets = [
   { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-macOS-arm64.zip', browser_download_url: 'https://example.com/mac-arm64.zip', size: 1024 }
 ];
 
+const githubAssets = [
+  { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-x64.exe', browser_download_url: 'https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/v9.9.9/The-Melody-of-Oblivion-Remake-v9.9.9-Windows-x64.exe', size: 1024 }
+];
+
 function fixture({
   isPackaged = true,
   platform = 'win32',
   arch = 'x64',
   tag = 'v9.9.9',
   httpStatus = 200,
-  downloadError = null
+  downloadError = null,
+  assets = releaseAssets,
+  releaseBody = '## 新版本亮点\n- 修复了若干问题\n- 优化下载速度',
+  downloadFile = null,
+  fetchImpl = null
 } = {}) {
-  const calls = { download: [], spawn: [], quit: 0, relaunch: 0, showItemInFolder: [], updateAvailable: [] };
+  const calls = { download: [], spawn: [], quit: 0, relaunch: 0, showItemInFolder: [], updateAvailable: [], updateReady: [] };
   const manager = new UpdateManager({
     app: {
       isPackaged,
@@ -41,22 +50,24 @@ function fixture({
     env: {},
     shell: { showItemInFolder: (filePath) => calls.showItemInFolder.push(filePath) },
     onUpdateAvailable: (version, releaseUrl) => calls.updateAvailable.push({ version, releaseUrl }),
-    fetchImpl: async () => ({
+    onUpdateReady: (version, installAction) => calls.updateReady.push({ version, installAction }),
+    fetchImpl: fetchImpl ?? (async () => ({
       ok: httpStatus >= 200 && httpStatus < 300,
       status: httpStatus,
       json: async () => ({
         tag_name: tag,
+        body: releaseBody,
         html_url: 'https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/tag/v9.9.9',
-        assets: releaseAssets
+        assets
       })
-    }),
-    downloadFile: async (url, targetPath, onProgress) => {
+    })),
+    downloadFile: downloadFile ?? (async (url, targetPath, onProgress) => {
       calls.download.push({ url, targetPath });
       if (downloadError) throw downloadError;
       onProgress?.(50);
       onProgress?.(100);
       return targetPath;
-    },
+    }),
     fileSystem: {
       mkdir: async () => {},
       statfs: async () => ({ bavail: 1024n * 1024n * 8n, bsize: 1024n }),
@@ -175,4 +186,104 @@ test('macOS 下载完成后打开所在文件夹且不退出', async () => {
 test('未下载完成时不允许安装', async () => {
   const { manager } = fixture();
   await assert.rejects(() => manager.install(), /尚未下载完成/);
+});
+
+test('更新下载完成后触发就绪回调', async () => {
+  const { manager, calls } = fixture();
+  await manager.check();
+  assert.equal(calls.updateReady.length, 1);
+  assert.equal(calls.updateReady[0].version, '9.9.9');
+  assert.equal(calls.updateReady[0].installAction, 'relaunch');
+});
+
+test('同一版本重复检查只通知一次', async () => {
+  const { manager, calls } = fixture();
+  await manager.check();
+  await manager.check();
+  assert.equal(calls.updateAvailable.length, 1);
+});
+
+test('Release 接口直连失败时自动尝试镜像源', async () => {
+  const requestedUrls = [];
+  const { manager } = fixture({
+    fetchImpl: async (url) => {
+      requestedUrls.push(url);
+      if (!url.startsWith(GITHUB_MIRRORS[0])) {
+        throw new Error('fetch failed');
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          tag_name: 'v9.9.9',
+          html_url: 'https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/tag/v9.9.9',
+          assets: releaseAssets
+        })
+      };
+    }
+  });
+  const state = await manager.check();
+  assert.equal(state.status, 'downloaded');
+  assert.equal(requestedUrls[0], 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest');
+  assert.ok(requestedUrls[1].startsWith(`${GITHUB_MIRRORS[0]}/https://api.github.com/`));
+});
+
+test('官方直连下载失败时自动切换镜像源', async () => {
+  const { manager, calls } = fixture({
+    assets: githubAssets,
+    downloadFile: async (url, targetPath, onProgress) => {
+      calls.download.push({ url, targetPath });
+      if (!url.startsWith(`${GITHUB_MIRRORS[0]}/`)) {
+        throw new Error('下载更新失败（HTTP 403）');
+      }
+      onProgress?.(100);
+      return targetPath;
+    }
+  });
+  const state = await manager.check();
+  assert.equal(state.status, 'downloaded');
+  assert.equal(calls.download[0].url, githubAssets[0].browser_download_url);
+  assert.ok(calls.download.some((call) => call.url.startsWith(`${GITHUB_MIRRORS[0]}/https://github.com/`)));
+});
+
+test('所有下载源均失败时报告聚合错误', async () => {
+  const { manager, calls } = fixture({
+    assets: githubAssets,
+    downloadFile: async (url) => {
+      calls.download.push({ url });
+      throw new Error('下载更新失败（HTTP 403）');
+    }
+  });
+  const state = await manager.check();
+  assert.equal(state.status, 'error');
+  assert.match(state.message, /HTTP 403/);
+  assert.equal(calls.download.length, GITHUB_MIRRORS.length + 2);
+});
+
+test('仅提示策略下发现新版本但不自动下载', async () => {
+  const { manager, calls } = fixture();
+  const state = await manager.check({ autoDownload: false });
+  assert.equal(state.status, 'available');
+  assert.equal(state.availableVersion, '9.9.9');
+  assert.equal(calls.download.length, 0);
+  assert.equal(calls.updateReady.length, 0);
+  assert.equal(calls.updateAvailable.length, 1);
+});
+
+test('更新状态携带 Release 更新日志且超长内容被截断', async () => {
+  const { manager } = fixture();
+  const state = await manager.check({ autoDownload: false });
+  assert.equal(state.releaseNotes, '## 新版本亮点\n- 修复了若干问题\n- 优化下载速度');
+
+  const { manager: longManager } = fixture({ releaseBody: 'x'.repeat(5000) });
+  const longState = await longManager.check({ autoDownload: false });
+  assert.equal(longState.releaseNotes.length, 4001);
+  assert.ok(longState.releaseNotes.endsWith('…'));
+});
+
+test('已是最新版本时更新日志被清空', async () => {
+  const { manager } = fixture({ tag: 'v1.2.0' });
+  const state = await manager.check();
+  assert.equal(state.status, 'current');
+  assert.equal(state.releaseNotes, null);
 });

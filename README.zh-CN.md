@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
-[![Release](https://img.shields.io/badge/Release-v1.2.4-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
+[![Release](https://img.shields.io/badge/Release-v1.3.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
 </div>
 
 > [!IMPORTANT]
-> 当前仓库版本为 `1.2.4`。Windows、macOS 与 Linux 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
+> 当前仓库版本为 `1.3.0`。Windows、macOS 与 Linux 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -38,13 +38,13 @@
 - **模组加载器**：通过统一流程查询并安装 Fabric、Forge 与 NeoForge。
 - **可靠下载**：在 Mojang 官方源与 BMCLAPI 之间选择；自动模式会测速；支持任务并发、大文件 HTTP Range 分段、SHA-1 校验、取消下载及失败后切换来源重试。
 - **账户系统**：支持离线账户、Microsoft 设备代码登录及 LittleSkin Yggdrasil；可同步皮肤头像、启动前刷新在线凭据，并阻止令牌进入渲染进程。
-- **Java 管理**：匹配游戏所需的 Java 主版本，优先使用用户指定且兼容的运行时，否则通过 Adoptium API 安装 Eclipse Temurin JRE。
+- **Java 管理**：匹配游戏所需的 Java 主版本；自动扫描 JAVA_HOME、JRE_HOME、PATH、启动器旁 `.jre` 便携目录、常见安装目录（Adoptium、Microsoft、Zulu、Corretto 等）与 Windows 注册表，优先使用用户指定且兼容的运行时，否则通过 Adoptium API 安装 Eclipse Temurin JRE；设置页会直接显示当前使用的 Java 路径。
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
 - **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides 和已兼容的加载器。
-- **启动器更新**：启动时检测 GitHub Releases 新版本并后台静默下载；页脚状态圆提示更新（蓝色为最新、绿色带箭头为有新版本），发现新版本时弹窗告知，可一键重启完成更新。
+- **启动器更新**：启动时检测 GitHub Releases 新版本；提供三档更新策略（自动下载 / 仅提示 / 从不检查），发现新版本与更新就绪时发送系统通知，设置页可查看 Release 更新日志；更新包下载支持 GitHub 镜像多源自动切换与低速检测，完成后经 SHA-256 校验再安装。旧版布尔更新设置会自动迁移为新策略。
 - **桌面界面**：紧凑的固定尺寸无边框 Electron 窗口，覆盖版本、账户、下载、启动及设置流程。
 
-自动化测试目前覆盖账户、身份验证、下载、Java 选择、游戏启动、加载器、整合包、设置、本地版本管理及启动器更新等 83 个测试用例。
+自动化测试目前覆盖账户、身份验证、下载、Java 选择、游戏启动、加载器、整合包、设置、本地版本管理及启动器更新等 94 个测试用例。
 
 ## 当前限制
 

@@ -3,6 +3,7 @@ const path = require('node:path');
 
 const DOWNLOAD_CONCURRENCY_OPTIONS = Object.freeze([4, 8, 12, 16, 24, 32]);
 const DOWNLOAD_SOURCE_OPTIONS = Object.freeze(['auto', 'bmclapi', 'official']);
+const LAUNCHER_UPDATE_POLICY_OPTIONS = Object.freeze(['auto', 'notify', 'off']);
 const DEFAULT_SETTINGS = Object.freeze({
   version: 3,
   javaPath: '',
@@ -11,8 +12,15 @@ const DEFAULT_SETTINGS = Object.freeze({
   downloadConcurrency: 32,
   memoryMb: 4096,
   autoUpdate: true,
-  launcherAutoUpdate: true
+  launcherUpdatePolicy: 'auto'
 });
+
+// 旧版布尔设置 launcherAutoUpdate 迁移为三档策略
+function normalizeLauncherUpdatePolicy(value, legacyBoolean) {
+  if (LAUNCHER_UPDATE_POLICY_OPTIONS.includes(value)) return value;
+  if (typeof legacyBoolean === 'boolean') return legacyBoolean ? 'auto' : 'off';
+  return DEFAULT_SETTINGS.launcherUpdatePolicy;
+}
 
 function normalizeSettings(value = {}) {
   const requestedConcurrency = Number(value.downloadConcurrency);
@@ -38,9 +46,7 @@ function normalizeSettings(value = {}) {
     autoUpdate: typeof value.autoUpdate === 'boolean'
       ? value.autoUpdate
       : DEFAULT_SETTINGS.autoUpdate,
-    launcherAutoUpdate: typeof value.launcherAutoUpdate === 'boolean'
-      ? value.launcherAutoUpdate
-      : DEFAULT_SETTINGS.launcherAutoUpdate
+    launcherUpdatePolicy: normalizeLauncherUpdatePolicy(value.launcherUpdatePolicy, value.launcherAutoUpdate)
   };
 }
 
@@ -93,6 +99,7 @@ module.exports = {
   DEFAULT_SETTINGS,
   DOWNLOAD_CONCURRENCY_OPTIONS,
   DOWNLOAD_SOURCE_OPTIONS,
+  LAUNCHER_UPDATE_POLICY_OPTIONS,
   SettingsStore,
   normalizeSettings
 };

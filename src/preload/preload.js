@@ -59,6 +59,11 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
       const listener = (_event, state) => callback(state);
       ipcRenderer.on('updater:state', listener);
       return () => ipcRenderer.removeListener('updater:state', listener);
+    },
+    onRequestShowSettings: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on('updater:show-settings', listener);
+      return () => ipcRenderer.removeListener('updater:show-settings', listener);
     }
   }),
   accounts: Object.freeze({

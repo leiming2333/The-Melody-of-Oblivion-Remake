@@ -11,6 +11,20 @@ const LATEST_RELEASE_URL = 'https://api.github.com/repos/leiming2333/The-Melody-
 const PLATFORM_KEYWORDS = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux: 'Linux' });
 const USER_AGENT = 'melody-of-oblivion-launcher-updater';
 
+// GitHub 加速镜像（参考 HMCL 多下载源思路）：直连过慢或失败时按序切换
+const GITHUB_MIRRORS = Object.freeze([
+  'https://ghproxy.net',
+  'https://gh-proxy.com',
+  'https://ghfast.top',
+  'https://github.moeyy.xyz'
+]);
+const API_TIMEOUT_MS = 15000;
+const DOWNLOAD_CONNECT_TIMEOUT_MS = 10000;
+const DOWNLOAD_STALL_TIMEOUT_MS = 15000;
+const DOWNLOAD_MIN_SPEED_BYTES_PER_SEC = 100 * 1024;
+const DOWNLOAD_MIN_SPEED_GRACE_MS = 6000;
+const DOWNLOAD_SPEED_WINDOW_MS = 3000;
+
 function percent(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : 0;
@@ -54,6 +68,19 @@ function pickAsset(assets, platform, arch) {
   return candidates[0];
 }
 
+function isGithubUrl(url) {
+  return /^https:\/\/(github\.com|api\.github\.com)\//i.test(String(url));
+}
+
+function mirrorUrls(url) {
+  if (!isGithubUrl(url)) return [];
+  return GITHUB_MIRRORS.map((prefix) => `${prefix}/${url}`);
+}
+
+function isAbortError(error) {
+  return error?.name === 'AbortError' || error?.code === 'ABORT_ERR';
+}
+
 function errorMessage(error) {
   return error?.message ?? String(error);
 }
@@ -67,6 +94,7 @@ function isNetworkError(error) {
   if (code && ['ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'ENETUNREACH'].includes(code)) {
     return true;
   }
+  if (isAbortError(error)) return true;
   const message = errorMessage(error).toLowerCase();
   return message.includes('fetch failed') || message.includes('network') || message.includes('socket hang up');
 }
@@ -94,20 +122,78 @@ async function sha256File(filePath) {
   return hash.digest('hex');
 }
 
-async function downloadToFile(url, targetPath, onProgress) {
-  const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
-  if (!response.ok || !response.body) {
-    throw new Error(`下载更新失败（HTTP ${response.status}）`);
-  }
-  const total = Number(response.headers.get('content-length')) || 0;
+async function downloadToFile(url, targetPath, onProgress, { enforceMinSpeed = true } = {}) {
+  const controller = new AbortController();
+  const connectTimeout = AbortSignal.timeout(DOWNLOAD_CONNECT_TIMEOUT_MS);
+  const signal = AbortSignal.any([controller.signal, connectTimeout]);
+  const startedAt = Date.now();
   let loaded = 0;
-  const source = Readable.fromWeb(response.body);
-  source.on('data', (chunk) => {
-    loaded += chunk.length;
-    onProgress?.(total > 0 ? (loaded / total) * 100 : 0);
-  });
-  await pipeline(source, createWriteStream(targetPath));
-  return targetPath;
+  let windowStartedAt = startedAt;
+  let windowLoadedBytes = 0;
+  let lastByteAt = startedAt;
+  let speedAborted = false;
+  let stallAborted = false;
+  let monitor = null;
+
+  try {
+    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal });
+    if (!response.ok || !response.body) {
+      throw new Error(`下载更新失败（HTTP ${response.status}）`);
+    }
+    const total = Number(response.headers.get('content-length')) || 0;
+    const source = Readable.fromWeb(response.body);
+    monitor = setInterval(() => {
+      const now = Date.now();
+      const windowBytes = loaded - windowLoadedBytes;
+      if (windowBytes > 0) {
+        lastByteAt = now;
+      }
+      if (now - lastByteAt >= DOWNLOAD_STALL_TIMEOUT_MS) {
+        stallAborted = true;
+        controller.abort();
+        return;
+      }
+      const windowMs = now - windowStartedAt;
+      if (windowMs < DOWNLOAD_SPEED_WINDOW_MS) return;
+      const bytesPerSecond = (windowBytes * 1000) / windowMs;
+      if (
+        enforceMinSpeed
+        && now - startedAt >= DOWNLOAD_MIN_SPEED_GRACE_MS
+        && bytesPerSecond < DOWNLOAD_MIN_SPEED_BYTES_PER_SEC
+      ) {
+        speedAborted = true;
+        controller.abort();
+        return;
+      }
+      windowStartedAt = now;
+      windowLoadedBytes = loaded;
+    }, 1000);
+    source.on('data', (chunk) => {
+      loaded += chunk.length;
+      onProgress?.(total > 0 ? (loaded / total) * 100 : 0);
+    });
+    await pipeline(source, createWriteStream(targetPath));
+    return targetPath;
+  } catch (error) {
+    if (speedAborted) {
+      const slowError = new Error('当前下载源速度过慢');
+      slowError.code = 'SLOW_SOURCE';
+      throw slowError;
+    }
+    if (stallAborted) {
+      const stallError = new Error('下载超时：服务器长时间未响应');
+      stallError.code = 'STALL_SOURCE';
+      throw stallError;
+    }
+    if (connectTimeout.aborted && isAbortError(error)) {
+      const timeoutError = new Error('连接下载源超时');
+      timeoutError.code = 'CONNECT_TIMEOUT';
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    if (monitor) clearInterval(monitor);
+  }
 }
 
 class UpdateManager {
@@ -121,6 +207,7 @@ class UpdateManager {
     spawnProcess = spawn,
     shell = null,
     onUpdateAvailable = null,
+    onUpdateReady = null,
     platform = process.platform,
     arch = process.arch,
     env = process.env
@@ -134,16 +221,19 @@ class UpdateManager {
     this.spawnProcess = spawnProcess;
     this.shell = shell;
     this.onUpdateAvailable = onUpdateAvailable;
+    this.onUpdateReady = onUpdateReady;
     this.platform = platform;
     this.arch = arch;
     this.env = env;
     this.started = false;
     this.release = null;
     this.updateFilePath = null;
+    this.notifiedVersion = null;
     this.state = {
       status: app?.isPackaged ? 'idle' : 'unavailable',
       currentVersion: app?.getVersion?.() ?? '0.0.0',
       availableVersion: null,
+      releaseNotes: null,
       progress: 0,
       installAction: null,
       message: app?.isPackaged ? '尚未检查更新' : '开发模式不检查更新'
@@ -173,17 +263,39 @@ class UpdateManager {
   }
 
   async fetchLatestRelease() {
-    const response = await this.fetchImpl(LATEST_RELEASE_URL, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': USER_AGENT }
-    });
-    if (!response.ok) throw new Error(`获取 Release 信息失败（HTTP ${response.status}）`);
-    return response.json();
+    const candidates = [LATEST_RELEASE_URL, ...mirrorUrls(LATEST_RELEASE_URL)];
+    let lastError = null;
+    for (const url of candidates) {
+      try {
+        const response = await this.fetchImpl(url, {
+          headers: { Accept: 'application/vnd.github+json', 'User-Agent': USER_AGENT },
+          signal: AbortSignal.timeout(API_TIMEOUT_MS)
+        });
+        if (!response.ok) throw new Error(`获取 Release 信息失败（HTTP ${response.status}）`);
+        return await response.json();
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError ?? new Error('获取 Release 信息失败');
   }
 
   async fetchText(url) {
-    const response = await this.fetchImpl(url, { headers: { 'User-Agent': USER_AGENT } });
-    if (!response.ok) throw new Error(`下载校验文件失败（HTTP ${response.status}）`);
-    return response.text();
+    const candidates = [url, ...mirrorUrls(url)];
+    let lastError = null;
+    for (const candidate of candidates) {
+      try {
+        const response = await this.fetchImpl(candidate, {
+          headers: { 'User-Agent': USER_AGENT },
+          signal: AbortSignal.timeout(API_TIMEOUT_MS)
+        });
+        if (!response.ok) throw new Error(`下载校验文件失败（HTTP ${response.status}）`);
+        return await response.text();
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError ?? new Error('下载校验文件失败');
   }
 
   getUpdateDirectory() {
@@ -257,6 +369,7 @@ class UpdateManager {
         this.setState({
           status: 'current',
           availableVersion: null,
+          releaseNotes: null,
           progress: 100,
           message: `已是最新版本 ${this.state.currentVersion}`
         });
@@ -265,10 +378,14 @@ class UpdateManager {
         this.setState({
           status: 'available',
           availableVersion: version,
+          releaseNotes: this.sanitizeReleaseNotes(release?.body),
           progress: 0,
           message: `发现新版本 ${version}`
         });
-        this.onUpdateAvailable?.(version, release?.html_url ?? null);
+        if (this.notifiedVersion !== version) {
+          this.notifiedVersion = version;
+          this.onUpdateAvailable?.(version, release?.html_url ?? null, autoDownload);
+        }
         if (autoDownload) await this.download();
       }
     } catch (error) {
@@ -278,6 +395,40 @@ class UpdateManager {
       this.setState({ status: 'error', message });
     }
     return this.publicState();
+  }
+
+  // Release 正文仅保留安全子集，避免渲染层引入 HTML 注入风险
+  sanitizeReleaseNotes(body) {
+    const text = String(body ?? '').trim();
+    if (!text) return null;
+    const limited = text.length > 4000 ? `${text.slice(0, 4000)}…` : text;
+    return limited.replace(/\u0000/g, '');
+  }
+
+  downloadCandidates(assetUrl) {
+    if (!isGithubUrl(assetUrl)) return [{ url: assetUrl, enforceMinSpeed: false }];
+    return [
+      { url: assetUrl, enforceMinSpeed: true },
+      ...mirrorUrls(assetUrl).map((url) => ({ url, enforceMinSpeed: true })),
+      // 所有镜像均不可用时，最后回退官方直连并放宽限速
+      { url: assetUrl, enforceMinSpeed: false }
+    ];
+  }
+
+  async downloadUpdateFile(assetUrl, targetPath, onProgress) {
+    const candidates = this.downloadCandidates(assetUrl);
+    let lastError = null;
+    for (const candidate of candidates) {
+      try {
+        await this.downloadFile(candidate.url, targetPath, onProgress, {
+          enforceMinSpeed: candidate.enforceMinSpeed
+        });
+        return candidate.url;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError ?? new Error('下载更新失败');
   }
 
   async download() {
@@ -292,7 +443,7 @@ class UpdateManager {
     try {
       await this.fileSystem.mkdir(directory, { recursive: true });
       await this.assertEnoughStorage(directory, asset.size);
-      await this.downloadFile(asset.browser_download_url, targetPath, (value) => {
+      await this.downloadUpdateFile(asset.browser_download_url, targetPath, (value) => {
         const downloaded = percent(value);
         this.setState({
           status: 'downloading',
@@ -311,6 +462,7 @@ class UpdateManager {
           ? '新版本已下载，请解压压缩包并替换旧版本'
           : '新版本已就绪，重启启动器即可完成更新'
       });
+      this.onUpdateReady?.(this.state.availableVersion, this.state.installAction);
     } catch (error) {
       const code = errorCode(error);
       const message = String(errorMessage(error));
@@ -320,11 +472,13 @@ class UpdateManager {
           ? '存储空间不足，无法下载更新'
           : ['EACCES', 'EPERM', 'EROFS'].includes(code)
             ? '没有写入权限，无法保存更新文件'
-            : isNetworkError(error)
-              ? '网络异常，无法下载更新，请检查网络连接'
-              : message.startsWith('下载更新失败')
-                ? message
-                : `更新下载失败：${message}`;
+            : ['SLOW_SOURCE', 'STALL_SOURCE', 'CONNECT_TIMEOUT'].includes(code)
+              ? '所有下载源均不可用或速度过慢，请检查网络后重试'
+              : isNetworkError(error)
+                ? '网络异常，无法下载更新，请检查网络连接'
+                : message.startsWith('下载更新失败')
+                  ? message
+                  : `更新下载失败：${message}`;
       this.setState({ status: 'error', message: friendly });
     }
     return this.publicState();
@@ -362,6 +516,7 @@ class UpdateManager {
 }
 
 module.exports = {
+  GITHUB_MIRRORS,
   UPDATE_CHANNEL,
   UpdateManager,
   downloadToFile,

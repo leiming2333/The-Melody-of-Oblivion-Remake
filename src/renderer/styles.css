@@ -1832,16 +1832,6 @@ textarea {
   font-size: 10px;
 }
 
-.setting-group .java-path-hint {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.setting-group .java-path-hint.is-custom {
-  color: rgba(239, 170, 131, 0.7);
-}
-
 .text-link-button {
   margin-top: 6px;
   padding: 0;
@@ -1997,8 +1987,24 @@ textarea {
   opacity: 0.48;
 }
 
-.launcher-update-check {
-  margin-top: 0;
+.launcher-update-notes-setting {
+  margin-top: 10px;
+}
+
+.launcher-update-notes {
+  max-height: 180px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid rgba(221, 145, 107, 0.28);
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(20, 17, 18, 0.48);
+  font-size: 11px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Microsoft YaHei UI", sans-serif;
 }
 
 .dialog-actions {

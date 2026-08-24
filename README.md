@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
-[![Release](https://img.shields.io/badge/Release-v1.2.4-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
+[![Release](https://img.shields.io/badge/Release-v1.3.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
 </div>
 
 > [!IMPORTANT]
-> This repository is at version `1.2.4`. Downloads for Windows, macOS, and Linux are published through GitHub Releases. Back up your Minecraft data before testing a new build.
+> This repository is at version `1.3.0`. Downloads for Windows, macOS, and Linux are published through GitHub Releases. Back up your Minecraft data before testing a new build.
 
 ## About this project
 
@@ -38,13 +38,13 @@ The current repository starts a new implementation; its version numbers and code
 - **Mod loaders** — discover and install Fabric, Forge, and NeoForge through a shared workflow.
 - **Resilient downloads** — choose between Mojang-hosted endpoints and BMCLAPI, probe sources in automatic mode, use configurable task concurrency, split large files with HTTP Range requests, verify SHA-1 metadata, cancel active work, and retry alternate sources.
 - **Accounts** — create offline profiles, sign in with a Microsoft device code, or use LittleSkin Yggdrasil; sync skin avatars, refresh online credentials before launch, and keep tokens out of the renderer process.
-- **Java management** — match the Java major version required by the selected game, prefer an explicit compatible runtime, and otherwise provision an Eclipse Temurin JRE through the Adoptium API.
+- **Java management** — match the Java major version required by the selected game; automatically scan `JAVA_HOME`, `JRE_HOME`, `PATH`, a `.jre` folder next to the launcher, common install directories (Adoptium, Microsoft, Zulu, Corretto, …), and the Windows registry; prefer an explicit compatible runtime, otherwise provision an Eclipse Temurin JRE through the Adoptium API. The settings page shows the Java path currently in use.
 - **Launch core** — resolve inherited version metadata, apply platform rules, assemble arguments and classpaths, extract native libraries safely, launch the Java process, and report its status. LittleSkin accounts automatically provision a SHA-256-verified authlib-injector.
 - **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instance directories, including overrides and supported loaders.
-- **Launcher updates** — checks GitHub Releases on startup and downloads updates silently in the background; a footer status dot signals updates (blue = up to date, green arrow = new version), a dialog announces new releases, and one click restarts into the new build.
+- **Launcher updates** — checks GitHub Releases on startup with a three-level policy (auto-download / notify only / never); system notifications announce new versions and ready updates; release notes are shown in settings; update downloads fall back across GitHub mirrors with slow-speed detection and are SHA-256 verified before install. Legacy boolean update settings migrate automatically.
 - **Desktop UI** — a compact fixed-size frameless Electron window with version, account, download, launch, and settings flows.
 
-The automated test suite currently covers 83 cases across accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, local version management, and launcher updates.
+The automated test suite currently covers 94 cases across accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, local version management, and launcher updates.
 
 ## Current limitations
 

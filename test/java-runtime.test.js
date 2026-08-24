@@ -4,6 +4,8 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const {
+  detectJava,
+  discoverJavaCandidates,
   findJavaExecutable,
   javaMajorFromVersionOutput
 } = require('../src/main/minecraft/java-runtime');
@@ -26,16 +28,89 @@ test('启动器只选择游戏要求的 Java 主版本', async () => {
     ['C:/Java/jdk-21/bin/java.exe', 21],
     [executableName, 25]
   ]);
+  const probe = async (candidate) => versions.get(candidate);
+  const discover = async (explicitPath) => [explicitPath, executableName];
   const executable = await findJavaExecutable(
     'C:/Java/jdk-21/bin/java.exe',
     25,
-    async (candidate) => versions.get(candidate)
+    probe,
+    discover
   );
   assert.equal(executable, executableName);
   await assert.rejects(
-    findJavaExecutable('C:/Java/jdk-21/bin/java.exe', 17, async (candidate) => versions.get(candidate)),
+    findJavaExecutable('C:/Java/jdk-21/bin/java.exe', 17, probe, discover),
     /需要 Java 17.*检测到 Java 21、25/
   );
+});
+
+test('discoverJavaCandidates 按优先级扫描各来源', async () => {
+  const env = {
+    JAVA_HOME: path.join('C:', 'Dev', 'jdk-25'),
+    JRE_HOME: path.join('C:', 'Dev', 'jre-8'),
+    PATH: [path.join('C:', 'Windows', 'system32'), path.join('C:', 'Tools', 'bin')].join(path.delimiter),
+    ProgramFiles: path.join('C:', 'Program Files'),
+    'ProgramFiles(x86)': path.join('C:', 'Program Files (x86)'),
+    LOCALAPPDATA: path.join('C:', 'Users', 'dev', 'AppData', 'Local'),
+    USERPROFILE: path.join('C:', 'Users', 'dev')
+  };
+  const javaDirectory = path.join(env.ProgramFiles, 'Java');
+  const launcherDirectory = path.join('D:', 'Launcher');
+  const directories = new Map([
+    [javaDirectory, ['jdk-17', 'jdk-21', 'notes.txt']]
+  ]);
+  const existing = new Set([
+    path.join(env.JAVA_HOME, 'bin', 'java.exe'),
+    path.join(env.JRE_HOME, 'bin', 'java.exe'),
+    path.join(launcherDirectory, '.jre', 'bin', 'java.exe'),
+    path.join('C:', 'Tools', 'bin', 'java.exe'),
+    path.join(javaDirectory, 'jdk-17', 'bin', 'java.exe'),
+    path.join(javaDirectory, 'jdk-21', 'jre', 'bin', 'java.exe'),
+    path.join('C:', 'Registry', 'jdk-11', 'bin', 'java.exe')
+  ]);
+  const fileSystem = {
+    readdir: async (dir) => (directories.get(dir) ?? []).map((name) => ({
+      name,
+      isDirectory: () => !name.endsWith('.txt')
+    })),
+    access: async (candidate) => {
+      if (!existing.has(candidate)) throw new Error('ENOENT');
+    }
+  };
+  const registryQuery = async () => [path.join('C:', 'Registry', 'jdk-11')];
+  const explicit = path.join('C:', 'Explicit', 'java.exe');
+
+  const candidates = await discoverJavaCandidates(explicit, {
+    platform: 'win32',
+    env,
+    fileSystem,
+    registryQuery,
+    launcherDirectory
+  });
+
+  assert.equal(candidates[0], explicit);
+  assert.equal(candidates[1], path.join(env.JAVA_HOME, 'bin', 'java.exe'));
+  assert.equal(candidates[2], path.join(env.JRE_HOME, 'bin', 'java.exe'));
+  assert.equal(candidates[3], path.join(launcherDirectory, '.jre', 'bin', 'java.exe'));
+  assert.ok(candidates.includes(path.join('C:', 'Tools', 'bin', 'java.exe')));
+  assert.ok(candidates.includes(path.join(javaDirectory, 'jdk-17', 'bin', 'java.exe')));
+  assert.ok(candidates.includes(path.join(javaDirectory, 'jdk-21', 'jre', 'bin', 'java.exe')));
+  assert.ok(candidates.includes(path.join('C:', 'Registry', 'jdk-11', 'bin', 'java.exe')));
+  assert.equal(candidates.at(-1), 'java.exe');
+  assert.ok(!candidates.includes(path.join('C:', 'Windows', 'system32', 'java.exe')));
+});
+
+test('detectJava 探测所有候选并返回版本最高的', async () => {
+  const versions = new Map([
+    [path.join('C:', 'old', 'java.exe'), 8],
+    [path.join('C:', 'new', 'java.exe'), 21],
+    [path.join('C:', 'mid', 'java.exe'), 17]
+  ]);
+  const discover = async () => [...versions.keys()];
+  const probe = async (candidate) => versions.get(candidate);
+  const result = await detectJava(undefined, probe, discover);
+  assert.equal(result.available, true);
+  assert.equal(result.majorVersion, 21);
+  assert.equal(result.path, path.join('C:', 'new', 'java.exe'));
 });
 
 test('可以从 Adoptium 元数据选择当前平台的 Java 25 JRE', () => {

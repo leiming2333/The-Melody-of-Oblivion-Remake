@@ -1,5 +1,5 @@
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, safeStorage, shell } = require('electron');
 const { registerAccountIpc } = require('./accounts/ipc');
 const { AccountStore } = require('./accounts/account-store');
 const { MicrosoftAuthManager } = require('./accounts/microsoft-auth');
@@ -38,6 +38,29 @@ ipcMain.handle('shell:open-external', async (_event, url) => {
   }
   return false;
 });
+
+function focusLauncherUpdateSettings() {
+  const parentWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
+  if (!parentWindow) return;
+  if (parentWindow.isMinimized()) parentWindow.restore();
+  parentWindow.show?.();
+  parentWindow.focus?.();
+  parentWindow.webContents.send('updater:show-settings');
+}
+
+function showLauncherUpdateNotification(title, body) {
+  if (typeof Notification !== 'function' || !Notification.isSupported()) {
+    return false;
+  }
+  try {
+    const notification = new Notification({ title, body, icon: appIconPath });
+    notification.on('click', () => focusLauncherUpdateSettings());
+    notification.show();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -153,13 +176,21 @@ app.whenReady().then(async () => {
     BrowserWindow,
     ipcMain,
     shell,
-    onUpdateAvailable: (version, releaseUrl) => {
+    onUpdateAvailable: (version, releaseUrl, autoDownload) => {
+      const detail = autoDownload
+        ? `新版本 v${version} 已发布，启动器正在后台下载更新。`
+        : `新版本 v${version} 已发布，可在「启动器设置」中查看更新日志并下载。`;
+      if (showLauncherUpdateNotification('发现启动器新版本', detail)) {
+        return;
+      }
       const parentWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
       dialog.showMessageBox(parentWindow, {
         type: 'info',
         title: '启动器更新',
         message: `发现新版本 v${version}`,
-        detail: '启动器已在后台下载更新，完成后可在「启动器设置」中重启安装。',
+        detail: autoDownload
+          ? '启动器已在后台下载更新，完成后可在「启动器设置」中重启安装。'
+          : '可在「启动器设置」中查看更新日志并手动下载安装。',
         buttons: ['稍后提醒', '查看发布页'],
         defaultId: 0,
         cancelId: 0,
@@ -169,14 +200,39 @@ app.whenReady().then(async () => {
           shell.openExternal(releaseUrl);
         }
       }).catch(() => {});
+    },
+    onUpdateReady: (version, installAction) => {
+      const detail = installAction === 'open-folder'
+        ? `新版本 v${version} 已下载完成，请解压压缩包并替换旧版本。`
+        : `新版本 v${version} 已下载完成，重启启动器即可完成更新。`;
+      if (showLauncherUpdateNotification('启动器更新已就绪', detail)) {
+        return;
+      }
+      const parentWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
+      dialog.showMessageBox(parentWindow, {
+        type: 'info',
+        title: '启动器更新',
+        message: '更新已就绪',
+        detail,
+        buttons: ['稍后提醒', '打开设置'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      }).then(({ response }) => {
+        if (response === 1) {
+          focusLauncherUpdateSettings();
+        }
+      }).catch(() => {});
     }
   });
   updateManager.start();
   createWindow();
 
   const settings = await settingsStore.getState();
-  if (settings.launcherAutoUpdate) {
-    setTimeout(() => void updateManager.check(), 5000);
+  if (settings.launcherUpdatePolicy !== 'off') {
+    setTimeout(() => {
+      void updateManager.check({ autoDownload: settings.launcherUpdatePolicy === 'auto' });
+    }, 5000);
   }
 
   app.on('activate', () => {

@@ -35,6 +35,19 @@ test('游戏目录默认使用启动器本地目录且只接受受支持的模�
   assert.equal(normalizeSettings({ gameDirectoryMode: 'other' }).gameDirectoryMode, 'local');
 });
 
+test('更新策略仅接受三档取值并迁移旧版布尔设置', () => {
+  assert.equal(normalizeSettings({ launcherUpdatePolicy: 'auto' }).launcherUpdatePolicy, 'auto');
+  assert.equal(normalizeSettings({ launcherUpdatePolicy: 'notify' }).launcherUpdatePolicy, 'notify');
+  assert.equal(normalizeSettings({ launcherUpdatePolicy: 'off' }).launcherUpdatePolicy, 'off');
+  assert.equal(normalizeSettings({ launcherUpdatePolicy: 'invalid' }).launcherUpdatePolicy, 'auto');
+  // 旧版 launcherAutoUpdate 布尔值迁移：true → auto，false → off
+  assert.equal(normalizeSettings({ launcherAutoUpdate: true }).launcherUpdatePolicy, 'auto');
+  assert.equal(normalizeSettings({ launcherAutoUpdate: false }).launcherUpdatePolicy, 'off');
+  // 显式策略优先于旧布尔值
+  assert.equal(normalizeSettings({ launcherUpdatePolicy: 'notify', launcherAutoUpdate: false }).launcherUpdatePolicy, 'notify');
+  assert.equal(normalizeSettings().launcherUpdatePolicy, DEFAULT_SETTINGS.launcherUpdatePolicy);
+});
+
 test('启动设置可以持久化并自动规范内存值', async (t) => {
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-settings-test-'));
   t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
@@ -47,7 +60,7 @@ test('启动设置可以持久化并自动规范内存值', async (t) => {
     downloadConcurrency: 12,
     memoryMb: 5000,
     autoUpdate: false,
-    launcherAutoUpdate: false
+    launcherUpdatePolicy: 'notify'
   });
   assert.deepEqual(saved, {
     version: 3,
@@ -57,7 +70,7 @@ test('启动设置可以持久化并自动规范内存值', async (t) => {
     downloadConcurrency: 12,
     memoryMb: 5120,
     autoUpdate: false,
-    launcherAutoUpdate: false
+    launcherUpdatePolicy: 'notify'
   });
   assert.deepEqual(await new SettingsStore(filePath).getState(), saved);
 });

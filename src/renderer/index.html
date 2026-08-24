@@ -286,7 +286,6 @@
               </select>
               <button id="javaBrowseButton" type="button">选择</button>
             </div>
-            <p id="javaPathHint" class="java-path-hint">启动时会从 JAVA_HOME 与系统 PATH 中自动查找 Java。</p>
             <button id="javaRedetectButton" class="text-link-button" type="button">重新检测 Java 环境</button>
           </div>
 
@@ -348,11 +347,19 @@
             <button id="launcherUpdateButton" type="button">检查更新</button>
           </div>
 
-          <label class="check-setting launcher-update-check">
-            <input id="launcherAutoUpdateCheck" type="checkbox" checked />
-            <span aria-hidden="true"></span>
-            启动时自动检查启动器更新
-          </label>
+          <div class="setting-group launcher-update-policy-setting">
+            <label for="launcherUpdatePolicySelect">更新策略</label>
+            <select id="launcherUpdatePolicySelect">
+              <option value="auto">自动检查并后台下载更新</option>
+              <option value="notify">仅检查并提示，不自动下载</option>
+              <option value="off">从不检查更新</option>
+            </select>
+          </div>
+
+          <div class="setting-group launcher-update-notes-setting" id="launcherUpdateNotesSetting" hidden>
+            <label>更新日志</label>
+            <pre id="launcherUpdateNotes" class="launcher-update-notes"></pre>
+          </div>
 
           <footer class="dialog-actions">
             <button class="secondary-dialog-button" value="cancel" type="submit">取消</button>

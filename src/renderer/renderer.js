@@ -79,8 +79,9 @@ const downloadEta = document.querySelector('#downloadEta');
 const settingsDialog = document.querySelector('#settingsDialog');
 const launcherApp = document.querySelector('.launcher-app');
 const javaSelect = document.querySelector('#javaSelect');
+const javaAutoOption = javaSelect?.querySelector('option[value="auto"]');
+const javaCustomOption = javaSelect?.querySelector('option[value="custom"]');
 const javaBrowseButton = document.querySelector('#javaBrowseButton');
-const javaPathHint = document.querySelector('#javaPathHint');
 const javaRedetectButton = document.querySelector('#javaRedetectButton');
 const gameDirectoryModeSelect = document.querySelector('#gameDirectoryModeSelect');
 const gameDirectoryHint = document.querySelector('#gameDirectoryHint');
@@ -89,7 +90,9 @@ const memoryValue = document.querySelector('#memoryValue');
 const downloadConcurrencySelect = document.querySelector('#downloadConcurrencySelect');
 const downloadSourceSelect = document.querySelector('#downloadSourceSelect');
 const autoUpdateCheck = document.querySelector('#autoUpdateCheck');
-const launcherAutoUpdateCheck = document.querySelector('#launcherAutoUpdateCheck');
+const launcherUpdatePolicySelect = document.querySelector('#launcherUpdatePolicySelect');
+const launcherUpdateNotesSetting = document.querySelector('#launcherUpdateNotesSetting');
+const launcherUpdateNotes = document.querySelector('#launcherUpdateNotes');
 const launcherUpdateStatus = document.querySelector('#launcherUpdateStatus');
 const launcherUpdateProgress = document.querySelector('#launcherUpdateProgress');
 const launcherUpdateButton = document.querySelector('#launcherUpdateButton');
@@ -141,11 +144,13 @@ let launcherSettings = {
   downloadConcurrency: 16,
   memoryMb: 4096,
   autoUpdate: true,
-  launcherAutoUpdate: true
+  launcherUpdatePolicy: 'auto'
 };
 let launcherSettingsLoaded = false;
 let selectedJavaPath = '';
 let selectedJavaMajorVersion;
+let autoJavaDetection = null;
+let autoJavaDetectionPromise = null;
 let microsoftLoginSessionId;
 let microsoftLoginActive = false;
 let littleSkinLoginActive = false;
@@ -173,7 +178,8 @@ function renderLauncherUpdate(state = launcherUpdateState) {
   if (state.currentVersion) {
     launcherVersionMeta.textContent = `Launcher ${state.currentVersion}`;
   }
-  const hasUpdate = ['available', 'downloading', 'verifying', 'downloaded'].includes(state.status);
+  const hasUpdate = Boolean(state.availableVersion)
+    || ['available', 'downloading', 'verifying', 'downloaded'].includes(state.status);
   updateStatusBadge.classList.toggle('has-update', hasUpdate);
   updateStatusBadge.title = state.message ?? '尚未检查更新';
   updateBadgeArrow.hidden = !hasUpdate;
@@ -194,6 +200,21 @@ function renderLauncherUpdate(state = launcherUpdateState) {
         : state.status === 'downloading'
           ? `${state.progress ?? 0}%`
           : '检查更新';
+  renderLauncherUpdateNotes(state);
+}
+
+// 有新版本且 Release 带正文时展示更新日志（文本渲染，不含 HTML）
+function renderLauncherUpdateNotes(state) {
+  if (!launcherUpdateNotesSetting || !launcherUpdateNotes) return;
+  const notes = typeof state.releaseNotes === 'string' && state.releaseNotes.trim()
+    ? state.releaseNotes
+    : '';
+  const visible = Boolean(notes)
+    && ['available', 'downloading', 'verifying', 'downloaded', 'error'].includes(state.status);
+  launcherUpdateNotesSetting.hidden = !visible;
+  if (visible) {
+    launcherUpdateNotes.textContent = notes;
+  }
 }
 
 async function handleLauncherUpdate() {
@@ -210,7 +231,7 @@ async function handleLauncherUpdate() {
   }
 }
 
-async function openSettingsForLauncherUpdate() {
+async function openLauncherUpdateSettings() {
   if (!settingsDialog.open) {
     if (!launcherSettingsLoaded) await loadLauncherSettings();
     applySettingsToForm();
@@ -221,7 +242,7 @@ async function openSettingsForLauncherUpdate() {
 }
 
 async function handleLauncherUpdateFromBadge() {
-  await openSettingsForLauncherUpdate();
+  await openLauncherUpdateSettings();
   await handleLauncherUpdate();
 }
 
@@ -551,25 +572,65 @@ function applySettingsToForm() {
   memoryRange.value = String(launcherSettings.memoryMb);
   memoryValue.value = `${launcherSettings.memoryMb} MB`;
   autoUpdateCheck.checked = launcherSettings.autoUpdate;
-  launcherAutoUpdateCheck.checked = launcherSettings.launcherAutoUpdate;
+  const policyOptions = ['auto', 'notify', 'off'];
+  launcherUpdatePolicySelect.value = policyOptions.includes(launcherSettings.launcherUpdatePolicy)
+    ? launcherSettings.launcherUpdatePolicy
+    : 'auto';
   sourceHint.textContent = `${launcherSettings.downloadConcurrency} 路并发下载`;
+}
+
+function javaOptionLabel(majorVersion, javaPath, suffix = '') {
+  const versionLabel = Number.isInteger(majorVersion) ? `Java ${majorVersion} · ` : '';
+  return `${versionLabel}${javaPath}${suffix}`;
 }
 
 function renderJavaPathSetting() {
   const hasCustomPath = Boolean(selectedJavaPath);
   javaSelect.value = hasCustomPath ? 'custom' : 'auto';
   javaBrowseButton.textContent = hasCustomPath ? '更换' : '选择';
-  javaPathHint.classList.toggle('is-custom', hasCustomPath);
-  if (hasCustomPath) {
-    const versionLabel = Number.isInteger(selectedJavaMajorVersion)
-      ? `Java ${selectedJavaMajorVersion} · `
-      : '';
-    javaPathHint.textContent = `${versionLabel}${selectedJavaPath}`;
-    javaPathHint.title = selectedJavaPath;
-  } else {
-    javaPathHint.textContent = '启动时会从 JAVA_HOME 与系统 PATH 中自动查找 Java。';
-    javaPathHint.removeAttribute('title');
+
+  // 下拉框选项直接显示实际 Java 路径
+  if (javaAutoOption) {
+    javaAutoOption.textContent = autoJavaDetection?.path
+      ? javaOptionLabel(autoJavaDetection.majorVersion, autoJavaDetection.path, '（自动）')
+      : '自动查找系统 Java';
   }
+  if (javaCustomOption) {
+    javaCustomOption.textContent = hasCustomPath
+      ? javaOptionLabel(selectedJavaMajorVersion, selectedJavaPath)
+      : '手动选择路径';
+  }
+  javaSelect.title = hasCustomPath
+    ? selectedJavaPath
+    : autoJavaDetection?.path ?? '';
+}
+
+function applyAutoJavaDetection(result) {
+  if (!result?.available || !result.path) {
+    autoJavaDetection = null;
+    return false;
+  }
+  autoJavaDetection = { path: result.path, majorVersion: result.majorVersion };
+  renderJavaPathSetting();
+  return true;
+}
+
+// 系统级 Java 检测只发起一次，多处共享结果
+function detectSystemJava() {
+  if (!autoJavaDetectionPromise) {
+    autoJavaDetectionPromise = settingsApi.detectJava().catch(() => null);
+  }
+  return autoJavaDetectionPromise;
+}
+
+// 自动模式下后台检测一次，让设置页直接显示实际使用的 Java 路径
+async function refreshAutoJavaDetection() {
+  if (!settingsApi?.detectJava) return null;
+  const result = await detectSystemJava();
+  if (!selectedJavaPath && result?.available && result.path) {
+    applyAutoJavaDetection(result);
+  }
+  return result;
 }
 
 async function chooseJavaPath() {
@@ -599,6 +660,7 @@ async function loadLauncherSettings() {
     if (settingsApi) launcherSettings = await settingsApi.getState();
     launcherSettingsLoaded = true;
     applySettingsToForm();
+    void refreshAutoJavaDetection();
   } catch (error) {
     showToast(`设置读取失败：${readableError(error)}`);
   }
@@ -1573,6 +1635,9 @@ updateStatusBadge.addEventListener('keydown', (event) => {
 
 launcherUpdateButton.addEventListener('click', handleLauncherUpdate);
 updaterApi?.onState?.((state) => renderLauncherUpdate(state));
+updaterApi?.onRequestShowSettings?.(() => {
+  void openLauncherUpdateSettings();
+});
 updaterApi?.getState?.().then(renderLauncherUpdate).catch((error) => {
   renderLauncherUpdate({ status: 'error', message: readableError(error), progress: 0 });
 });
@@ -1634,7 +1699,7 @@ settingsDialog.addEventListener('close', async () => {
         downloadConcurrency: Number(downloadConcurrencySelect.value),
         memoryMb: Number(memoryRange.value),
         autoUpdate: autoUpdateCheck.checked,
-        launcherAutoUpdate: launcherAutoUpdateCheck.checked
+        launcherUpdatePolicy: launcherUpdatePolicySelect.value
       };
       launcherSettings = settingsApi ? await settingsApi.update(patch) : patch;
       applySettingsToForm();
@@ -1676,25 +1741,25 @@ javaBrowseButton.addEventListener('click', () => {
 });
 
 javaRedetectButton.addEventListener('click', async () => {
+  if (!settingsApi?.detectJava) return;
   javaRedetectButton.disabled = true;
-  javaPathHint.textContent = '正在重新检测 Java…';
+  showToast('正在重新检测 Java…');
+  autoJavaDetectionPromise = null;
   try {
-    const result = settingsApi?.detectJava
-      ? await settingsApi.detectJava()
-      : { available: false };
-    if (result.available) {
+    const result = await detectSystemJava();
+    if (result?.available) {
       window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
       selectedJavaPath = '';
-      selectedJavaMajorVersion = result.majorVersion;
-      renderJavaPathSetting();
+      selectedJavaMajorVersion = undefined;
+      applyAutoJavaDetection(result);
       showToast(`已检测到 Java ${result.majorVersion}`);
     } else {
-      javaPathHint.textContent = '未检测到可用的 Java，请手动选择或安装 Java 后重试。';
+      autoJavaDetection = null;
+      renderJavaPathSetting();
       window.localStorage.removeItem(JAVA_CHECK_SKIP_KEY);
       showToast('未检测到 Java，可手动选择路径或安装后重新检测');
     }
   } catch (error) {
-    javaPathHint.textContent = `检测失败：${readableError(error)}`;
     showToast(readableError(error));
   } finally {
     javaRedetectButton.disabled = false;
@@ -2006,8 +2071,8 @@ async function performJavaCheck() {
   if (!settingsApi?.detectJava) return;
   if (window.localStorage.getItem(JAVA_CHECK_SKIP_KEY) === '1') return;
   try {
-    const result = await settingsApi.detectJava();
-    if (result.available) {
+    const result = await refreshAutoJavaDetection();
+    if (result?.available) {
       window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
       return;
     }
@@ -2025,14 +2090,15 @@ javaCheckSkipButton.addEventListener('click', () => {
 });
 
 javaCheckRetryButton.addEventListener('click', async () => {
+  if (!settingsApi?.detectJava) return;
   javaCheckRetryButton.disabled = true;
   javaCheckHint.textContent = '正在重新检测 Java…';
+  autoJavaDetectionPromise = null;
   try {
-    const result = settingsApi?.detectJava
-      ? await settingsApi.detectJava()
-      : { available: false };
-    if (result.available) {
+    const result = await detectSystemJava();
+    if (result?.available) {
       window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
+      applyAutoJavaDetection(result);
       javaCheckDialog.close();
       showToast(`已检测到 Java ${result.majorVersion}`);
     } else {
