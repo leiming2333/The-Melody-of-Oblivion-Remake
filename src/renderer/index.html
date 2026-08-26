@@ -116,26 +116,9 @@
           </header>
 
           <div id="accountList" class="account-list" aria-label="已添加账户"></div>
-          <p id="accountEmpty" class="account-empty">还没有账户，可选择 Microsoft、离线或 LittleSkin 外置登录。</p>
+          <p id="accountEmpty" class="account-empty">还没有账户，可添加离线账户或使用 LittleSkin 外置登录。</p>
 
-          <div class="standard-account-methods" aria-label="Microsoft 与离线登录">
-          <section class="microsoft-account-form" aria-label="Microsoft 账户">
-            <button id="microsoftLoginButton" class="microsoft-account-button" type="button">
-              <span class="microsoft-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-              <span><strong>Microsoft 登录</strong><small>Xbox Live · Minecraft Java</small></span>
-              <b>登录</b>
-            </button>
-            <div id="microsoftDevicePanel" class="microsoft-device-panel" hidden>
-              <span>在浏览器中输入代码</span>
-              <div class="microsoft-device-code-row">
-                <strong id="microsoftDeviceCode">—</strong>
-                <button id="microsoftCopyCodeButton" type="button">复制</button>
-              </div>
-              <small id="microsoftLoginHint">等待 Microsoft 授权…</small>
-              <button id="microsoftCancelLoginButton" type="button">取消</button>
-            </div>
-          </section>
-
+          <div class="standard-account-methods" aria-label="离线登录">
           <section class="offline-account-form" aria-labelledby="offlineAccountTitle">
             <div class="account-section-title">
               <strong id="offlineAccountTitle">离线账户</strong>
@@ -367,32 +350,6 @@
           </footer>
         </form>
       </dialog>
-
-      <dialog id="skinUploadDialog" class="rename-dialog">
-        <form method="dialog">
-          <header class="dialog-header">
-            <h2>上传皮肤</h2>
-            <button class="dialog-close" value="cancel" aria-label="关闭" type="submit">×</button>
-          </header>
-          <div class="skin-upload-field">
-            <button id="skinFilePickerButton" type="button">选择文件</button>
-            <span id="skinFileName">未选择</span>
-          </div>
-          <label class="skin-model-select">
-            <span>皮肤模型</span>
-            <select id="skinModelSelect">
-              <option value="steve">Steve（经典）</option>
-              <option value="alex">Alex（纤细）</option>
-            </select>
-          </label>
-          <p id="skinUploadHint" class="rename-hint">仅支持 64×32 或 64×64 像素的 PNG 文件</p>
-          <footer class="dialog-actions">
-            <button class="secondary-dialog-button" value="cancel" type="submit">取消</button>
-            <button id="skinUploadConfirmButton" class="primary-dialog-button" value="upload" type="submit">上传</button>
-          </footer>
-        </form>
-      </dialog>
-      <input id="skinFileInput" type="file" accept="image/png" hidden />
 
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div id="modpackDropOverlay" class="modpack-drop-overlay" hidden>

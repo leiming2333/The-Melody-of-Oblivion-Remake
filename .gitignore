@@ -13,9 +13,6 @@ electron-builder.env
 accounts.json
 settings.json
 
-# 构建时注入的 Microsoft Client ID（不提交到仓库）
-src/main/accounts/microsoft-client-id.json
-
 *.log
 *.part
 *.tmp
@@ -34,3 +31,4 @@ Thumbs.db
 .vscode/
 .agents/
 .workbuddy/
+.git-commit-msg.txt

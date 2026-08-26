@@ -37,20 +37,20 @@ The current repository starts a new implementation; its version numbers and code
 - **Game versions** — browse Mojang's version manifest, detect local installations, download Vanilla versions, verify required files, and move removable profiles to the recycle bin.
 - **Mod loaders** — discover and install Fabric, Forge, and NeoForge through a shared workflow.
 - **Resilient downloads** — choose between Mojang-hosted endpoints and BMCLAPI, probe sources in automatic mode, use configurable task concurrency, split large files with HTTP Range requests, verify SHA-1 metadata, cancel active work, and retry alternate sources.
-- **Accounts** — create offline profiles, sign in with a Microsoft device code, or use LittleSkin Yggdrasil; sync skin avatars, refresh online credentials before launch, and keep tokens out of the renderer process.
+- **Accounts** — create offline profiles or sign in with LittleSkin Yggdrasil; sync skin avatars, refresh online credentials before launch, and keep tokens out of the renderer process. Microsoft sign-in has been removed for account safety.
 - **Java management** — match the Java major version required by the selected game; automatically scan `JAVA_HOME`, `JRE_HOME`, `PATH`, a `.jre` folder next to the launcher, common install directories (Adoptium, Microsoft, Zulu, Corretto, …), and the Windows registry; prefer an explicit compatible runtime, otherwise provision an Eclipse Temurin JRE through the Adoptium API. The settings page shows the Java path currently in use.
 - **Launch core** — resolve inherited version metadata, apply platform rules, assemble arguments and classpaths, extract native libraries safely, launch the Java process, and report its status. LittleSkin accounts automatically provision a SHA-256-verified authlib-injector.
 - **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instance directories, including overrides and supported loaders.
 - **Launcher updates** — checks GitHub Releases on startup with a three-level policy (auto-download / notify only / never); system notifications announce new versions and ready updates; release notes are shown in settings; update downloads fall back across GitHub mirrors with slow-speed detection and are SHA-256 verified before install. Legacy boolean update settings migrate automatically.
 - **Desktop UI** — a compact fixed-size frameless Electron window with version, account, download, launch, and settings flows.
 
-The automated test suite currently covers 94 cases across accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, local version management, and launcher updates.
+The automated test suite currently covers 87 cases across accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, local version management, and launcher updates.
 
 ## Current limitations
 
 - Public multi-architecture builds are available for Windows, macOS, and Linux. Platform-specific behavior may still vary.
 - Update behavior differs per platform: Linux AppImages replace themselves and restart; the Windows portable build places the new executable next to the old one and launches it (the old file is kept); macOS downloads a zip that must be extracted and replaced manually.
-- Microsoft sign-in depends on the launcher's Azure application registration being accepted by Minecraft Services. Provider-side policy or registration changes can make the preview login unavailable.
+- For account safety this launcher does not offer Microsoft sign-in; use the official launcher for premium login.
 - LittleSkin Yggdrasil works only when both client and server are configured for the same authentication service. It does not replace a premium account or grant access to premium-only servers. See the [LittleSkin manual](https://manual.littlesk.in/yggdrasil/).
 - CurseForge installation depends on downloadable file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Packs containing restricted or unavailable files may fail.
 - Quilt modpacks are not supported.
@@ -62,13 +62,10 @@ The automated test suite currently covers 94 cases across accounts, authenticati
 - Node.js 22 or later
 - npm compatible with the committed lockfile
 - An internet connection for metadata, game files, authentication, and managed Java downloads
-- A legally owned Minecraft: Java Edition account for authenticated online play
-
 ## Run from source
 
 ```powershell
 npm ci
-$env:MELODY_MICROSOFT_CLIENT_ID = "your-public-azure-application-id"
 npm run dev
 ```
 
@@ -108,9 +105,9 @@ The landing page in the repository root and the Electron renderer under `src/ren
 ## Security notes
 
 - Electron runs the renderer with context isolation, sandboxing, and Node.js integration disabled.
-- Microsoft and LittleSkin access, refresh, and client tokens are removed from renderer-facing account objects.
+- LittleSkin access and client tokens are removed from renderer-facing account objects.
 - Online-account tokens are encrypted at rest with Electron's `safeStorage`. If secure storage is unavailable, the launcher refuses to save or read online credentials instead of falling back to plain text.
-- Microsoft sign-in reads its public OAuth application identifier from `MELODY_MICROSOFT_CLIENT_ID`. The repository contains no client secret or production Client ID; public Electron builds cannot keep an embedded Client ID confidential.
+- For account safety this launcher does not offer Microsoft sign-in and does not handle any Microsoft account credentials.
 - Download destinations, modpack paths, archive extraction, and remote mod URLs are validated to reduce path-traversal and unsafe-URL risks.
 - SHA-1 checks detect accidental corruption when upstream metadata provides a hash; SHA-1 should not be treated as a modern authenticity guarantee.
 
