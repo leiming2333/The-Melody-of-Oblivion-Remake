@@ -353,7 +353,8 @@ function normalizeAccount(account) {
     uuid,
     skinModel: account.skinModel === 'alex' ? 'alex' : 'steve',
     accessToken: account.accessToken || '0',
-    userType: 'legacy',
+    userType: account.type === 'microsoft' ? 'msa' : 'legacy',
+    xuid: account.xuid || '',
     clientId: account.clientId || ''
   };
 }
@@ -379,6 +380,7 @@ function launchVariables({
     auth_player_name: normalizedAccount.name,
     auth_session: `token:${normalizedAccount.accessToken}:${normalizedAccount.uuid}`,
     auth_uuid: normalizedAccount.uuid,
+    auth_xuid: normalizedAccount.xuid,
     classpath,
     classpath_separator: path.delimiter,
     clientid: normalizedAccount.clientId,
