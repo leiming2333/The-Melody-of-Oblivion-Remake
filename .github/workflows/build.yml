@@ -65,7 +65,7 @@ jobs:
       - name: Build (${{ matrix.arch }})
         run: npm run ${{ matrix.script }} -- --${{ matrix.arch }}
         env:
-          MELODY_MICROSOFT_CLIENT_ID: ${{ secrets.MELODY_MICROSOFT_CLIENT_ID }}
+          MELODY_MICROSOFT_CLIENT_ID: ${{ secrets.MELODY_MICROSOFT_CLIENT_ID || '72867f11-f8bf-4086-a502-39039a08970c' }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

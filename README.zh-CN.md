@@ -110,7 +110,7 @@ styles.css                落地页样式
 - Electron 渲染进程启用了上下文隔离和沙箱，并关闭 Node.js 集成。
 - Microsoft 与 LittleSkin 的访问令牌、刷新令牌和客户端令牌不会出现在提供给渲染进程的账户对象中。
 - 在线账户令牌使用 Electron `safeStorage` 加密保存。如果安全存储不可用，启动器会拒绝保存或读取在线凭据，不会降级为明文存储。
-- Microsoft 登录从 `MELODY_MICROSOFT_CLIENT_ID` 读取公开 OAuth 应用 ID。仓库不包含客户端密钥或生产环境 Client ID；公开 Electron 构建无法对内嵌 Client ID 保密。
+- Microsoft 登录使用公开 OAuth 应用 ID，构建时可用 `MELODY_MICROSOFT_CLIENT_ID` 覆盖。仓库不包含客户端密钥；公开 Electron 构建无法对内嵌 Client ID 保密。
 - 下载目标、整合包路径、压缩包解压位置和远程模组 URL 均会经过验证，以降低路径穿越及不安全 URL 的风险。
 - 上游元数据提供哈希时，SHA-1 校验可发现意外损坏，但不应将 SHA-1 视为现代的真实性保证。
 

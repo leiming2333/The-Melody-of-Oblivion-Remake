@@ -96,10 +96,17 @@
           <strong>忘却的旋律</strong>
           <span id="launcherVersionMeta">Launcher</span>
           <span id="updateStatusBadge" class="update-status-badge" title="尚未检查更新" role="button" tabindex="0" aria-label="检查启动器更新">
-            <svg viewBox="0 0 14 14" aria-hidden="true">
-              <circle cx="7" cy="7" r="6"></circle>
-              <path id="updateBadgeEqual" d="M4.4 5.9h5.2M4.4 8.1h5.2"></path>
-              <path id="updateBadgeArrow" d="M7 9.6V4.6M4.9 6.5L7 4.4l2.1 2.1" hidden></path>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path id="updateBadgeRefresh" d="M12.3 5.6A5 5 0 1 0 13 8M12.3 3.3v2.5H9.8"></path>
+              <g id="updateBadgeCheck" hidden>
+                <circle cx="8" cy="8" r="6.1"></circle>
+                <path d="m4.9 8.1 2 2 4.3-4.4"></path>
+              </g>
+              <path id="updateBadgeDownload" d="M8 2.6v7.1m-2.5-2.4L8 9.8l2.5-2.5M4.6 12.6h6.8" hidden></path>
+              <g id="updateBadgeError" hidden>
+                <circle cx="8" cy="8" r="6.1"></circle>
+                <path d="M8 4.5v4.2M8 11.2h.01"></path>
+              </g>
             </svg>
           </span>
         </div>

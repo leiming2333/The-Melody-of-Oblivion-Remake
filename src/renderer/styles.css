@@ -119,7 +119,10 @@ textarea {
   align-items: center;
   justify-content: space-between;
   padding: 0 6px;
-  background: linear-gradient(180deg, rgba(10, 7, 8, 0.68), transparent);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  background: linear-gradient(180deg, rgba(10, 7, 8, 0.62), rgba(10, 7, 8, 0.08));
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
+  backdrop-filter: blur(12px) saturate(1.08);
 }
 
 .brand {
@@ -266,8 +269,10 @@ textarea {
   padding: 8px 10px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 3px;
-  background: rgba(9, 9, 10, 0.42);
-  backdrop-filter: blur(8px);
+  background: rgba(9, 9, 10, 0.38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 26px rgba(0, 0, 0, 0.18);
+  -webkit-backdrop-filter: blur(14px) saturate(1.14);
+  backdrop-filter: blur(14px) saturate(1.14);
 }
 
 .wallpaper-switcher > span {
@@ -510,11 +515,14 @@ textarea {
   padding: 9px 12px;
   border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 4px;
-  background: rgba(17, 14, 16, 0.52);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 48%),
+    rgba(17, 14, 16, 0.46);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 12px 32px rgba(0, 0, 0, 0.22);
   cursor: pointer;
   text-align: left;
-  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(16px) saturate(1.16);
+  backdrop-filter: blur(16px) saturate(1.16);
   transition: border-color 160ms ease, background 160ms ease;
 }
 
@@ -871,8 +879,10 @@ textarea {
   justify-content: space-between;
   padding: 0 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(8, 9, 10, 0.58);
-  backdrop-filter: blur(12px);
+  background: rgba(8, 9, 10, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  backdrop-filter: blur(18px) saturate(1.12);
 }
 
 .footer-meta,
@@ -896,24 +906,27 @@ textarea {
 
 .update-status-badge {
   display: inline-flex;
-  width: 14px;
-  height: 14px;
+  width: 22px;
+  height: 22px;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  margin: -4px;
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.5);
   cursor: pointer;
-  transition: filter 140ms ease, transform 120ms ease;
+  transition: color 140ms ease, background-color 140ms ease, transform 120ms ease;
 }
 
 .update-status-badge svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   transform-origin: 50% 50%;
   backface-visibility: hidden;
 }
 
 .update-status-badge:hover {
-  filter: brightness(1.08);
+  color: rgba(255, 255, 255, 0.76);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .update-status-badge:active {
@@ -930,23 +943,28 @@ textarea {
   will-change: transform;
 }
 
-.update-status-badge circle {
-  fill: #3b82f6;
+.update-status-badge.is-current {
+  color: #7dd3fc;
 }
 
-.update-status-badge.has-update circle {
-  fill: #22c55e;
+.update-status-badge.has-update {
+  color: #f0a06f;
 }
 
+.update-status-badge.has-error {
+  color: #f87171;
+}
+
+.update-status-badge circle,
 .update-status-badge path {
   fill: none;
-  stroke: #ffffff;
-  stroke-width: 1.4;
+  stroke: currentColor;
+  stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.update-status-badge path[hidden] {
+.update-status-badge [hidden] {
   display: none;
 }
 

@@ -98,8 +98,10 @@ const launcherUpdateProgress = document.querySelector('#launcherUpdateProgress')
 const launcherUpdateButton = document.querySelector('#launcherUpdateButton');
 const launcherVersionMeta = document.querySelector('#launcherVersionMeta');
 const updateStatusBadge = document.querySelector('#updateStatusBadge');
-const updateBadgeEqual = document.querySelector('#updateBadgeEqual');
-const updateBadgeArrow = document.querySelector('#updateBadgeArrow');
+const updateBadgeRefresh = document.querySelector('#updateBadgeRefresh');
+const updateBadgeCheck = document.querySelector('#updateBadgeCheck');
+const updateBadgeDownload = document.querySelector('#updateBadgeDownload');
+const updateBadgeError = document.querySelector('#updateBadgeError');
 const updateStatusBadgeSvg = updateStatusBadge.querySelector('svg');
 const sourceHint = document.querySelector('#sourceHint');
 const toast = document.querySelector('#toast');
@@ -160,16 +162,7 @@ let launcherUpdateState = { status: 'idle', progress: 0, installAction: null, me
 
 function setUpdateStatusBadgeSpinning(spinning) {
   if (!updateStatusBadgeSvg) return;
-  if (spinning) {
-    updateStatusBadgeSvg.style.transform = '';
-    updateStatusBadge.classList.add('is-spinning');
-    return;
-  }
-  if (updateStatusBadge.classList.contains('is-spinning')) {
-    const transform = window.getComputedStyle(updateStatusBadgeSvg).transform;
-    updateStatusBadgeSvg.style.transform = transform === 'none' ? '' : transform;
-  }
-  updateStatusBadge.classList.remove('is-spinning');
+  updateStatusBadge.classList.toggle('is-spinning', spinning);
 }
 
 function renderLauncherUpdate(state = launcherUpdateState) {
@@ -180,10 +173,17 @@ function renderLauncherUpdate(state = launcherUpdateState) {
   }
   const hasUpdate = Boolean(state.availableVersion)
     || ['available', 'downloading', 'verifying', 'downloaded'].includes(state.status);
+  const isCurrent = state.status === 'current';
+  const hasError = state.status === 'error';
   updateStatusBadge.classList.toggle('has-update', hasUpdate);
+  updateStatusBadge.classList.toggle('is-current', isCurrent);
+  updateStatusBadge.classList.toggle('has-error', hasError);
   updateStatusBadge.title = state.message ?? '尚未检查更新';
-  updateBadgeArrow.hidden = !hasUpdate;
-  updateBadgeEqual.hidden = hasUpdate;
+  updateStatusBadge.setAttribute('aria-label', state.message ?? '检查启动器更新');
+  updateBadgeRefresh.hidden = hasUpdate || isCurrent || hasError;
+  updateBadgeCheck.hidden = !isCurrent;
+  updateBadgeDownload.hidden = !hasUpdate;
+  updateBadgeError.hidden = !hasError;
   setUpdateStatusBadgeSpinning(state.status === 'checking');
   const showProgress = ['downloading', 'verifying'].includes(state.status);
   launcherUpdateProgress.hidden = !showProgress;

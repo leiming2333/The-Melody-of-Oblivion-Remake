@@ -110,7 +110,7 @@ The landing page in the repository root and the Electron renderer under `src/ren
 - Electron runs the renderer with context isolation, sandboxing, and Node.js integration disabled.
 - Microsoft and LittleSkin access, refresh, and client tokens are removed from renderer-facing account objects.
 - Online-account tokens are encrypted at rest with Electron's `safeStorage`. If secure storage is unavailable, the launcher refuses to save or read online credentials instead of falling back to plain text.
-- Microsoft sign-in reads its public OAuth application identifier from `MELODY_MICROSOFT_CLIENT_ID`. The repository contains no client secret or production Client ID; public Electron builds cannot keep an embedded Client ID confidential.
+- Microsoft sign-in uses a public OAuth application ID; `MELODY_MICROSOFT_CLIENT_ID` can override it when building. The repository contains no client secret, and public Electron builds cannot keep an embedded Client ID confidential.
 - Download destinations, modpack paths, archive extraction, and remote mod URLs are validated to reduce path-traversal and unsafe-URL risks.
 - SHA-1 checks detect accidental corruption when upstream metadata provides a hash; SHA-1 should not be treated as a modern authenticity guarantee.
 
