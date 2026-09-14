@@ -12,12 +12,12 @@
     "start": "electron .",
     "dev": "electron .",
     "build": "electron-builder",
-    "build:win": "node scripts/generate-client-id.js && electron-builder --win --publish never",
-    "build:linux": "node scripts/generate-client-id.js && electron-builder --linux AppImage --publish never",
-    "build:mac": "node scripts/generate-client-id.js && electron-builder --mac zip --publish never",
+    "build:win": "electron-builder --win --publish never",
+    "build:linux": "electron-builder --linux AppImage --publish never",
+    "build:mac": "electron-builder --mac zip --publish never",
     "smoke": "electron . --smoke-test",
-    "check": "node --check site.js && node --check src/main/main.js && node --check src/main/accounts/account-store.js && node --check src/main/accounts/microsoft-auth.js && node --check src/main/accounts/yggdrasil-auth.js && node --check src/main/accounts/ipc.js && node --check src/main/settings/settings-store.js && node --check src/main/settings/ipc.js && node --check src/main/updater/update-manager.js && node --check src/main/minecraft/source-manager.js && node --check src/main/minecraft/downloader.js && node --check src/main/minecraft/authlib-injector.js && node --check src/main/minecraft/java-runtime.js && node --check src/main/minecraft/managed-java-runtime.js && node --check src/main/minecraft/launch-core.js && node --check src/main/minecraft/loader-manager.js && node --check src/main/minecraft/modpack-manager.js && node --check src/main/minecraft/version-manager.js && node --check src/main/minecraft/ipc.js && node --check src/preload/preload.js && node --check src/renderer/renderer.js",
-    "test": "node --test test/minecraft-core.test.js test/launch-core.test.js test/java-runtime.test.js test/modpack-manager.test.js test/version-manager.test.js test/account-store.test.js test/microsoft-auth.test.js test/yggdrasil-auth.test.js test/authlib-injector.test.js test/settings-store.test.js test/update-manager.test.js test/game-directory.test.js"
+    "check": "node --check site.js && node --check src/main/main.js && node --check src/main/accounts/account-store.js && node --check src/main/accounts/yggdrasil-auth.js && node --check src/main/accounts/ipc.js && node --check src/main/settings/settings-store.js && node --check src/main/settings/ipc.js && node --check src/main/updater/update-manager.js && node --check src/main/minecraft/source-manager.js && node --check src/main/minecraft/downloader.js && node --check src/main/minecraft/authlib-injector.js && node --check src/main/minecraft/java-runtime.js && node --check src/main/minecraft/managed-java-runtime.js && node --check src/main/minecraft/launch-core.js && node --check src/main/minecraft/loader-manager.js && node --check src/main/minecraft/modpack-manager.js && node --check src/main/minecraft/version-manager.js && node --check src/main/minecraft/ipc.js && node --check src/preload/preload.js && node --check src/renderer/renderer.js",
+    "test": "node --test test/minecraft-core.test.js test/launch-core.test.js test/java-runtime.test.js test/modpack-manager.test.js test/version-manager.test.js test/account-store.test.js test/yggdrasil-auth.test.js test/authlib-injector.test.js test/settings-store.test.js test/update-manager.test.js test/game-directory.test.js"
   },
   "engines": {
     "node": ">=22"
@@ -37,8 +37,7 @@
     },
     "files": [
       "src/**/*",
-      "package.json",
-      "src/main/accounts/microsoft-client-id.json"
+      "package.json"
     ],
     "win": {
       "icon": "src/renderer/assets/app-icon.ico",
