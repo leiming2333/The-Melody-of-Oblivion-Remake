@@ -40,10 +40,22 @@ const offlineNameInput = document.querySelector('#offlineNameInput');
 const offlineSkinModelInputs = [...document.querySelectorAll('input[name="offlineSkinModel"]')];
 const addOfflineButton = document.querySelector('#addOfflineButton');
 const accountFormHint = document.querySelector('#accountFormHint');
+const microsoftLoginButton = document.querySelector('#microsoftLoginButton');
+const microsoftDevicePanel = document.querySelector('#microsoftDevicePanel');
+const microsoftDeviceCode = document.querySelector('#microsoftDeviceCode');
+const microsoftCopyCodeButton = document.querySelector('#microsoftCopyCodeButton');
+const microsoftLoginHint = document.querySelector('#microsoftLoginHint');
+const microsoftCancelLoginButton = document.querySelector('#microsoftCancelLoginButton');
 const littleSkinUsernameInput = document.querySelector('#littleSkinUsernameInput');
 const littleSkinPasswordInput = document.querySelector('#littleSkinPasswordInput');
 const littleSkinLoginButton = document.querySelector('#littleSkinLoginButton');
 const littleSkinLoginHint = document.querySelector('#littleSkinLoginHint');
+const skinUploadDialog = document.querySelector('#skinUploadDialog');
+const skinFilePickerButton = document.querySelector('#skinFilePickerButton');
+const skinFileName = document.querySelector('#skinFileName');
+const skinModelSelect = document.querySelector('#skinModelSelect');
+const skinUploadHint = document.querySelector('#skinUploadHint');
+const skinFileInput = document.querySelector('#skinFileInput');
 const versionSelect = document.querySelector('#versionSelect');
 const versionDialog = document.querySelector('#versionDialog');
 const versionCloseButtons = [...versionDialog.querySelectorAll('[value="cancel"]')];
@@ -60,6 +72,7 @@ const downloadVersionButton = document.querySelector('#downloadVersionButton');
 const cancelDownloadButton = document.querySelector('#cancelDownloadButton');
 const downloadStatus = document.querySelector('#downloadStatus');
 const downloadMessage = document.querySelector('#downloadMessage');
+const downloadStage = document.querySelector('#downloadStage');
 const downloadPercent = document.querySelector('#downloadPercent');
 const downloadProgress = document.querySelector('#downloadProgress');
 const downloadSpeed = document.querySelector('#downloadSpeed');
@@ -71,6 +84,14 @@ const javaAutoOption = javaSelect?.querySelector('option[value="auto"]');
 const javaCustomOption = javaSelect?.querySelector('option[value="custom"]');
 const javaBrowseButton = document.querySelector('#javaBrowseButton');
 const javaRedetectButton = document.querySelector('#javaRedetectButton');
+const javaDownloadButton = document.querySelector('#javaDownloadButton');
+const javaDownloadPanel = document.querySelector('#javaDownloadPanel');
+const javaDownloadVersionSelect = document.querySelector('#javaDownloadVersionSelect');
+const javaDownloadStartButton = document.querySelector('#javaDownloadStartButton');
+const javaDownloadCancelButton = document.querySelector('#javaDownloadCancelButton');
+const javaDownloadHint = document.querySelector('#javaDownloadHint');
+const javaDownloadProgress = document.querySelector('#javaDownloadProgress');
+const javaDownloadPercent = document.querySelector('#javaDownloadPercent');
 const gameDirectoryModeSelect = document.querySelector('#gameDirectoryModeSelect');
 const gameDirectoryHint = document.querySelector('#gameDirectoryHint');
 const memoryRange = document.querySelector('#memoryRange');
@@ -141,7 +162,13 @@ let selectedJavaPath = '';
 let selectedJavaMajorVersion;
 let autoJavaDetection = null;
 let autoJavaDetectionPromise = null;
+let javaDownloadActive = false;
+let javaRequirementRequest = 0;
+let microsoftLoginSessionId;
+let microsoftLoginActive = false;
 let littleSkinLoginActive = false;
+let skinUploadAccountId = null;
+let skinUploadFilePath = null;
 let launcherUpdateState = { status: 'idle', progress: 0, installAction: null, message: '尚未检查更新' };
 
 function setUpdateStatusBadgeSpinning(spinning) {
@@ -150,6 +177,8 @@ function setUpdateStatusBadgeSpinning(spinning) {
 }
 
 function renderLauncherUpdate(state = launcherUpdateState) {
+  const downloadFailed = state.status === 'error'
+    && ['downloading', 'verifying'].includes(launcherUpdateState.status);
   launcherUpdateState = state;
   launcherUpdateStatus.textContent = state.message ?? '尚未检查更新';
   if (state.currentVersion) {
@@ -171,7 +200,9 @@ function renderLauncherUpdate(state = launcherUpdateState) {
   setUpdateStatusBadgeSpinning(state.status === 'checking');
   const showProgress = ['downloading', 'verifying'].includes(state.status);
   launcherUpdateProgress.hidden = !showProgress;
-  launcherUpdateProgress.value = Number(state.progress) || 0;
+  const updatePercent = renderProgressBar(launcherUpdateProgress, state.progress, 100,
+    state.status === 'downloaded');
+  if (state.status === 'verifying') launcherUpdateProgress.removeAttribute('value');
   launcherUpdateButton.disabled = ['checking', 'downloading', 'verifying', 'unavailable'].includes(state.status);
   launcherUpdateButton.textContent = state.status === 'available'
     ? `下载 ${state.availableVersion ?? '更新'}`
@@ -182,9 +213,10 @@ function renderLauncherUpdate(state = launcherUpdateState) {
         : state.status === 'verifying'
           ? '正在校验…'
         : state.status === 'downloading'
-          ? `${state.progress ?? 0}%`
+          ? (updatePercent === null ? '下载中' : `${updatePercent}%`)
           : '检查更新';
   renderLauncherUpdateNotes(state);
+  if (downloadFailed) showToast(`下载失败：${state.message ?? '启动器更新下载失败'}`, true);
 }
 
 // 有新版本且 Release 带正文时展示更新日志（文本渲染，不含 HTML）
@@ -308,11 +340,19 @@ function rememberedSelectedGame() {
   }
 }
 
-function showToast(message) {
+function showToast(message, isError = false) {
   window.clearTimeout(toastTimer);
+  if (toast.matches(':popover-open')) toast.hidePopover();
   toast.textContent = message;
+  toast.classList.toggle('is-error', isError);
+  toast.setAttribute('role', isError ? 'alert' : 'status');
+  toast.setAttribute('aria-live', isError ? 'assertive' : 'polite');
+  toast.showPopover();
   toast.classList.add('is-visible');
-  toastTimer = window.setTimeout(() => toast.classList.remove('is-visible'), 2800);
+  toastTimer = window.setTimeout(() => {
+    toast.classList.remove('is-visible');
+    if (toast.matches(':popover-open')) toast.hidePopover();
+  }, isError ? 6000 : 2800);
 }
 
 function delay(milliseconds) {
@@ -334,9 +374,11 @@ function updateAccountCard() {
   playerAvatar.style.backgroundImage = '';
   if (accountState.current) {
     accountName.textContent = accountState.current.name;
-    accountType.textContent = accountState.current.type === 'yggdrasil'
-      ? 'LittleSkin 外置登录'
-      : '离线账户';
+    accountType.textContent = accountState.current.type === 'microsoft'
+      ? 'Microsoft'
+      : accountState.current.type === 'yggdrasil'
+        ? 'LittleSkin 外置登录'
+        : '离线账户';
     applySkinAvatar(playerAvatar, skinUrlForAccount(accountState.current));
   } else {
     accountName.textContent = '未添加账户';
@@ -344,8 +386,24 @@ function updateAccountCard() {
   }
 }
 
+function renderProgressBar(element, completed, total, complete = false) {
+  element.max = 100;
+  if (complete) {
+    element.value = 100;
+    return 100;
+  }
+  if (!Number.isFinite(completed) || !Number.isFinite(total) || total <= 0) {
+    element.removeAttribute('value');
+    return null;
+  }
+  const percent = Math.max(0, Math.min(99, Math.floor(completed / total * 100)));
+  element.value = percent;
+  return percent;
+}
+
 async function refreshCurrentOnlineSkin() {
-  if (accountState.current?.type !== 'yggdrasil' || !accountsApi?.refreshSkin) return;
+  if (!['microsoft', 'yggdrasil'].includes(accountState.current?.type)
+    || !accountsApi?.refreshSkin) return;
   try {
     accountState = await accountsApi.refreshSkin(accountState.current.id);
     updateAccountCard();
@@ -469,9 +527,11 @@ function renderAccountList() {
       copy.append(name);
     }
     const detail = document.createElement('small');
-    detail.textContent = account.type === 'yggdrasil'
-      ? `LittleSkin 外置 · ${account.uuid}`
-      : `离线账户 · ${account.uuid}`;
+    detail.textContent = account.type === 'offline'
+      ? `离线账户 · ${account.uuid}`
+      : account.type === 'yggdrasil'
+        ? `LittleSkin 外置 · ${account.uuid}`
+        : `Microsoft · ${account.uuid}`;
     copy.append(detail);
 
     const actions = document.createElement('span');
@@ -493,6 +553,24 @@ function renderAccountList() {
       skinButton.title = `切换为${skinModelNames[nextSkinModel]}`;
       skinButton.addEventListener('click', () => setAccountSkinModel(account.id, nextSkinModel));
       actions.append(skinButton);
+    }
+
+    if (account.type === 'microsoft' && accountsApi?.uploadSkin) {
+      const uploadSkinButton = document.createElement('button');
+      uploadSkinButton.type = 'button';
+      uploadSkinButton.className = 'upload-skin-button';
+      uploadSkinButton.textContent = '上传皮肤';
+      uploadSkinButton.title = '上传 PNG 皮肤到 Minecraft';
+      uploadSkinButton.addEventListener('click', () => {
+        skinUploadAccountId = account.id;
+        skinUploadFilePath = null;
+        skinFileName.textContent = '未选择';
+        skinModelSelect.value = account.skinModel === 'alex' ? 'alex' : 'steve';
+        skinUploadHint.textContent = '仅支持 64×32 或 64×64 像素的 PNG 文件';
+        skinUploadHint.classList.remove('is-error');
+        skinUploadDialog.showModal();
+      });
+      actions.append(uploadSkinButton);
     }
 
     const removeButton = document.createElement('button');
@@ -579,7 +657,9 @@ function applyAutoJavaDetection(result) {
 // 系统级 Java 检测只发起一次，多处共享结果
 function detectSystemJava() {
   if (!autoJavaDetectionPromise) {
-    autoJavaDetectionPromise = settingsApi.detectJava().catch(() => null);
+    autoJavaDetectionPromise = (minecraft?.detectJava
+      ? minecraft.detectJava()
+      : settingsApi.detectJava()).catch(() => null);
   }
   return autoJavaDetectionPromise;
 }
@@ -665,6 +745,197 @@ async function addOfflineAccount() {
   } finally {
     addOfflineButton.disabled = false;
   }
+}
+
+function setJavaDownloadPanelOpen(open) {
+  javaDownloadPanel.hidden = !open;
+  javaDownloadButton.setAttribute('aria-expanded', String(open));
+}
+
+async function prepareJavaDownloadSelection(requiredMajorVersion) {
+  if (javaDownloadActive) return;
+  const request = ++javaRequirementRequest;
+  javaDownloadVersionSelect.value = '21';
+  javaDownloadHint.textContent = '';
+  javaDownloadPercent.textContent = '';
+  try {
+    const requirement = Number.isInteger(requiredMajorVersion)
+      ? { majorVersion: requiredMajorVersion }
+      : versionSelect.value && minecraft?.getJavaRequirement
+        ? await minecraft.getJavaRequirement(versionSelect.value)
+        : null;
+    if (request !== javaRequirementRequest || javaDownloadActive) return;
+    if (requirement) {
+      if ([8, 16, 17, 21, 25].includes(requirement.majorVersion)) {
+        javaDownloadVersionSelect.value = String(requirement.majorVersion);
+      }
+      javaDownloadHint.textContent = `当前游戏需要 Java ${requirement.majorVersion}`;
+    }
+  } catch (error) {
+    if (request === javaRequirementRequest) javaDownloadHint.textContent = readableError(error);
+  }
+}
+
+async function openJavaSettings(requiredMajorVersion) {
+  if (!launcherSettingsLoaded) await loadLauncherSettings();
+  if (!settingsDialog.open) {
+    applySettingsToForm();
+    settingsDialog.showModal();
+  }
+  setJavaDownloadPanelOpen(true);
+  await prepareJavaDownloadSelection(requiredMajorVersion);
+  javaDownloadPanel.scrollIntoView({ block: 'nearest' });
+}
+
+function renderJavaDownloadState() {
+  javaDownloadVersionSelect.disabled = javaDownloadActive;
+  javaDownloadStartButton.disabled = javaDownloadActive;
+  javaDownloadStartButton.textContent = javaDownloadActive ? '下载中' : '下载';
+  javaDownloadCancelButton.hidden = !javaDownloadActive;
+  gameDirectoryModeSelect.disabled = javaDownloadActive;
+  settingsDialog.querySelector('[value="save"]').disabled = javaDownloadActive;
+}
+
+javaDownloadButton.addEventListener('click', () => {
+  setJavaDownloadPanelOpen(javaDownloadPanel.hidden);
+  if (!javaDownloadPanel.hidden && !javaDownloadActive) void prepareJavaDownloadSelection();
+});
+
+javaDownloadVersionSelect.addEventListener('change', () => {
+  javaRequirementRequest += 1;
+});
+
+minecraft?.onJavaDownloadProgress?.((progress) => {
+  if (!javaDownloadActive) return;
+  javaDownloadHint.textContent = progress.message ?? '正在准备 Java 运行环境';
+  const percent = renderProgressBar(javaDownloadProgress, progress.receivedBytes, progress.totalBytes);
+  javaDownloadPercent.textContent = percent === null ? '—' : `${percent}%`;
+  javaDownloadProgress.hidden = false;
+  if (Number.isFinite(progress.receivedBytes)) {
+    javaDownloadHint.textContent += ` · ${(progress.receivedBytes / 1048576).toFixed(1)} MB`;
+  }
+});
+
+javaDownloadStartButton.addEventListener('click', async () => {
+  if (javaDownloadActive) return;
+  if (!minecraft?.downloadJava) {
+    showToast('当前环境不支持下载 Java');
+    return;
+  }
+  if (gameDirectoryModeSelect.value !== launcherSettings.gameDirectoryMode) {
+    showToast('请先保存游戏目录设置，再下载 Java');
+    return;
+  }
+  javaRequirementRequest += 1;
+  const majorVersion = Number(javaDownloadVersionSelect.value);
+  javaDownloadActive = true;
+  javaDownloadCancelButton.disabled = false;
+  javaDownloadProgress.hidden = false;
+  javaDownloadProgress.removeAttribute('value');
+  javaDownloadPercent.textContent = '—';
+  javaDownloadHint.textContent = `正在准备 Java ${majorVersion}`;
+  renderJavaDownloadState();
+  try {
+    const result = await minecraft.downloadJava(majorVersion);
+    autoJavaDetectionPromise = null;
+    if (!selectedJavaPath) applyAutoJavaDetection({ available: true, path: result.javaPath, majorVersion });
+    javaDownloadProgress.value = 100;
+    javaDownloadPercent.textContent = '100%';
+    javaDownloadHint.textContent = `Java ${majorVersion} 已安装`;
+    window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
+    showToast(`Java ${majorVersion} 运行环境已就绪`);
+  } catch (error) {
+    javaDownloadProgress.hidden = true;
+    javaDownloadPercent.textContent = '';
+    javaDownloadHint.textContent = readableError(error);
+    const cancelled = javaDownloadHint.textContent.includes('下载已取消');
+    showToast(cancelled ? javaDownloadHint.textContent : `下载失败：${javaDownloadHint.textContent}`, !cancelled);
+  } finally {
+    javaDownloadActive = false;
+    renderJavaDownloadState();
+  }
+});
+
+javaDownloadCancelButton.addEventListener('click', async () => {
+  if (!javaDownloadActive) return;
+  javaDownloadCancelButton.disabled = true;
+  try {
+    await minecraft.cancelJavaDownload();
+    if (javaDownloadActive) javaDownloadHint.textContent = '正在取消下载';
+  } catch (error) {
+    javaDownloadCancelButton.disabled = false;
+    showToast(readableError(error));
+  }
+});
+
+function setMicrosoftLoginBusy(active) {
+  microsoftLoginActive = active;
+  microsoftLoginButton.disabled = active;
+  microsoftCancelLoginButton.disabled = !active;
+}
+
+async function copyMicrosoftDeviceCode(code = microsoftDeviceCode.textContent, notify = true) {
+  const normalizedCode = String(code ?? '').trim();
+  if (!/^[A-Z0-9-]{6,24}$/i.test(normalizedCode)) return false;
+  try {
+    await accountsApi?.copyMicrosoftCode?.(normalizedCode);
+    microsoftCopyCodeButton.textContent = '已复制';
+    window.setTimeout(() => {
+      microsoftCopyCodeButton.textContent = '复制';
+    }, 1600);
+    if (notify) showToast('登录代码已复制');
+    return true;
+  } catch (error) {
+    if (notify) showToast(readableError(error));
+    return false;
+  }
+}
+
+async function beginMicrosoftLogin() {
+  if (microsoftLoginActive) return;
+  if (!accountsApi?.beginMicrosoft || !accountsApi?.completeMicrosoft) {
+    showToast('请在 Electron 启动器中使用 Microsoft 登录');
+    return;
+  }
+
+  setMicrosoftLoginBusy(true);
+  microsoftDevicePanel.hidden = false;
+  microsoftDeviceCode.textContent = '正在连接…';
+  microsoftLoginHint.textContent = '正在向 Microsoft 申请登录代码';
+  try {
+    const session = await accountsApi.beginMicrosoft();
+    microsoftLoginSessionId = session.sessionId;
+    microsoftDeviceCode.textContent = session.userCode;
+    const copied = await copyMicrosoftDeviceCode(session.userCode, false);
+    microsoftLoginHint.textContent = copied
+      ? '代码已复制；授权页面完成后会自动登录'
+      : '授权页面已打开，完成后会自动登录';
+    const completedState = await accountsApi.completeMicrosoft(session.sessionId);
+    if (microsoftLoginSessionId !== session.sessionId) return;
+    accountState = completedState;
+    updateAccountCard();
+    renderAccountList();
+    microsoftDevicePanel.hidden = true;
+    showToast(`Microsoft 登录成功：${accountState.current?.name ?? 'Minecraft 玩家'}`);
+  } catch (error) {
+    const message = readableError(error);
+    if (!message.includes('登录已取消')) {
+      microsoftLoginHint.textContent = message;
+      showToast(message);
+    }
+  } finally {
+    microsoftLoginSessionId = undefined;
+    setMicrosoftLoginBusy(false);
+  }
+}
+
+async function cancelMicrosoftLogin() {
+  const sessionId = microsoftLoginSessionId;
+  microsoftLoginSessionId = undefined;
+  if (sessionId) await accountsApi?.cancelMicrosoft?.(sessionId);
+  microsoftDevicePanel.hidden = true;
+  setMicrosoftLoginBusy(false);
+  showToast('Microsoft 登录已取消');
 }
 
 function setLittleSkinLoginBusy(active) {
@@ -800,33 +1071,48 @@ function updateDownloadProgress(progress) {
   if (downloadCancelRequested && progress.phase !== 'complete') return;
   downloadStatus.hidden = false;
   downloadMessage.textContent = progress.message ?? '正在准备下载…';
+  downloadStage.textContent = {
+    preparing: '准备下载',
+    'preparing-base': '准备基础游戏',
+    benchmarking: '测速',
+    'downloading-base': '基础游戏下载',
+    'base-ready': '基础游戏就绪',
+    'downloading-loader': '加载器下载',
+    'installing-loader': '安装加载器',
+    'installing-base': '安装基础游戏',
+    'resolving-files': '解析整合包',
+    'downloading-files': '整合包下载',
+    'copying-overrides': '整理整合包',
+    'committing-instance': '保存整合包',
+    complete: '完成'
+  }[progress.phase] ?? '下载';
 
   const totalFiles = progress.totalFiles ?? 0;
   const completedFiles = progress.completedFiles ?? 0;
   const totalBytes = progress.totalBytes ?? 0;
   const completedBytes = progress.completedBytes ?? 0;
-  const useByteProgress = totalBytes > 0;
+  const useByteProgress = progress.totalBytesKnown !== false && totalBytes > 0;
   const progressTotal = useByteProgress ? totalBytes : totalFiles;
   const progressValue = useByteProgress ? completedBytes : completedFiles;
-  const percent = progressTotal > 0
-    ? Math.min(100, Math.round((progressValue / progressTotal) * 100))
-    : 0;
-  downloadProgress.max = Math.max(progressTotal, 1);
-  downloadProgress.value = Math.min(progressValue, downloadProgress.max);
-  downloadPercent.textContent = progress.phase === 'complete' ? '100%' : `${percent}%`;
+  const percent = renderProgressBar(downloadProgress, progressValue, progressTotal, progress.phase === 'complete');
+  downloadPercent.textContent = percent === null ? '—' : `${percent}%`;
 
   // 主页状态条同步显示实时下载进度，避免下载进行中误显"下载失败"
   if (activeDownloadLabel) {
     if (progress.phase === 'complete') {
       gameStatus.textContent = `${activeDownloadLabel} 下载完成`;
-    } else if (progress.phase === 'preparing' || progress.phase === 'installing-base') {
+    } else if (['preparing', 'preparing-base', 'installing-base'].includes(progress.phase)) {
       gameStatus.textContent = `正在准备 ${activeDownloadLabel}`;
+    } else if (progress.phase === 'installing-loader' || progress.phase === 'base-ready') {
+      gameStatus.textContent = `正在安装 ${activeDownloadLabel}`;
     } else if (progress.phase === 'copying-overrides' || progress.phase === 'committing-instance') {
       gameStatus.textContent = `正在整理 ${activeDownloadLabel}`;
     } else if (progress.phase === 'resolving-files') {
       gameStatus.textContent = `正在解析 ${activeDownloadLabel} 文件`;
     } else {
-      gameStatus.textContent = `正在下载 ${activeDownloadLabel} · ${percent}%`;
+      gameStatus.textContent = percent === null
+        ? `正在处理 ${activeDownloadLabel}`
+        : `正在下载 ${activeDownloadLabel} · ${percent}%`;
     }
     statusBadge.textContent = 'DOWNLOAD';
   }
@@ -1370,8 +1656,7 @@ async function installSelectedVersion() {
     renderVersionCatalog(version.id);
     renderLoaderCatalog(loader.version);
     useVersion(result.profileId ?? version.id, loaderLabel);
-    downloadMessage.textContent = `${loaderLabel} 安装完成`;
-    downloadPercent.textContent = '100%';
+    updateDownloadProgress({ phase: 'complete', message: `${loaderLabel} 安装完成` });
     statusBadge.textContent = 'READY';
   } catch (error) {
     const message = readableError(error);
@@ -1379,12 +1664,14 @@ async function installSelectedVersion() {
     downloadMessage.textContent = cancelled
       ? '下载已取消'
       : `下载失败：${message}。可重新点击「重试」再次下载。`;
+    if (!downloadProgress.hasAttribute('value')) downloadProgress.value = 0;
+    downloadStage.textContent = cancelled ? '已取消' : '下载失败';
     downloadPercent.textContent = cancelled ? '—' : downloadPercent.textContent;
     statusBadge.textContent = cancelled ? 'READY' : 'ERROR';
     gameStatus.textContent = cancelled ? '下载已取消' : '下载失败，可重试';
     if (!cancelled) {
       lastDownloadFailed = true;
-      showToast(`${message}，可点击「重试」重新下载`);
+      showToast(`下载失败：${message}，可点击「重试」重新下载`, true);
     } else {
       showToast('已取消下载，并清理临时文件');
     }
@@ -1480,6 +1767,7 @@ document.querySelector('#closeButton').addEventListener('click', () => {
 accountButton.addEventListener('click', () => {
   renderAccountList();
   accountDialog.showModal();
+  microsoftLoginButton.focus();
 });
 
 addOfflineButton.addEventListener('click', addOfflineAccount);
@@ -1490,6 +1778,9 @@ offlineNameInput.addEventListener('keydown', (event) => {
   }
 });
 
+microsoftLoginButton.addEventListener('click', beginMicrosoftLogin);
+microsoftCopyCodeButton.addEventListener('click', () => copyMicrosoftDeviceCode());
+microsoftCancelLoginButton.addEventListener('click', cancelMicrosoftLogin);
 littleSkinLoginButton.addEventListener('click', beginLittleSkinLogin);
 littleSkinPasswordInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
@@ -1498,10 +1789,16 @@ littleSkinPasswordInput.addEventListener('keydown', (event) => {
   }
 });
 
+accountsApi?.onMicrosoftProgress?.((progress) => {
+  if (!microsoftLoginActive || progress?.sessionId !== microsoftLoginSessionId) return;
+  if (progress.message) microsoftLoginHint.textContent = progress.message;
+});
+
 document.querySelector('#settingsButton').addEventListener('click', async () => {
   if (!launcherSettingsLoaded) await loadLauncherSettings();
   applySettingsToForm();
   settingsDialog.showModal();
+  void prepareJavaDownloadSelection();
 });
 
 updateStatusBadge.addEventListener('click', () => {
@@ -1535,6 +1832,41 @@ document.querySelector('#versionButton').addEventListener('click', () => {
   }
 });
 
+skinFilePickerButton.addEventListener('click', () => skinFileInput.click());
+
+skinFileInput.addEventListener('change', () => {
+  const file = skinFileInput.files?.[0];
+  if (!file) return;
+  const filePath = environment?.files?.getPath?.(file);
+  if (!filePath) {
+    skinUploadHint.textContent = '无法获取文件路径，请在 Electron 启动器中使用';
+    skinUploadHint.classList.add('is-error');
+    return;
+  }
+  skinUploadFilePath = filePath;
+  skinFileName.textContent = file.name;
+  skinUploadHint.textContent = '仅支持 64×32 或 64×64 像素的 PNG 文件';
+  skinUploadHint.classList.remove('is-error');
+});
+
+skinUploadDialog.addEventListener('close', async () => {
+  const accountId = skinUploadAccountId;
+  const filePath = skinUploadFilePath;
+  skinUploadAccountId = null;
+  skinUploadFilePath = null;
+  skinFileInput.value = '';
+  if (skinUploadDialog.returnValue !== 'upload' || !accountId || !filePath) return;
+  skinUploadHint.textContent = '正在上传…';
+  try {
+    accountState = await accountsApi.uploadSkin(accountId, filePath, skinModelSelect.value);
+    updateAccountCard();
+    renderAccountList();
+    showToast('皮肤上传成功');
+  } catch (error) {
+    showToast(readableError(error));
+  }
+});
+
 settingsDialog.addEventListener('close', async () => {
   if (settingsDialog.returnValue === 'save') {
     try {
@@ -1551,6 +1883,10 @@ settingsDialog.addEventListener('close', async () => {
       launcherSettings = settingsApi ? await settingsApi.update(patch) : patch;
       applySettingsToForm();
       if (launcherSettings.gameDirectoryMode !== previousDirectoryMode) {
+        autoJavaDetection = null;
+        autoJavaDetectionPromise = null;
+        renderJavaPathSetting();
+        void refreshAutoJavaDetection();
         invalidateVersionCatalogForDirectoryChange();
         await reloadLocalProfilesForDirectoryChange();
       }
@@ -1705,17 +2041,6 @@ if (minecraft?.onLaunchStatus) {
         statusBadge.textContent = 'YGGDRASIL';
         launchHint.textContent = '校验 authlib-injector';
       }
-    } else if (status.phase === 'java') {
-      if (versionSelect.value === launchTargetId) {
-        gameStatus.textContent = status.message ?? `正在准备 Java ${status.majorVersion ?? ''}`;
-        statusBadge.textContent = 'JAVA';
-        if (Number.isFinite(status.receivedBytes) && Number.isFinite(status.totalBytes)) {
-          const percent = Math.min(100, Math.round(status.receivedBytes / status.totalBytes * 100));
-          launchHint.textContent = `自动安装 Java ${status.majorVersion} · ${percent}%`;
-        } else {
-          launchHint.textContent = `自动准备 Java ${status.majorVersion ?? ''}`;
-        }
-      }
     } else if (status.phase === 'exited') {
       activeGameProfiles.delete(launchTargetId);
       if (versionSelect.value === launchTargetId) {
@@ -1797,7 +2122,7 @@ async function installDroppedModpack(filePath) {
     const cancelled = downloadCancelRequested || message.includes('下载已取消');
     gameStatus.textContent = cancelled ? '整合包安装已取消' : '整合包安装失败，可重新拖入重试';
     statusBadge.textContent = cancelled ? 'READY' : 'ERROR';
-    showToast(cancelled ? '整合包安装已取消' : `${message}，可重新拖入整合包重试`);
+    showToast(cancelled ? '整合包安装已取消' : `下载失败：${message}，可重新拖入整合包重试`, !cancelled);
   } finally {
     modpackInstallActive = false;
     versionDownloadActive = false;
@@ -1875,6 +2200,8 @@ launchButton.addEventListener('click', async () => {
     gameStatus.textContent = '游戏启动失败';
     statusBadge.textContent = 'ERROR';
     showToast(message);
+    const requiredJava = message.match(/需要 Java (\d+)/);
+    if (requiredJava) void openJavaSettings(Number(requiredJava[1]));
   } finally {
     launchRequestActive = false;
     updateLaunchButtonState();
@@ -1883,6 +2210,10 @@ launchButton.addEventListener('click', async () => {
 });
 
 versionSelect.addEventListener('change', () => {
+  javaRequirementRequest += 1;
+  if (settingsDialog.open && !javaDownloadPanel.hidden && !javaDownloadActive) {
+    void prepareJavaDownloadSelection();
+  }
   rememberSelectedGame(versionSelect.value);
   if (versionSelect.value) {
     gameStatus.textContent = `已选择 Minecraft ${versionSelect.value}`;
@@ -1927,7 +2258,7 @@ async function performJavaCheck() {
     // 检测失败时继续弹出引导，不阻断使用
   }
   if (javaCheckDialog.open) return;
-  javaCheckHint.textContent = '当前未在系统中检测到可用的 Java，请先安装后再继续使用启动器。安装完成后点击「重新检测」。';
+  javaCheckHint.textContent = '当前未检测到可用的 Java，可在启动设置中下载运行环境或选择已安装的 Java。';
   javaCheckDialog.showModal();
 }
 
@@ -1959,7 +2290,8 @@ javaCheckRetryButton.addEventListener('click', async () => {
 });
 
 javaCheckDownloadButton.addEventListener('click', () => {
-  void environment?.shell?.openExternal?.('https://www.azul.com/downloads/?package=jdk-fx');
+  javaCheckDialog.close();
+  void openJavaSettings();
 });
 
 performJavaCheck();

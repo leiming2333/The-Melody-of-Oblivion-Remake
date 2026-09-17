@@ -14,6 +14,7 @@ const {
 } = require('../src/main/minecraft/source-manager');
 const {
   MinecraftDownloader,
+  createDownloadProgressTracker,
   createDownloadSegments,
   downloadFile,
   hasValidInstallationMarker,
@@ -23,6 +24,7 @@ const {
   safePath
 } = require('../src/main/minecraft/downloader');
 const {
+  MinecraftLoaderManager,
   fetchFastest,
   forgeLoaderVersions,
   forgeLoaderVersionsFromBmclapi,
@@ -123,6 +125,229 @@ test('大文件可以被均匀拆分为多个并行下载段', () => {
   assert.equal(createDownloadSegments(26 * 1024 * 1024, 8, 1024 * 1024).length, 8);
 });
 
+test('mixed known and unknown sizes never publish a partial byte denominator', () => {
+  const tasks = [
+    { destination: 'known', size: 100, label: 'Known file' },
+    { destination: 'unknown', label: 'Unknown file' }
+  ];
+  const progress = [];
+  const tracker = createDownloadProgressTracker({
+    tasks,
+    onProgress: (event) => progress.push(event),
+    emitIntervalMs: 0
+  });
+  tracker.start('Starting');
+  const hooks = tracker.hooks(tasks[1]);
+  hooks.onBytes(120);
+  assert.equal(progress.at(-1).completedBytes, 120);
+  assert.equal(progress.at(-1).completedFiles, 0);
+  assert.equal(progress.at(-1).totalBytes, 0);
+  assert.equal(progress.at(-1).totalBytesKnown, false);
+  assert.equal(progress.at(-1).etaSeconds, undefined);
+
+  hooks.onTotalBytes(120);
+  assert.equal(progress.at(-1).totalBytes, 220);
+  assert.equal(progress.at(-1).totalBytesKnown, true);
+  tracker.complete(tasks[1], { bytes: 120 });
+  tracker.complete(tasks[0], { bytes: 100, skipped: true });
+  assert.deepEqual(tracker.snapshot(), {
+    completedFiles: 2,
+    totalFiles: 2,
+    completedBytes: 220,
+    totalBytes: 220,
+    totalBytesKnown: true
+  });
+});
+
+test('retrying an unknown-size transfer discards the previous response length', () => {
+  const task = { destination: 'retry', label: 'Retry file' };
+  const progress = [];
+  const tracker = createDownloadProgressTracker({
+    tasks: [task],
+    onProgress: (event) => progress.push(event),
+    emitIntervalMs: 0
+  });
+  const hooks = tracker.hooks(task);
+  hooks.onTotalBytes(100);
+  hooks.onBytes(60);
+  hooks.onBytes(0);
+  assert.equal(progress.at(-1).completedBytes, 0);
+  assert.equal(progress.at(-1).totalBytes, 0);
+  assert.equal(progress.at(-1).totalBytesKnown, false);
+  assert.equal(progress.at(-1).etaSeconds, undefined);
+  hooks.onTotalBytes(200);
+  hooks.onBytes(40);
+  assert.equal(progress.at(-1).totalBytes, 200);
+  assert.equal(progress.at(-1).completedBytes, 40);
+});
+
+test('cached unknown-size files contribute their actual size without network speed', async (t) => {
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-cached-progress-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const destination = path.join(temporaryRoot, 'cached');
+  const content = Buffer.from('cached file');
+  await fs.writeFile(destination, content);
+  const task = { destination, label: 'Cached file', urls: [] };
+  const progress = [];
+  const tracker = createDownloadProgressTracker({
+    tasks: [task],
+    onProgress: (event) => progress.push(event)
+  });
+  tracker.start('Starting');
+  const result = await downloadFile({ ...task, ...tracker.hooks(task) });
+  tracker.complete(task, result);
+  assert.equal(result.skipped, true);
+  assert.equal(result.bytes, content.length);
+  assert.equal(progress.at(-1).completedBytes, content.length);
+  assert.equal(progress.at(-1).totalBytes, content.length);
+  assert.equal(progress.at(-1).totalBytesKnown, true);
+  assert.equal(progress.at(-1).bytesPerSecond, 0);
+});
+
+test('unknown-size HTTP downloads learn an identity response length before receiving bytes', async (t) => {
+  const content = Buffer.from('unknown-size download');
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { 'Content-Length': content.length });
+    response.end(content);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-http-progress-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const task = {
+    destination: path.join(temporaryRoot, 'download'),
+    label: 'Unknown file',
+    urls: [`http://127.0.0.1:${server.address().port}/file`]
+  };
+  const progress = [];
+  const tracker = createDownloadProgressTracker({
+    tasks: [task],
+    onProgress: (event) => progress.push(event),
+    emitIntervalMs: 0
+  });
+  const hooks = tracker.hooks(task);
+  const callbackOrder = [];
+  const result = await downloadFile({
+    ...task,
+    ...hooks,
+    onTotalBytes: (bytes) => {
+      callbackOrder.push('total');
+      hooks.onTotalBytes(bytes);
+    },
+    onBytes: (bytes) => {
+      if (bytes > 0) callbackOrder.push('bytes');
+      hooks.onBytes(bytes);
+    }
+  });
+  tracker.complete(task, result);
+  assert.equal(callbackOrder[0], 'total');
+  assert.equal(callbackOrder.filter((event) => event === 'total').length, 1);
+  assert.ok(callbackOrder.includes('bytes'));
+  assert.ok(progress.some((event) => event.totalBytesKnown && event.completedBytes === 0));
+  assert.equal(progress.at(-1).totalBytes, content.length);
+  assert.equal(progress.at(-1).completedBytes, content.length);
+  assert.deepEqual(await fs.readFile(task.destination), content);
+});
+
+test('encoded and partial HTTP response lengths are not treated as complete file sizes', async (t) => {
+  const content = Buffer.from('decoded file data '.repeat(20));
+  const encoded = require('node:zlib').gzipSync(content);
+  const server = http.createServer((request, response) => {
+    if (request.url === '/encoded') {
+      response.writeHead(200, {
+        'Content-Length': encoded.length,
+        'Content-Encoding': 'gzip'
+      });
+      response.end(encoded);
+    } else {
+      response.writeHead(206, {
+        'Content-Length': content.length,
+        'Content-Range': `bytes 0-${content.length - 1}/${content.length * 2}`
+      });
+      response.end(content);
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-header-progress-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  for (const route of ['encoded', 'partial']) {
+    const totals = [];
+    const result = await downloadFile({
+      destination: path.join(temporaryRoot, route),
+      label: route,
+      urls: [`http://127.0.0.1:${server.address().port}/${route}`],
+      onTotalBytes: (bytes) => totals.push(bytes)
+    });
+    assert.deepEqual(totals, []);
+    assert.equal(result.bytes, content.length);
+  }
+});
+
+test('loader installation publishes complete only after the loader has finished', async () => {
+  const progress = [];
+  let markLoaderStarted;
+  let finishLoader;
+  const loaderStarted = new Promise((resolve) => { markLoaderStarted = resolve; });
+  const loaderFinished = new Promise((resolve) => { finishLoader = resolve; });
+  const manager = new MinecraftLoaderManager({
+    gameDirectory: 'game',
+    sourceManager: {},
+    downloader: {
+      async installVersion(_version, onProgress) {
+        onProgress({ phase: 'preparing', message: 'Preparing base' });
+        onProgress({ phase: 'downloading', completedFiles: 1, totalFiles: 2 });
+        onProgress({ phase: 'complete', completedFiles: 2, totalFiles: 2 });
+        return { source: 'official' };
+      }
+    }
+  });
+  manager.validateLoaderVersion = async () => ({ entry: {}, source: { id: 'official' } });
+  manager.installFabric = async () => {
+    markLoaderStarted();
+    await loaderFinished;
+    return { profileId: 'fabric-test', totalFiles: 3 };
+  };
+  const installation = manager.installLoader({
+    gameVersion: '1.21.5', loaderType: 'fabric', loaderVersion: '0.16.14'
+  }, (event) => progress.push(event));
+  await loaderStarted;
+  assert.equal(progress.some((event) => event.phase === 'complete'), false);
+  assert.ok(progress.some((event) => event.phase === 'preparing-base'));
+  assert.ok(progress.some((event) => event.phase === 'downloading-base' && event.completedFiles === 1));
+  assert.equal(progress.at(-1).phase, 'base-ready');
+  assert.equal(progress.at(-1).completedFiles, 2);
+  finishLoader();
+  await installation;
+  assert.equal(progress.filter((event) => event.phase === 'complete').length, 1);
+  assert.equal(progress.at(-1).phase, 'complete');
+  assert.equal(progress.at(-1).completedFiles, 3);
+});
+
+test('vanilla installation retains the downloader completion event', async () => {
+  const progress = [];
+  const manager = new MinecraftLoaderManager({
+    gameDirectory: 'game',
+    sourceManager: {},
+    downloader: {
+      async installVersion(_version, onProgress) {
+        onProgress({ phase: 'complete', completedFiles: 2, totalFiles: 2 });
+        return { versionId: '1.21.5' };
+      }
+    }
+  });
+  await manager.installLoader({ gameVersion: '1.21.5', loaderType: 'vanilla' },
+    (event) => progress.push(event));
+  assert.equal(progress.length, 1);
+  assert.equal(progress[0].phase, 'complete');
+});
+
 test('任务池收到取消信号后立即停止派发任务', async () => {
   const controller = new AbortController();
   controller.abort();
@@ -214,6 +439,116 @@ test('取消文件流后清理临时文件', async (t) => {
   );
   await assert.rejects(fs.stat(destination), { code: 'ENOENT' });
   await assert.rejects(fs.stat(`${destination}.part`), { code: 'ENOENT' });
+});
+
+test('小文件长时间无数据时切换备用地址', { timeout: 5000 }, async (t) => {
+  const content = Buffer.alloc(64 * 1024, 0x42);
+  const requested = [];
+  const server = http.createServer((request, response) => {
+    requested.push(request.url);
+    response.writeHead(200, { 'Content-Length': content.length });
+    if (request.url === '/stall') {
+      response.write(content.subarray(0, 1));
+      return;
+    }
+    response.end(content);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-idle-fallback-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const destination = path.join(temporaryRoot, 'asset');
+  const address = server.address();
+  const switches = [];
+  const result = await downloadFile({
+    label: '停滞小文件',
+    destination,
+    urls: [
+      `http://127.0.0.1:${address.port}/stall`,
+      `http://127.0.0.1:${address.port}/fast`
+    ],
+    size: content.length,
+    sha1: crypto.createHash('sha1').update(content).digest('hex'),
+    idleTimeoutMs: 80,
+    signal: AbortSignal.timeout(3000),
+    onSourceSwitch: (event) => switches.push(event)
+  });
+
+  assert.deepEqual(requested, ['/stall', '/fast']);
+  assert.equal(result.url, `http://127.0.0.1:${address.port}/fast`);
+  assert.equal(switches.length, 1);
+  assert.equal(switches[0].reason, 'idle');
+  assert.deepEqual(await fs.readFile(destination), content);
+  await assert.rejects(fs.stat(`${destination}.part`), { code: 'ENOENT' });
+});
+
+test('唯一地址停滞时结束下载并清理临时文件', { timeout: 5000 }, async (t) => {
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { 'Content-Length': 64 * 1024 });
+    response.write(Buffer.from('x'));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-idle-cleanup-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const destination = path.join(temporaryRoot, 'asset');
+  const address = server.address();
+
+  await assert.rejects(downloadFile({
+    label: '唯一停滞地址',
+    destination,
+    urls: [`http://127.0.0.1:${address.port}/stall`],
+    size: 64 * 1024,
+    idleTimeoutMs: 80,
+    signal: AbortSignal.timeout(3000)
+  }), /下载连接长时间无数据/);
+  await assert.rejects(fs.stat(destination), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(`${destination}.part`), { code: 'ENOENT' });
+});
+
+test('持续有数据的慢速连接可以超过无数据超时完成下载', { timeout: 5000 }, async (t) => {
+  const content = Buffer.alloc(24 * 1024, 0x31);
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { 'Content-Length': content.length });
+    let sent = 0;
+    const timer = setInterval(() => {
+      const chunk = content.subarray(sent, sent + 1024);
+      sent += chunk.length;
+      response.write(chunk);
+      if (sent >= content.length) {
+        clearInterval(timer);
+        response.end();
+      }
+    }, 20);
+    response.once('close', () => clearInterval(timer));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-idle-progress-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const destination = path.join(temporaryRoot, 'asset');
+  const address = server.address();
+  const result = await downloadFile({
+    label: '持续慢速下载',
+    destination,
+    urls: [`http://127.0.0.1:${address.port}/slow`],
+    size: content.length,
+    sha1: crypto.createHash('sha1').update(content).digest('hex'),
+    idleTimeoutMs: 100,
+    signal: AbortSignal.timeout(3000)
+  });
+
+  assert.equal(result.bytes, content.length);
+  assert.deepEqual(await fs.readFile(destination), content);
 });
 
 test('只有完整文件检测通过后版本才会标记为已安装', async (t) => {

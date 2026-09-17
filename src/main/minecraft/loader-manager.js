@@ -400,7 +400,6 @@ class MinecraftLoaderManager {
     const tasks = deduplicateTasks(
       libraryTasks(profile, this.gameDirectory, this.sourceManager, fetched.source.id)
     );
-    const totalBytes = tasks.reduce((sum, task) => sum + (task.size ?? 0), 0);
     const progressTracker = createDownloadProgressTracker({
       tasks,
       onProgress,
@@ -430,7 +429,8 @@ class MinecraftLoaderManager {
       ...tasks
     ]);
 
-    return { profileId: profile.id, source: fetched.source.id, totalFiles: tasks.length, totalBytes };
+    const { totalBytes, totalBytesKnown } = progressTracker.snapshot();
+    return { profileId: profile.id, source: fetched.source.id, totalFiles: tasks.length, totalBytes, totalBytesKnown };
   }
 
   async installWithInstaller(
@@ -547,7 +547,13 @@ class MinecraftLoaderManager {
       versionId: gameVersion,
       loaderType
     });
-    const baseInstall = await this.downloader.installVersion(gameVersion, onProgress, { signal });
+    const baseInstall = await this.downloader.installVersion(gameVersion, (progress) => onProgress({
+      ...progress,
+      loaderType,
+      phase: progress.phase === 'complete'
+        ? 'base-ready'
+        : progress.phase === 'downloading' ? 'downloading-base' : 'preparing-base'
+    }), { signal });
     const preferredDownloadSourceId = baseInstall.source ?? source.id;
 
     const result = loaderType === 'fabric'

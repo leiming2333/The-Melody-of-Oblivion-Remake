@@ -4,8 +4,9 @@ const path = require('node:path');
 
 const OFFLINE_NAME_PATTERN = /^[A-Za-z0-9_]{3,16}$/;
 const SKIN_MODELS = Object.freeze(['steve', 'alex']);
+const MICROSOFT_SECRET_FIELDS = Object.freeze(['accessToken', 'microsoftRefreshToken']);
 const YGGDRASIL_SECRET_FIELDS = Object.freeze(['accessToken', 'clientToken']);
-const ONLINE_ACCOUNT_TYPES = Object.freeze(['yggdrasil']);
+const ONLINE_ACCOUNT_TYPES = Object.freeze(['microsoft', 'yggdrasil']);
 
 const passthroughSecretCodec = Object.freeze({
   decode: (value) => value,
@@ -19,13 +20,18 @@ function transformAccountSecrets(value, transform) {
     accounts: value.accounts.map((account) => {
       if (!ONLINE_ACCOUNT_TYPES.includes(account?.type)) return account;
       const copy = { ...account };
-      for (const field of YGGDRASIL_SECRET_FIELDS) {
+      const fields = account.type === 'microsoft'
+        ? MICROSOFT_SECRET_FIELDS
+        : YGGDRASIL_SECRET_FIELDS;
+      for (const field of fields) {
         if (typeof copy[field] === 'string' && copy[field]) copy[field] = transform(copy[field]);
       }
       return copy;
     })
   };
 }
+
+const transformMicrosoftSecrets = transformAccountSecrets;
 
 function normalizeSkinUrl(value, allowedDomains = ['textures.minecraft.net']) {
   try {
@@ -100,9 +106,11 @@ function normalizeState(value) {
       ).map((account) => ({
         ...account,
         skinModel: SKIN_MODELS.includes(account.skinModel) ? account.skinModel : 'steve',
-        skinUrl: account.type === 'yggdrasil'
-          ? normalizeSkinUrl(account.skinUrl, ['littleskin.cn'])
-          : undefined
+        skinUrl: account.type === 'microsoft'
+          ? normalizeSkinUrl(account.skinUrl, ['textures.minecraft.net'])
+          : account.type === 'yggdrasil'
+            ? normalizeSkinUrl(account.skinUrl, ['littleskin.cn'])
+            : undefined
       }))
     : [];
   const currentId = accounts.some((account) => account.id === value?.currentId)
@@ -163,7 +171,10 @@ class AccountStore {
         accessToken: _accessToken,
         accessTokenExpiresAt: _accessTokenExpiresAt,
         clientId: _clientId,
+        microsoftClientId: _microsoftClientId,
+        microsoftRefreshToken: _microsoftRefreshToken,
         clientToken: _clientToken,
+        xuid: _xuid,
         ...visible
       } = account;
       return visible;
@@ -222,6 +233,38 @@ class AccountStore {
       };
       state.accounts.push(account);
       state.currentId = account.id;
+      await this.write(state);
+      return this.publicState(state);
+    });
+  }
+
+  async upsertMicrosoft(credentials) {
+    const uuid = String(credentials?.uuid ?? '').toLowerCase();
+    const name = String(credentials?.name ?? '');
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(uuid)) {
+      throw new Error('Microsoft 账户 UUID 无效');
+    }
+    if (!OFFLINE_NAME_PATTERN.test(name) || !credentials?.accessToken) {
+      throw new Error('Microsoft Minecraft 档案无效');
+    }
+    return this.runExclusive(async () => {
+      const state = await this.read();
+      const id = `microsoft:${uuid}`;
+      const existingIndex = state.accounts.findIndex((account) => account.id === id);
+      const existing = existingIndex >= 0 ? state.accounts[existingIndex] : undefined;
+      const account = {
+        ...existing,
+        ...credentials,
+        id,
+        type: 'microsoft',
+        name,
+        uuid,
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      if (existingIndex >= 0) state.accounts[existingIndex] = account;
+      else state.accounts.push(account);
+      state.currentId = id;
       await this.write(state);
       return this.publicState(state);
     });
@@ -302,6 +345,25 @@ class AccountStore {
     });
   }
 
+  async refreshMicrosoftSkin(accountId, fetchImpl = fetch) {
+    return this.runExclusive(async () => {
+      const state = await this.read();
+      const account = state.accounts.find((item) => item.id === accountId);
+      if (!account || account.type !== 'microsoft') throw new Error('Microsoft 账户不存在');
+      const profileUuid = String(account.uuid).replaceAll('-', '');
+      const response = await fetchImpl(
+        `https://sessionserver.mojang.com/session/minecraft/profile/${profileUuid}?unsigned=false`,
+        { signal: AbortSignal.timeout(8000) }
+      );
+      if (!response.ok) throw new Error(`正版皮肤同步失败：HTTP ${response.status}`);
+      const skinUrl = skinUrlFromProfile(await response.json(), ['textures.minecraft.net']);
+      if (!skinUrl) throw new Error('正版档案没有可用皮肤');
+      account.skinUrl = skinUrl;
+      await this.write(state);
+      return this.publicState(state);
+    });
+  }
+
   async refreshYggdrasilSkin(accountId, fetchImpl = fetch) {
     return this.runExclusive(async () => {
       const state = await this.read();
@@ -323,6 +385,7 @@ class AccountStore {
 
   async refreshSkin(accountId, fetchImpl = fetch) {
     const account = await this.getAccount(accountId);
+    if (account?.type === 'microsoft') return this.refreshMicrosoftSkin(accountId, fetchImpl);
     if (account?.type === 'yggdrasil') return this.refreshYggdrasilSkin(accountId, fetchImpl);
     throw new Error('当前账户不支持在线皮肤同步');
   }
@@ -344,6 +407,7 @@ module.exports = {
   AccountStore,
   OFFLINE_NAME_PATTERN,
   SKIN_MODELS,
+  MICROSOFT_SECRET_FIELDS,
   YGGDRASIL_SECRET_FIELDS,
   javaUuidHashCode,
   normalizeSkinUrl,
@@ -351,6 +415,7 @@ module.exports = {
   offlineUuidForSkinModel,
   skinUrlFromProfile,
   transformAccountSecrets,
+  transformMicrosoftSecrets,
   validateSkinModel,
   validateOfflineName
 };

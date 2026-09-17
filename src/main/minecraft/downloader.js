@@ -14,6 +14,7 @@ const DEFAULT_SLOW_GRACE_MS = 10000;
 const DEFAULT_SLOW_THRESHOLD_BYTES_PER_SECOND = 96 * 1024;
 const DEFAULT_SLOW_CHECK_INTERVAL_MS = 1000;
 const DEFAULT_SLOW_MINIMUM_SIZE = 2 * 1024 * 1024;
+const DEFAULT_IDLE_TIMEOUT_MS = 15000;
 const INSTALLATION_MARKER_FILE = '.melody-installed.json';
 
 function sourceDetailsFromUrl(url) {
@@ -38,21 +39,32 @@ function sourceDetailsFromUrl(url) {
 
 function createTransferMonitor(task, controller, canSwitchSource) {
   const minimumSize = task.slowMinimumSize ?? DEFAULT_SLOW_MINIMUM_SIZE;
-  const enabled = canSwitchSource && (
+  const slowEnabled = canSwitchSource && (
     !Number.isFinite(task.size) || task.size >= minimumSize
   );
   const graceMs = task.slowGraceMs ?? DEFAULT_SLOW_GRACE_MS;
   const threshold = task.slowThresholdBytesPerSecond
     ?? DEFAULT_SLOW_THRESHOLD_BYTES_PER_SECOND;
   const intervalMs = task.slowCheckIntervalMs ?? DEFAULT_SLOW_CHECK_INTERVAL_MS;
+  const idleTimeoutMs = task.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const windowMs = Math.max(intervalMs * 2, Math.min(5000, graceMs));
   let startedAt = Date.now();
+  let lastChunkAt = startedAt;
   const samples = [{ at: startedAt, bytes: 0 }];
   let bytes = 0;
   let slow = false;
+  let idle = false;
+  let active = true;
 
-  const timer = enabled ? setInterval(() => {
+  const timer = setInterval(() => {
+    if (!active) return;
     const now = Date.now();
+    if (now - lastChunkAt >= idleTimeoutMs) {
+      idle = true;
+      controller.abort();
+      return;
+    }
+    if (!slowEnabled) return;
     samples.push({ at: now, bytes });
     while (samples.length > 2 && samples[1].at < now - windowMs) samples.shift();
     if (now - startedAt < graceMs) return;
@@ -63,12 +75,13 @@ function createTransferMonitor(task, controller, canSwitchSource) {
       slow = true;
       controller.abort();
     }
-  }, intervalMs) : undefined;
+  }, Math.min(intervalMs, idleTimeoutMs));
   timer?.unref?.();
 
   return {
     addBytes(length) {
       bytes += length;
+      if (length > 0) lastChunkAt = Date.now();
       task.onBytes?.(bytes);
     },
     get bytes() {
@@ -77,14 +90,22 @@ function createTransferMonitor(task, controller, canSwitchSource) {
     get slow() {
       return slow;
     },
+    get idle() {
+      return idle;
+    },
     get averageBytesPerSecond() {
       return Math.round(bytes / Math.max(0.001, (Date.now() - startedAt) / 1000));
     },
     reset() {
       bytes = 0;
       startedAt = Date.now();
+      lastChunkAt = startedAt;
+      active = true;
       samples.splice(0, samples.length, { at: startedAt, bytes: 0 });
       task.onBytes?.(0);
+    },
+    pause() {
+      active = false;
     },
     stop() {
       if (timer) clearInterval(timer);
@@ -364,6 +385,7 @@ async function downloadFileSegmented(url, temporary, task) {
       );
     }, task.signal);
 
+    task.onTransferComplete?.();
     await fsPromises.rm(temporary, { force: true });
     for (const chunkPath of chunkPaths) {
       throwIfAborted(task.signal);
@@ -382,7 +404,10 @@ async function downloadFileSegmented(url, temporary, task) {
 async function downloadFile(task) {
   throwIfAborted(task.signal);
   if (await fileMatches(task.destination, task)) {
-    return { skipped: true, bytes: task.size ?? 0, url: undefined, segmented: false, segments: 0 };
+    const bytes = Number.isFinite(task.size)
+      ? task.size
+      : (await fsPromises.stat(task.destination)).size;
+    return { skipped: true, bytes, url: undefined, segmented: false, segments: 0 };
   }
 
   await fsPromises.mkdir(path.dirname(task.destination), { recursive: true });
@@ -409,10 +434,11 @@ async function downloadFile(task) {
           segmentResult = await downloadFileSegmented(url, temporary, {
             ...task,
             signal: attemptSignal,
-            onChunk: (length) => monitor.addBytes(length)
+            onChunk: (length) => monitor.addBytes(length),
+            onTransferComplete: () => monitor.pause()
           });
         } catch (error) {
-          if (task.signal?.aborted || monitor.slow) throw error;
+          if (task.signal?.aborted || monitor.slow || monitor.idle) throw error;
           await fsPromises.rm(temporary, { force: true });
           monitor.reset();
         }
@@ -424,6 +450,14 @@ async function downloadFile(task) {
           throw new Error(`HTTP ${response.status}`);
         }
 
+        const contentLength = Number(response.headers.get('content-length'));
+        const contentEncoding = response.headers.get('content-encoding')?.trim().toLowerCase();
+        if (Number.isSafeInteger(contentLength) && contentLength > 0
+          && response.status !== 206 && !response.headers.has('content-range')
+          && (!contentEncoding || contentEncoding === 'identity')) {
+          task.onTotalBytes?.(contentLength);
+        }
+
         const readable = Readable.fromWeb(response.body);
         readable.on('data', (chunk) => monitor.addBytes(chunk.length));
         await pipeline(
@@ -433,6 +467,7 @@ async function downloadFile(task) {
         );
       }
 
+      monitor.pause();
       throwIfAborted(task.signal);
       if (!(await fileMatches(temporary, task))) {
         throw new Error('文件校验失败');
@@ -453,7 +488,7 @@ async function downloadFile(task) {
     } catch (error) {
       await fsPromises.rm(temporary, { force: true });
       if (task.signal?.aborted) throw createAbortError();
-      if (monitor.slow && nextUrl) {
+      if ((monitor.slow || monitor.idle) && nextUrl) {
         const nextSource = sourceDetailsFromUrl(nextUrl);
         task.onBytes?.(0);
         task.onSourceSwitch?.({
@@ -461,10 +496,14 @@ async function downloadFile(task) {
           nextSourceId: nextSource.sourceId,
           nextSourceLabel: nextSource.sourceLabel,
           nextUrl,
-          reason: 'slow',
+          reason: monitor.idle ? 'idle' : 'slow',
           bytesPerSecond: monitor.averageBytesPerSecond
         });
-        errors.push(`${url}: 下载速度持续过慢，已切换备用源`);
+        errors.push(`${url}: ${monitor.idle ? '下载连接长时间无数据' : '下载速度持续过慢'}，已切换备用源`);
+        continue;
+      }
+      if (monitor.idle) {
+        errors.push(`${url}: 下载连接长时间无数据，已中止`);
         continue;
       }
       if (isAbortError(error)) {
@@ -616,7 +655,17 @@ function createDownloadProgressTracker({
   emitIntervalMs = 220
 }) {
   const taskBytes = new Map(tasks.map((task) => [task.destination, 0]));
-  const totalBytes = tasks.reduce((sum, task) => sum + (task.size ?? 0), 0);
+  const declaredTaskSizes = new Map(tasks.map((task) => [
+    task.destination,
+    Number.isSafeInteger(task.size) && task.size >= 0 ? task.size : undefined
+  ]));
+  const taskSizes = new Map(declaredTaskSizes);
+  let knownTotalBytes = 0;
+  let unknownTaskSizes = 0;
+  for (const size of taskSizes.values()) {
+    if (size === undefined) unknownTaskSizes += 1;
+    else knownTotalBytes += size;
+  }
   let completedFiles = 0;
   let completedBytes = 0;
   let networkBytes = 0;
@@ -624,6 +673,23 @@ function createDownloadProgressTracker({
   let currentSourceId = initialSourceId;
   let currentSourceLabel = SOURCES[initialSourceId]?.label;
   const speedSamples = [{ at: Date.now(), bytes: 0 }];
+
+  function totals() {
+    const totalBytesKnown = unknownTaskSizes === 0 && Number.isSafeInteger(knownTotalBytes);
+    return {
+      totalBytesKnown,
+      totalBytes: totalBytesKnown ? knownTotalBytes : 0
+    };
+  }
+
+  function setTaskSize(task, size) {
+    const previous = taskSizes.get(task.destination);
+    if (previous === undefined) unknownTaskSizes -= 1;
+    else knownTotalBytes -= previous;
+    taskSizes.set(task.destination, size);
+    if (size === undefined) unknownTaskSizes += 1;
+    else knownTotalBytes += size;
+  }
 
   function updateSpeedSamples(now) {
     speedSamples.push({ at: now, bytes: networkBytes });
@@ -638,8 +704,9 @@ function createDownloadProgressTracker({
     if (!force && now - lastEmitAt < emitIntervalMs) return;
     lastEmitAt = now;
     const bytesPerSecond = updateSpeedSamples(now);
+    const { totalBytes, totalBytesKnown } = totals();
     const remainingBytes = Math.max(0, totalBytes - completedBytes);
-    const etaSeconds = bytesPerSecond > 1024 && totalBytes > 0
+    const etaSeconds = totalBytesKnown && bytesPerSecond > 1024 && totalBytes > 0
       ? Math.ceil(remainingBytes / bytesPerSecond)
       : undefined;
     onProgress({
@@ -652,6 +719,7 @@ function createDownloadProgressTracker({
       totalFiles: tasks.length,
       completedBytes,
       totalBytes,
+      totalBytesKnown,
       bytesPerSecond: Math.round(bytesPerSecond),
       etaSeconds,
       ...extra
@@ -673,8 +741,18 @@ function createDownloadProgressTracker({
     hooks(task) {
       return {
         onBytes: (bytes) => {
+          if (bytes === 0 && declaredTaskSizes.get(task.destination) === undefined) {
+            setTaskSize(task, undefined);
+          }
           setTaskBytes(task, bytes);
           emit(task.label);
+        },
+        onTotalBytes: (bytes) => {
+          if (declaredTaskSizes.get(task.destination) === undefined
+            && Number.isSafeInteger(bytes) && bytes > 0) {
+            setTaskSize(task, bytes);
+            emit(task.label, { force: true });
+          }
         },
         onSourceChange: (source) => {
           currentSourceId = source.sourceId;
@@ -684,7 +762,9 @@ function createDownloadProgressTracker({
         onSourceSwitch: (source) => {
           currentSourceId = source.nextSourceId;
           currentSourceLabel = source.nextSourceLabel;
-          emit('当前线路速度过慢，正在切换备用线路…', {
+          emit(source.reason === 'idle'
+            ? '当前线路长时间无响应，正在切换备用线路…'
+            : '当前线路速度过慢，正在切换备用线路…', {
             force: true,
             extra: { sourceSwitch: true }
           });
@@ -692,9 +772,11 @@ function createDownloadProgressTracker({
       };
     },
     complete(task, result, message) {
+      const bytes = declaredTaskSizes.get(task.destination) ?? result.bytes;
+      if (Number.isSafeInteger(bytes) && bytes >= 0) setTaskSize(task, bytes);
       setTaskBytes(
         task,
-        Number.isFinite(task.size) ? task.size : result.bytes,
+        bytes,
         result.skipped !== true
       );
       completedFiles += 1;
@@ -705,7 +787,7 @@ function createDownloadProgressTracker({
       emit(message ?? task.label, { force: true });
     },
     snapshot() {
-      return { completedFiles, totalFiles: tasks.length, completedBytes, totalBytes };
+      return { completedFiles, totalFiles: tasks.length, completedBytes, ...totals() };
     }
   };
 }
@@ -1021,7 +1103,8 @@ class MinecraftDownloader {
       sourceLabel: downloadSource.label,
       gameDirectory: this.gameDirectory,
       totalFiles: downloadTasks.length,
-      totalBytes: progress.totalBytes
+      totalBytes: progress.totalBytes,
+      totalBytesKnown: progress.totalBytesKnown
     };
     onProgress({
       phase: 'complete',
@@ -1036,6 +1119,7 @@ class MinecraftDownloader {
 
 module.exports = {
   DEFAULT_FILE_CONCURRENCY,
+  DEFAULT_IDLE_TIMEOUT_MS,
   DEFAULT_SEGMENT_CONCURRENCY,
   DEFAULT_SLOW_GRACE_MS,
   DEFAULT_SLOW_MINIMUM_SIZE,

@@ -123,9 +123,26 @@
           </header>
 
           <div id="accountList" class="account-list" aria-label="已添加账户"></div>
-          <p id="accountEmpty" class="account-empty">还没有账户，可添加离线账户或使用 LittleSkin 外置登录。</p>
+          <p id="accountEmpty" class="account-empty">还没有账户，可选择 Microsoft、离线或 LittleSkin 外置登录。</p>
 
-          <div class="standard-account-methods" aria-label="离线登录">
+          <div class="standard-account-methods" aria-label="Microsoft 与离线登录">
+          <section class="microsoft-account-form" aria-label="Microsoft 账户">
+            <button id="microsoftLoginButton" class="microsoft-account-button" type="button">
+              <span class="microsoft-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              <span><strong>Microsoft 登录</strong><small>Xbox Live · Minecraft Java</small></span>
+              <b>登录</b>
+            </button>
+            <div id="microsoftDevicePanel" class="microsoft-device-panel" hidden>
+              <span>在浏览器中输入代码</span>
+              <div class="microsoft-device-code-row">
+                <strong id="microsoftDeviceCode">—</strong>
+                <button id="microsoftCopyCodeButton" type="button">复制</button>
+              </div>
+              <small id="microsoftLoginHint">等待 Microsoft 授权…</small>
+              <button id="microsoftCancelLoginButton" type="button">取消</button>
+            </div>
+          </section>
+
           <section class="offline-account-form" aria-labelledby="offlineAccountTitle">
             <div class="account-section-title">
               <strong id="offlineAccountTitle">离线账户</strong>
@@ -235,7 +252,7 @@
 
           <div id="downloadStatus" class="download-status" hidden>
             <div class="download-status-line">
-              <span id="downloadMessage">正在准备下载…</span>
+              <span><span id="downloadStage">准备下载</span><span id="downloadMessage">正在准备下载…</span></span>
               <strong id="downloadPercent">0%</strong>
             </div>
             <progress id="downloadProgress" max="1" value="0"></progress>
@@ -275,8 +292,28 @@
                 <option value="custom">手动选择路径</option>
               </select>
               <button id="javaBrowseButton" type="button">选择</button>
+              <button id="javaDownloadButton" type="button" aria-expanded="false" aria-controls="javaDownloadPanel">下载环境</button>
             </div>
             <button id="javaRedetectButton" class="text-link-button" type="button">重新检测 Java 环境</button>
+            <div id="javaDownloadPanel" class="java-download-panel" hidden>
+              <label for="javaDownloadVersionSelect">Java 版本</label>
+              <div class="java-download-picker">
+                <select id="javaDownloadVersionSelect">
+                  <option value="8">Java 8</option>
+                  <option value="16">Java 16</option>
+                  <option value="17">Java 17</option>
+                  <option value="21" selected>Java 21</option>
+                  <option value="25">Java 25</option>
+                </select>
+                <button id="javaDownloadStartButton" class="primary-dialog-button" type="button">下载</button>
+                <button id="javaDownloadCancelButton" class="secondary-dialog-button" type="button" hidden>取消下载</button>
+              </div>
+              <div class="java-progress-status">
+                <p id="javaDownloadHint" role="status" aria-live="polite"></p>
+                <strong id="javaDownloadPercent"></strong>
+              </div>
+              <progress id="javaDownloadProgress" aria-label="Java 下载进度" max="100" value="0" hidden></progress>
+            </div>
           </div>
 
           <div class="setting-group">
@@ -358,7 +395,33 @@
         </form>
       </dialog>
 
-      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <dialog id="skinUploadDialog" class="rename-dialog">
+        <form method="dialog">
+          <header class="dialog-header">
+            <h2>上传皮肤</h2>
+            <button class="dialog-close" value="cancel" aria-label="关闭" type="submit">×</button>
+          </header>
+          <div class="skin-upload-field">
+            <button id="skinFilePickerButton" type="button">选择文件</button>
+            <span id="skinFileName">未选择</span>
+          </div>
+          <label class="skin-model-select">
+            <span>皮肤模型</span>
+            <select id="skinModelSelect">
+              <option value="steve">Steve（经典）</option>
+              <option value="alex">Alex（纤细）</option>
+            </select>
+          </label>
+          <p id="skinUploadHint" class="rename-hint">仅支持 64×32 或 64×64 像素的 PNG 文件</p>
+          <footer class="dialog-actions">
+            <button class="secondary-dialog-button" value="cancel" type="submit">取消</button>
+            <button id="skinUploadConfirmButton" class="primary-dialog-button" value="upload" type="submit">上传</button>
+          </footer>
+        </form>
+      </dialog>
+      <input id="skinFileInput" type="file" accept="image/png" hidden />
+
+      <div id="toast" class="toast" popover="manual" role="status" aria-live="polite"></div>
       <div id="modpackDropOverlay" class="modpack-drop-overlay" hidden>
         <span aria-hidden="true">＋</span>
         <strong>松开以安装整合包</strong>
@@ -375,17 +438,17 @@
           </header>
           <div class="java-check-body">
             <p id="javaCheckHint" class="java-check-hint">
-              启动 Minecraft 需要 Java 运行环境。当前未在系统中检测到可用的 Java，请先安装后再继续使用启动器。
+              当前未检测到可用的 Java 运行环境。
             </p>
             <p class="java-check-guide">
-              推荐安装 <strong>AZUL Zulu JDK</strong>（免费）或 <strong>Oracle JDK</strong>，版本 17 或更高。
+              可在启动设置中下载游戏所需版本的 Java 运行环境。
             </p>
           </div>
           <footer class="dialog-actions java-check-actions">
             <button id="javaCheckSkipButton" class="secondary-dialog-button" type="submit">跳过检测</button>
             <button id="javaCheckRetryButton" class="secondary-dialog-button" type="button">重新检测</button>
             <span class="dialog-action-spacer"></span>
-            <button id="javaCheckDownloadButton" class="primary-dialog-button" type="button">打开下载页面</button>
+            <button id="javaCheckDownloadButton" class="primary-dialog-button" type="button">启动设置</button>
           </footer>
         </form>
       </dialog>

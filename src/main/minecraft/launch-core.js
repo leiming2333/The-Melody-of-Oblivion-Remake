@@ -353,7 +353,8 @@ function normalizeAccount(account) {
     uuid,
     skinModel: account.skinModel === 'alex' ? 'alex' : 'steve',
     accessToken: account.accessToken || '0',
-    userType: 'legacy',
+    userType: account.type === 'microsoft' ? 'msa' : 'legacy',
+    xuid: account.xuid || '',
     clientId: account.clientId || ''
   };
 }
@@ -379,6 +380,7 @@ function launchVariables({
     auth_player_name: normalizedAccount.name,
     auth_session: `token:${normalizedAccount.accessToken}:${normalizedAccount.uuid}`,
     auth_uuid: normalizedAccount.uuid,
+    auth_xuid: normalizedAccount.xuid,
     classpath,
     classpath_separator: path.delimiter,
     clientid: normalizedAccount.clientId,
@@ -413,6 +415,7 @@ async function prepareLaunch({
   const validatedId = validateProfileId(profileId);
   const metadata = await readVersionMetadata(gameDirectory, validatedId);
   if (!metadata.mainClass) throw new Error(`游戏版本 ${validatedId} 缺少启动主类`);
+  const requiredJavaVersion = metadata.javaVersion?.majorVersion ?? 8;
 
   const allowedLibraries = (metadata.libraries ?? []).filter((library) => libraryIsAllowed(library));
   const classpathEntries = allowedLibraries
@@ -495,7 +498,7 @@ async function prepareLaunch({
       ? modernGameArguments
       : splitLegacyArguments(metadata.minecraftArguments)
     ).map((argument) => replaceVariables(argument, variables));
-    const javaExecutable = await findJava(javaPath, metadata.javaVersion?.majorVersion);
+    const javaExecutable = await findJava(javaPath, requiredJavaVersion);
     const workingDirectory = instanceDirectory
       ? path.resolve(instanceDirectory)
       : gameDirectory;
@@ -507,7 +510,7 @@ async function prepareLaunch({
       mainClass: metadata.mainClass,
       nativesDirectory,
       profileId: validatedId,
-      requiredJavaVersion: metadata.javaVersion?.majorVersion
+      requiredJavaVersion
     };
   } catch (error) {
     await fs.rm(nativesDirectory, { recursive: true, force: true }).catch(() => {});

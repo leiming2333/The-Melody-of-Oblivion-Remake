@@ -15,6 +15,15 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
   minecraft: Object.freeze({
     listVersions: (options = {}) => ipcRenderer.invoke('minecraft:list-versions', options),
     listLocalVersions: () => ipcRenderer.invoke('minecraft:list-local-versions'),
+    getJavaRequirement: (targetId) => ipcRenderer.invoke('minecraft:get-java-requirement', targetId),
+    detectJava: () => ipcRenderer.invoke('minecraft:detect-java'),
+    downloadJava: (majorVersion) => ipcRenderer.invoke('minecraft:download-java', majorVersion),
+    cancelJavaDownload: () => ipcRenderer.invoke('minecraft:cancel-java-download'),
+    onJavaDownloadProgress: (callback) => {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on('minecraft:java-download-progress', listener);
+      return () => ipcRenderer.removeListener('minecraft:java-download-progress', listener);
+    },
     inspectModpack: (filePath) => ipcRenderer.invoke('minecraft:inspect-modpack', filePath),
     installModpack: (filePath, options = {}) => ipcRenderer.invoke('minecraft:install-modpack', filePath, options),
     downloadVersion: (versionId) => ipcRenderer.invoke('minecraft:download-version', versionId),
@@ -71,18 +80,30 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     addOffline: (playerName, skinModel = 'steve') => (
       ipcRenderer.invoke('accounts:add-offline', playerName, skinModel)
     ),
+    beginMicrosoft: () => ipcRenderer.invoke('accounts:begin-microsoft'),
+    completeMicrosoft: (sessionId) => ipcRenderer.invoke('accounts:complete-microsoft', sessionId),
+    copyMicrosoftCode: (code) => ipcRenderer.invoke('accounts:copy-microsoft-code', code),
+    cancelMicrosoft: (sessionId) => ipcRenderer.invoke('accounts:cancel-microsoft', sessionId),
     loginLittleSkin: (username, password) => (
       ipcRenderer.invoke('accounts:login-littleskin', username, password)
     ),
     selectLittleSkinProfile: (sessionId, profileId) => (
       ipcRenderer.invoke('accounts:select-littleskin-profile', sessionId, profileId)
     ),
+    onMicrosoftProgress: (callback) => {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on('accounts:microsoft-progress', listener);
+      return () => ipcRenderer.removeListener('accounts:microsoft-progress', listener);
+    },
     select: (accountId) => ipcRenderer.invoke('accounts:select', accountId),
     setSkinModel: (accountId, skinModel) => (
       ipcRenderer.invoke('accounts:set-skin-model', accountId, skinModel)
     ),
     rename: (accountId, newName) => ipcRenderer.invoke('accounts:rename', accountId, newName),
     refreshSkin: (accountId) => ipcRenderer.invoke('accounts:refresh-skin', accountId),
+    uploadSkin: (accountId, filePath, skinModel) => (
+      ipcRenderer.invoke('accounts:upload-skin', accountId, filePath, skinModel)
+    ),
     remove: (accountId) => ipcRenderer.invoke('accounts:remove', accountId)
   })
 });

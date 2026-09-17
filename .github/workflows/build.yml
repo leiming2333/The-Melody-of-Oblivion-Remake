@@ -62,8 +62,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate source
+        run: npm run check
+
+      - name: Run tests
+        run: npm test
+
       - name: Build (${{ matrix.arch }})
         run: npm run ${{ matrix.script }} -- --${{ matrix.arch }}
+        env:
+          MELODY_MICROSOFT_CLIENT_ID: ${{ secrets.MELODY_MICROSOFT_CLIENT_ID || '72867f11-f8bf-4086-a502-39039a08970c' }}
+
+      - name: Normalize Linux x64 artifact name
+        if: matrix.script == 'build:linux' && matrix.arch == 'x64'
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          mv "release/The-Melody-of-Oblivion-Remake-v${version}-Linux-x86_64.AppImage" \
+             "release/The-Melody-of-Oblivion-Remake-v${version}-Linux-x64.AppImage"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -78,6 +94,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -89,8 +108,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          set -x
-          gh release delete "${{ github.ref_name }}" --yes 2>/dev/null || true
-          gh release create "${{ github.ref_name }}" --generate-notes
+          set -euo pipefail
+          if ! gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            notes_file=".github/notes/${{ github.ref_name }}.md"
+            if [ -f "$notes_file" ]; then
+              gh release create "${{ github.ref_name }}" --draft --notes-file "$notes_file"
+            else
+              gh release create "${{ github.ref_name }}" --draft --generate-notes
+            fi
+          fi
           find release-assets -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.AppImage' \) -print0 \
-            | xargs -0 -r -n1 gh release upload "${{ github.ref_name }}"
+            | xargs -0 -r -n1 gh release upload "${{ github.ref_name }}" --clobber
+          gh release edit "${{ github.ref_name }}" --draft=false

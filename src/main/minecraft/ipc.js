@@ -2,7 +2,9 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { MinecraftDownloader } = require('./downloader');
 const { MinecraftLoaderManager } = require('./loader-manager');
-const { MinecraftLauncher } = require('./launch-core');
+const { MinecraftLauncher, readVersionMetadata } = require('./launch-core');
+const { detectJava } = require('./java-runtime');
+const { SUPPORTED_JAVA_MAJORS } = require('./managed-java-runtime');
 const { ModpackManager } = require('./modpack-manager');
 const { MinecraftSourceManager } = require('./source-manager');
 const { MinecraftVersionManager } = require('./version-manager');
@@ -38,9 +40,11 @@ function registerMinecraftIpc({
   shell,
   settingsStore,
   accountStore,
+  microsoftAuth,
   yggdrasilAuth
 }) {
   const activeDownloads = new Map();
+  const preparingJavaDownloads = new Map();
   let gameDirectory;
   let sourceManager;
   let downloader;
@@ -143,6 +147,61 @@ function registerMinecraftIpc({
     return versionManager.listLocalProfiles();
   });
 
+  ipcMain.handle('minecraft:get-java-requirement', async (_event, targetId) => {
+    await ensureMinecraftServices();
+    const instance = await modpackManager.resolveLaunchTarget(String(targetId ?? ''));
+    const metadata = await readVersionMetadata(gameDirectory, instance?.profileId ?? targetId);
+    return { majorVersion: metadata.javaVersion?.majorVersion ?? 8 };
+  });
+
+  ipcMain.handle('minecraft:detect-java', async () => {
+    const settings = await ensureMinecraftServices();
+    const system = await detectJava(settings.javaPath);
+    const candidates = system.available ? [system] : [];
+    for (const majorVersion of [...SUPPORTED_JAVA_MAJORS].sort((left, right) => right - left)) {
+      const javaPath = await launcher.javaRuntime.installedExecutable(majorVersion);
+      if (javaPath) candidates.push({ available: true, path: javaPath, majorVersion });
+    }
+    candidates.sort((left, right) => right.majorVersion - left.majorVersion);
+    return candidates[0] ?? { available: false };
+  });
+
+  ipcMain.handle('minecraft:download-java', async (event, majorVersion) => {
+    if (preparingJavaDownloads.size > 0
+        || [...activeDownloads.values()].some((task) => task.taskId === 'java-runtime')) {
+      throw new Error('Java 运行环境正在下载中');
+    }
+    const controller = new AbortController();
+    const abortWhenDestroyed = () => controller.abort();
+    preparingJavaDownloads.set(event.sender.id, controller);
+    event.sender.once('destroyed', abortWhenDestroyed);
+    try {
+      const settings = await applyDownloadSettings();
+      if (controller.signal.aborted || event.sender.isDestroyed()) throw new Error('下载已取消');
+      const runtime = launcher.javaRuntime;
+      runtime.segmentConcurrency = Math.min(12, Math.max(4, Math.floor(settings.downloadConcurrency / 2)));
+      return await runDownloadTask(event, 'java-runtime', async (signal) => {
+        const javaPath = await runtime.ensureInstalled(majorVersion, (progress) => {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('minecraft:java-download-progress', progress);
+          }
+        }, AbortSignal.any([signal, controller.signal]));
+        return { javaPath, majorVersion };
+      });
+    } finally {
+      preparingJavaDownloads.delete(event.sender.id);
+      event.sender.removeListener('destroyed', abortWhenDestroyed);
+    }
+  });
+
+  ipcMain.handle('minecraft:cancel-java-download', async (event) => {
+    const task = activeDownloads.get(`${event.sender.id}:java-runtime`);
+    const controller = task?.controller ?? preparingJavaDownloads.get(event.sender.id);
+    if (!controller || controller.signal.aborted) return { cancelled: 0 };
+    controller.abort();
+    return { cancelled: 1 };
+  });
+
   ipcMain.handle('minecraft:inspect-modpack', async (_event, filePath) => {
     await ensureMinecraftServices();
     return modpackManager.inspect(filePath);
@@ -194,7 +253,8 @@ function registerMinecraftIpc({
   ipcMain.handle('minecraft:cancel-download', async (event) => {
     let cancelled = 0;
     for (const task of activeDownloads.values()) {
-      if (task.senderId === event.sender.id && !task.controller.signal.aborted) {
+      if (task.senderId === event.sender.id && task.taskId !== 'java-runtime'
+          && !task.controller.signal.aborted) {
         task.controller.abort();
         cancelled += 1;
       }
@@ -227,6 +287,9 @@ function registerMinecraftIpc({
       throw new Error('请先等待下载完成或取消下载，再启动游戏');
     }
     let currentAccount = accountStore ? await accountStore.getCurrentAccount() : undefined;
+    if (currentAccount?.type === 'microsoft' && microsoftAuth) {
+      currentAccount = await microsoftAuth.ensureAccount(currentAccount);
+    }
     if (currentAccount?.type === 'yggdrasil' && yggdrasilAuth) {
       currentAccount = await yggdrasilAuth.ensureAccount(currentAccount);
     }

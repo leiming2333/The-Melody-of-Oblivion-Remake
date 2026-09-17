@@ -14,7 +14,7 @@ const launcherSceneIndicators = [...document.querySelectorAll(".mock-scene-switc
 const sceneButtons = [...document.querySelectorAll("[data-scene-target]")];
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const sceneRotationInterval = 6000;
-const releaseVersion = "1.3.0";
+const releaseVersion = "1.4.0";
 const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
 const releaseTargets = {
   windows: {
@@ -50,7 +50,7 @@ const translations = {
     "hero.lead":
       "Melody is a Minecraft launcher rebuilt from zero. Faster downloads, clearer version management, and safer accounts all live inside one quiet, compact window.",
     "hero.primary": "Get the matching build",
-    "hero.primarySub": "Automatic system detection · v1.3.0",
+    "hero.primarySub": "Automatic system detection · v1.4.0",
     "hero.secondary": "See what it can do",
     "hero.meta1": "download threads",
     "hero.meta2": "loader families",
@@ -93,7 +93,7 @@ const translations = {
       "The launch list shows only complete local versions, so switching stays direct and remote catalog noise stays out of the way.",
     "features.accountTitle": "Account and skin sync",
     "features.accountBody":
-      "Offline and LittleSkin Yggdrasil accounts live side by side. Online tokens are encrypted only through secure system storage and are never persisted as plain text.",
+      "Offline, Microsoft, and LittleSkin Yggdrasil accounts live side by side. Online tokens are encrypted only through secure system storage and are never persisted as plain text.",
     "features.loaderTitle": "One-stop loader setup",
     "features.loaderBody":
       "Fabric, Forge, and NeoForge share the same version picker and progress flow — no separate installers to hunt down.",
@@ -124,7 +124,7 @@ const translations = {
     "roadmap.phase1Title": "Launch core",
     "roadmap.phase1Body": "Version inheritance, arguments, native extraction, and process status.",
     "roadmap.phase2Title": "Accounts and downloads",
-    "roadmap.phase2Body": "Offline and LittleSkin sign-in, multi-source downloads, integrity checks, and background tasks.",
+    "roadmap.phase2Body": "Microsoft and LittleSkin sign-in, multi-source downloads, integrity checks, and background tasks.",
     "roadmap.phase3Title": "Modpacks and experience polish",
     "roadmap.phase3Body": "Modrinth and CurseForge instances now separate required and optional files, surface restricted-file warnings, and report failures by install phase.",
     "roadmap.phase4Title": "First public release",
@@ -139,7 +139,7 @@ const translations = {
     "download.arch": "Architecture",
     "download.version": "Version",
     "download.button": "Download the matching build",
-    "download.buttonSub": "GitHub Release v1.3.0",
+    "download.buttonSub": "GitHub Release v1.4.0",
     "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft. Since v1.3.0 the launcher supports three update policies, release notes, and mirror-accelerated update downloads.",
     "footer.slogan": "Hear the way back into the block world again.",
     "footer.backTop": "Back to top ↑",

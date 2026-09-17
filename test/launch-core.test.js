@@ -220,3 +220,27 @@ test('完整启动参数包含内存、继承类路径与离线账户信息', as
   ));
   assert.ok(yggdrasilPrepared.argumentsList.includes('little-access-token'));
 });
+
+test('旧版启动配置没有 Java 字段时使用托管 Java 8', async (t) => {
+  const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-legacy-java-test-'));
+  t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
+  await writeVersion(gameDirectory, 'legacy-test', {
+    mainClass: 'net.minecraft.client.main.Main',
+    minecraftArguments: '--username ${auth_player_name}',
+    libraries: []
+  });
+  await writeFile(path.join(gameDirectory, 'versions', 'legacy-test', 'legacy-test.jar'));
+  let requestedJavaVersion;
+  const prepared = await prepareLaunch({
+    gameDirectory,
+    profileId: 'legacy-test',
+    account: { type: 'offline', name: 'Steve', uuid: '5627dd98-e6be-3c21-b8a8-e92344183641' },
+    findJava: async (_explicitPath, majorVersion) => {
+      requestedJavaVersion = majorVersion;
+      return 'managed-java-8';
+    }
+  });
+  assert.equal(requestedJavaVersion, 8);
+  assert.equal(prepared.requiredJavaVersion, 8);
+  assert.equal(prepared.javaExecutable, 'managed-java-8');
+});
