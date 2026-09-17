@@ -40,22 +40,10 @@ const offlineNameInput = document.querySelector('#offlineNameInput');
 const offlineSkinModelInputs = [...document.querySelectorAll('input[name="offlineSkinModel"]')];
 const addOfflineButton = document.querySelector('#addOfflineButton');
 const accountFormHint = document.querySelector('#accountFormHint');
-const microsoftLoginButton = document.querySelector('#microsoftLoginButton');
-const microsoftDevicePanel = document.querySelector('#microsoftDevicePanel');
-const microsoftDeviceCode = document.querySelector('#microsoftDeviceCode');
-const microsoftCopyCodeButton = document.querySelector('#microsoftCopyCodeButton');
-const microsoftLoginHint = document.querySelector('#microsoftLoginHint');
-const microsoftCancelLoginButton = document.querySelector('#microsoftCancelLoginButton');
 const littleSkinUsernameInput = document.querySelector('#littleSkinUsernameInput');
 const littleSkinPasswordInput = document.querySelector('#littleSkinPasswordInput');
 const littleSkinLoginButton = document.querySelector('#littleSkinLoginButton');
 const littleSkinLoginHint = document.querySelector('#littleSkinLoginHint');
-const skinUploadDialog = document.querySelector('#skinUploadDialog');
-const skinFilePickerButton = document.querySelector('#skinFilePickerButton');
-const skinFileName = document.querySelector('#skinFileName');
-const skinModelSelect = document.querySelector('#skinModelSelect');
-const skinUploadHint = document.querySelector('#skinUploadHint');
-const skinFileInput = document.querySelector('#skinFileInput');
 const versionSelect = document.querySelector('#versionSelect');
 const versionDialog = document.querySelector('#versionDialog');
 const versionCloseButtons = [...versionDialog.querySelectorAll('[value="cancel"]')];
@@ -164,11 +152,7 @@ let autoJavaDetection = null;
 let autoJavaDetectionPromise = null;
 let javaDownloadActive = false;
 let javaRequirementRequest = 0;
-let microsoftLoginSessionId;
-let microsoftLoginActive = false;
 let littleSkinLoginActive = false;
-let skinUploadAccountId = null;
-let skinUploadFilePath = null;
 let launcherUpdateState = { status: 'idle', progress: 0, installAction: null, message: '尚未检查更新' };
 
 function setUpdateStatusBadgeSpinning(spinning) {
@@ -555,24 +539,6 @@ function renderAccountList() {
       actions.append(skinButton);
     }
 
-    if (account.type === 'microsoft' && accountsApi?.uploadSkin) {
-      const uploadSkinButton = document.createElement('button');
-      uploadSkinButton.type = 'button';
-      uploadSkinButton.className = 'upload-skin-button';
-      uploadSkinButton.textContent = '上传皮肤';
-      uploadSkinButton.title = '上传 PNG 皮肤到 Minecraft';
-      uploadSkinButton.addEventListener('click', () => {
-        skinUploadAccountId = account.id;
-        skinUploadFilePath = null;
-        skinFileName.textContent = '未选择';
-        skinModelSelect.value = account.skinModel === 'alex' ? 'alex' : 'steve';
-        skinUploadHint.textContent = '仅支持 64×32 或 64×64 像素的 PNG 文件';
-        skinUploadHint.classList.remove('is-error');
-        skinUploadDialog.showModal();
-      });
-      actions.append(uploadSkinButton);
-    }
-
     const removeButton = document.createElement('button');
     removeButton.type = 'button';
     removeButton.className = 'remove-account-button';
@@ -867,76 +833,6 @@ javaDownloadCancelButton.addEventListener('click', async () => {
     showToast(readableError(error));
   }
 });
-
-function setMicrosoftLoginBusy(active) {
-  microsoftLoginActive = active;
-  microsoftLoginButton.disabled = active;
-  microsoftCancelLoginButton.disabled = !active;
-}
-
-async function copyMicrosoftDeviceCode(code = microsoftDeviceCode.textContent, notify = true) {
-  const normalizedCode = String(code ?? '').trim();
-  if (!/^[A-Z0-9-]{6,24}$/i.test(normalizedCode)) return false;
-  try {
-    await accountsApi?.copyMicrosoftCode?.(normalizedCode);
-    microsoftCopyCodeButton.textContent = '已复制';
-    window.setTimeout(() => {
-      microsoftCopyCodeButton.textContent = '复制';
-    }, 1600);
-    if (notify) showToast('登录代码已复制');
-    return true;
-  } catch (error) {
-    if (notify) showToast(readableError(error));
-    return false;
-  }
-}
-
-async function beginMicrosoftLogin() {
-  if (microsoftLoginActive) return;
-  if (!accountsApi?.beginMicrosoft || !accountsApi?.completeMicrosoft) {
-    showToast('请在 Electron 启动器中使用 Microsoft 登录');
-    return;
-  }
-
-  setMicrosoftLoginBusy(true);
-  microsoftDevicePanel.hidden = false;
-  microsoftDeviceCode.textContent = '正在连接…';
-  microsoftLoginHint.textContent = '正在向 Microsoft 申请登录代码';
-  try {
-    const session = await accountsApi.beginMicrosoft();
-    microsoftLoginSessionId = session.sessionId;
-    microsoftDeviceCode.textContent = session.userCode;
-    const copied = await copyMicrosoftDeviceCode(session.userCode, false);
-    microsoftLoginHint.textContent = copied
-      ? '代码已复制；授权页面完成后会自动登录'
-      : '授权页面已打开，完成后会自动登录';
-    const completedState = await accountsApi.completeMicrosoft(session.sessionId);
-    if (microsoftLoginSessionId !== session.sessionId) return;
-    accountState = completedState;
-    updateAccountCard();
-    renderAccountList();
-    microsoftDevicePanel.hidden = true;
-    showToast(`Microsoft 登录成功：${accountState.current?.name ?? 'Minecraft 玩家'}`);
-  } catch (error) {
-    const message = readableError(error);
-    if (!message.includes('登录已取消')) {
-      microsoftLoginHint.textContent = message;
-      showToast(message);
-    }
-  } finally {
-    microsoftLoginSessionId = undefined;
-    setMicrosoftLoginBusy(false);
-  }
-}
-
-async function cancelMicrosoftLogin() {
-  const sessionId = microsoftLoginSessionId;
-  microsoftLoginSessionId = undefined;
-  if (sessionId) await accountsApi?.cancelMicrosoft?.(sessionId);
-  microsoftDevicePanel.hidden = true;
-  setMicrosoftLoginBusy(false);
-  showToast('Microsoft 登录已取消');
-}
 
 function setLittleSkinLoginBusy(active) {
   littleSkinLoginActive = active;
@@ -1767,7 +1663,7 @@ document.querySelector('#closeButton').addEventListener('click', () => {
 accountButton.addEventListener('click', () => {
   renderAccountList();
   accountDialog.showModal();
-  microsoftLoginButton.focus();
+  offlineNameInput.focus();
 });
 
 addOfflineButton.addEventListener('click', addOfflineAccount);
@@ -1778,20 +1674,12 @@ offlineNameInput.addEventListener('keydown', (event) => {
   }
 });
 
-microsoftLoginButton.addEventListener('click', beginMicrosoftLogin);
-microsoftCopyCodeButton.addEventListener('click', () => copyMicrosoftDeviceCode());
-microsoftCancelLoginButton.addEventListener('click', cancelMicrosoftLogin);
 littleSkinLoginButton.addEventListener('click', beginLittleSkinLogin);
 littleSkinPasswordInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     beginLittleSkinLogin();
   }
-});
-
-accountsApi?.onMicrosoftProgress?.((progress) => {
-  if (!microsoftLoginActive || progress?.sessionId !== microsoftLoginSessionId) return;
-  if (progress.message) microsoftLoginHint.textContent = progress.message;
 });
 
 document.querySelector('#settingsButton').addEventListener('click', async () => {
@@ -1829,41 +1717,6 @@ document.querySelector('#versionButton').addEventListener('click', () => {
   // 下载进行中时，恢复对话框内的进度显示
   if (versionDownloadActive && lastDownloadProgress) {
     updateDownloadProgress(lastDownloadProgress);
-  }
-});
-
-skinFilePickerButton.addEventListener('click', () => skinFileInput.click());
-
-skinFileInput.addEventListener('change', () => {
-  const file = skinFileInput.files?.[0];
-  if (!file) return;
-  const filePath = environment?.files?.getPath?.(file);
-  if (!filePath) {
-    skinUploadHint.textContent = '无法获取文件路径，请在 Electron 启动器中使用';
-    skinUploadHint.classList.add('is-error');
-    return;
-  }
-  skinUploadFilePath = filePath;
-  skinFileName.textContent = file.name;
-  skinUploadHint.textContent = '仅支持 64×32 或 64×64 像素的 PNG 文件';
-  skinUploadHint.classList.remove('is-error');
-});
-
-skinUploadDialog.addEventListener('close', async () => {
-  const accountId = skinUploadAccountId;
-  const filePath = skinUploadFilePath;
-  skinUploadAccountId = null;
-  skinUploadFilePath = null;
-  skinFileInput.value = '';
-  if (skinUploadDialog.returnValue !== 'upload' || !accountId || !filePath) return;
-  skinUploadHint.textContent = '正在上传…';
-  try {
-    accountState = await accountsApi.uploadSkin(accountId, filePath, skinModelSelect.value);
-    updateAccountCard();
-    renderAccountList();
-    showToast('皮肤上传成功');
-  } catch (error) {
-    showToast(readableError(error));
   }
 });
 

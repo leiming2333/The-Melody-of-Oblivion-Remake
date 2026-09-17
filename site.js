@@ -20,17 +20,14 @@ const releaseTargets = {
   windows: {
     name: "Windows",
     system: "Windows 10 / 11",
-    asset: `The-Melody-of-Oblivion-Remake-v${releaseVersion}-Windows-x64.exe`,
   },
   macos: {
     name: "macOS",
     system: "macOS",
-    asset: `The-Melody-of-Oblivion-Remake-v${releaseVersion}-macOS-x64.zip`,
   },
   linux: {
     name: "Linux",
     system: "Linux",
-    asset: `The-Melody-of-Oblivion-Remake-v${releaseVersion}-Linux-x64.AppImage`,
   },
 };
 
@@ -50,11 +47,11 @@ const translations = {
     "hero.lead":
       "Melody is a Minecraft launcher rebuilt from zero. Faster downloads, clearer version management, and safer accounts all live inside one quiet, compact window.",
     "hero.primary": "Get the matching build",
-    "hero.primarySub": "Automatic system detection · v1.4.0",
+    "hero.primarySub": "Source v1.4.0",
     "hero.secondary": "See what it can do",
     "hero.meta1": "download threads",
     "hero.meta2": "loader families",
-    "hero.meta3": "account modes",
+    "hero.meta3": "sign-in methods",
     "mock.account": "Game account",
     "mock.accountEmpty": "No account added",
     "mock.manage": "Manage",
@@ -93,7 +90,7 @@ const translations = {
       "The launch list shows only complete local versions, so switching stays direct and remote catalog noise stays out of the way.",
     "features.accountTitle": "Account and skin sync",
     "features.accountBody":
-      "Offline, Microsoft, and LittleSkin Yggdrasil accounts live side by side. Online tokens are encrypted only through secure system storage and are never persisted as plain text.",
+      "Create an offline account or sign in with LittleSkin Yggdrasil. Skin avatars stay in sync, and online tokens are encrypted only through secure system storage.",
     "features.loaderTitle": "One-stop loader setup",
     "features.loaderBody":
       "Fabric, Forge, and NeoForge share the same version picker and progress flow — no separate installers to hunt down.",
@@ -124,7 +121,7 @@ const translations = {
     "roadmap.phase1Title": "Launch core",
     "roadmap.phase1Body": "Version inheritance, arguments, native extraction, and process status.",
     "roadmap.phase2Title": "Accounts and downloads",
-    "roadmap.phase2Body": "Microsoft and LittleSkin sign-in, multi-source downloads, integrity checks, and background tasks.",
+    "roadmap.phase2Body": "Offline accounts and LittleSkin sign-in, multi-source downloads, integrity checks, and background tasks.",
     "roadmap.phase3Title": "Modpacks and experience polish",
     "roadmap.phase3Body": "Modrinth and CurseForge instances now separate required and optional files, surface restricted-file warnings, and report failures by install phase.",
     "roadmap.phase4Title": "First public release",
@@ -137,9 +134,9 @@ const translations = {
     "download.title": "Automatically select the build for your system.",
     "download.system": "System",
     "download.arch": "Architecture",
-    "download.version": "Version",
+    "download.version": "Source version",
     "download.button": "Download the matching build",
-    "download.buttonSub": "GitHub Release v1.4.0",
+    "download.buttonSub": "GitHub Releases",
     "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft. Since v1.3.0 the launcher supports three update policies, release notes, and mirror-accelerated update downloads.",
     "footer.slogan": "Hear the way back into the block world again.",
     "footer.backTop": "Back to top ↑",
@@ -226,24 +223,21 @@ function detectReleaseTarget() {
 function updateDownloadExperience() {
   const target = detectReleaseTarget();
   const isEnglish = currentLanguage === "en";
-  const targetUrl = target
-    ? `${releasesUrl}/download/v${releaseVersion}/${target.asset}`
-    : releasesUrl;
 
   downloadLinks.forEach((link) => {
-    link.href = targetUrl;
+    link.href = releasesUrl;
     link.dataset.detectedPlatform = target?.name || "unknown";
   });
 
   const copy = target
     ? {
-        heroLabel: isEnglish ? `Get for ${target.name}` : `获取 ${target.name} 版`,
-        heroDetail: `${target.name} x64 · ${releaseVersion}`,
-        title: isEnglish ? `${target.name} x64 public release.` : `${target.name} x64 正式版。`,
+        heroLabel: isEnglish ? `View ${target.name} releases` : `查看 ${target.name} 发行版本`,
+        heroDetail: isEnglish ? `Source v${releaseVersion}` : `源码 v${releaseVersion}`,
+        title: isEnglish ? `${target.name} releases.` : `${target.name} 发行版本。`,
         system: target.system,
         arch: "x64",
-        button: isEnglish ? `Download ${target.name} x64` : `下载 ${target.name} x64`,
-        detail: `GitHub Release v${releaseVersion}`,
+        button: isEnglish ? `View ${target.name} downloads` : `查看 ${target.name} 下载`,
+        detail: "GitHub Releases",
       }
     : {
         heroLabel: isEnglish ? "View all releases" : "查看全部版本",

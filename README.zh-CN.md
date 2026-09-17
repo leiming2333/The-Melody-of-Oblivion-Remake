@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
-[![Release](https://img.shields.io/badge/Release-v1.4.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
+[![Source](https://img.shields.io/badge/Source-v1.4.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> 当前仓库版本为 `1.4.0`。Windows、macOS 与 Linux 版本通过 GitHub Releases 发布。测试新版本前，请先备份 Minecraft 数据。
+> 当前源码版本为 `1.4.0`，尚未公开发行；已有下载仍可通过 [GitHub Releases](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases) 获取。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -37,20 +37,20 @@
 - **游戏版本**：浏览 Mojang 版本清单、识别本地安装、下载原版游戏、验证所需文件，并将可移除的配置移动到回收站。
 - **模组加载器**：通过统一流程查询并安装 Fabric、Forge 与 NeoForge。
 - **可靠下载**：在 Mojang 官方源与 BMCLAPI 之间选择；自动模式会测速；支持任务并发、大文件 HTTP Range 分段、SHA-1 校验、取消下载及失败后切换来源重试。
-- **账户系统**：支持离线账户、Microsoft 设备代码登录及 LittleSkin Yggdrasil；可同步皮肤头像、启动前刷新在线凭据，并阻止令牌进入渲染进程。
+- **账户系统**：支持离线账户及 LittleSkin Yggdrasil 登录；可同步皮肤头像、启动前刷新 LittleSkin 凭据，并阻止令牌进入渲染进程。已移除 Microsoft 登录及皮肤上传接口，历史 Microsoft 账户仍可显示和管理。
 - **Java 管理**：匹配游戏所需的 Java 主版本，检测系统安装与启动器托管环境。在 Java 路径设置旁手动下载 Java 8、16、17、21 或 25，支持进度与取消；优先 Azul JRE，失败后切换 Adoptium，使用并行下载与 SHA-256 校验。启动时缺少所需 Java 会打开设置，不再自动下载。
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
 - **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides 和已兼容的加载器。
 - **启动器更新**：启动时检测 GitHub Releases 新版本；提供三档更新策略（自动下载 / 仅提示 / 从不检查），发现新版本与更新就绪时发送系统通知，设置页可查看 Release 更新日志；更新包下载支持 GitHub 镜像多源自动切换与低速检测，完成后经 SHA-256 校验再安装。旧版布尔更新设置会自动迁移为新策略。
 - **桌面界面**：紧凑的固定尺寸无边框 Electron 窗口，覆盖版本、账户、下载、启动及设置流程。
 
-自动化测试目前覆盖账户、身份验证、下载、Java 选择、游戏启动、加载器、整合包、设置、本地版本管理及启动器更新等 125 个测试用例。
+自动化测试覆盖账户、身份验证、下载、Java 选择、游戏启动、加载器、整合包、设置、本地版本管理及启动器更新等领域。
 
 ## 当前限制
 
 - 提供 Windows、macOS 与 Linux 的多架构公开构建，不同平台的细节表现仍可能存在差异。
 - 更新行为因平台而异：Linux AppImage 自动替换并重启；Windows 便携版会在同目录生成新版并启动新版（旧文件保留）；macOS 下载压缩包后需手动解压替换。
-- Microsoft 登录依赖启动器的 Azure 应用注册获得 Minecraft Services 接受。服务方策略或注册状态改变可能导致登录暂时不可用。
+- 当前源码不再提供 Microsoft 登录、令牌续期及皮肤上传功能。已有账户记录保留，过期的 Microsoft 凭据无法在此续期。
 - LittleSkin Yggdrasil 仅在客户端和服务端使用相同验证服务时生效；它不能代替正版账户，也不会授予进入正版验证服务器的权限。参见 [LittleSkin 用户使用手册](https://manual.littlesk.in/yggdrasil/)。
 - CurseForge 安装依赖 CurseTools 提供的可下载文件元数据，或配置 `CURSEFORGE_API_KEY`。包含受限或已下架文件的整合包可能安装失败。
 - 暂不支持 Quilt 整合包。
@@ -68,7 +68,6 @@
 
 ```powershell
 npm ci
-$env:MELODY_MICROSOFT_CLIENT_ID = "你的公开 Azure 应用 ID"
 npm run dev
 ```
 
@@ -91,7 +90,7 @@ npm run dev
 ```text
 src/
 ├── main/                 Electron 主进程
-│   ├── accounts/         离线、Microsoft 与 LittleSkin 账户
+│   ├── accounts/         离线与 LittleSkin 登录、历史账户记录
 │   ├── minecraft/        下载、Java、加载器、启动与整合包
 │   └── settings/         持久化设置
 ├── preload/              沙箱化的渲染进程桥接层
@@ -110,11 +109,10 @@ styles.css                落地页样式
 - Electron 渲染进程启用了上下文隔离和沙箱，并关闭 Node.js 集成。
 - Microsoft 与 LittleSkin 的访问令牌、刷新令牌和客户端令牌不会出现在提供给渲染进程的账户对象中。
 - 在线账户令牌使用 Electron `safeStorage` 加密保存。如果安全存储不可用，启动器会拒绝保存或读取在线凭据，不会降级为明文存储。
-- Microsoft 登录使用公开 OAuth 应用 ID，构建时可用 `MELODY_MICROSOFT_CLIENT_ID` 覆盖。仓库不包含客户端密钥；公开 Electron 构建无法对内嵌 Client ID 保密。
 - 下载目标、整合包路径、压缩包解压位置和远程模组 URL 均会经过验证，以降低路径穿越及不安全 URL 的风险。
 - 上游元数据提供哈希时，SHA-1 校验可发现意外损坏，但不应将 SHA-1 视为现代的真实性保证。
 
-提交安全问题时，请勿包含账户文件、访问令牌、刷新令牌、设备代码或个人 Minecraft 数据。
+提交安全问题时，请勿包含账户文件、访问令牌、刷新令牌或个人 Minecraft 数据。
 
 ## 后续计划
 
