@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
-[![Source](https://img.shields.io/badge/Source-v1.4.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.5.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.4.0`，尚未公开发行；已有下载仍可通过 [GitHub Releases](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases) 获取。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.5.0`，尚未公开发行；已有下载仍可通过 [GitHub Releases](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases) 获取。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 
