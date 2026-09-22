@@ -1,14 +1,56 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs/promises');
+const http = require('node:http');
+const os = require('node:os');
+const path = require('node:path');
 const {
   GITHUB_MIRRORS,
   UpdateManager,
+  downloadToFile,
   isNewerVersion,
   normalizeVersion,
   percent,
   pickAsset
 } = require('../src/main/updater/update-manager');
 
+const fixtureHash = 'a'.repeat(64);
+
+test('failed Linux replacement restores the original executable', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-update-rollback-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const current = path.join(dir, 'current.AppImage');
+  const next = path.join(dir, 'next.AppImage');
+  await fs.writeFile(current, 'old');
+  await fs.writeFile(next, 'new');
+  const failure = Object.assign(new Error('replacement denied'), { code: 'EACCES' });
+  const manager = new UpdateManager({ platform: 'linux', env: { APPIMAGE: current }, fileSystem: {
+    ...fs,
+    rename: async (from, to) => {
+      if (from === next) throw failure;
+      return fs.rename(from, to);
+    }
+  } });
+  await assert.rejects(manager.finalizeDownload(next), (error) => error === failure);
+  assert.equal(await fs.readFile(current, 'utf8'), 'old');
+  assert.equal(await fs.readFile(next, 'utf8'), 'new');
+});
+
+test('manual update checks read the current download policy', async () => {
+  const { manager, calls } = fixture();
+  const handlers = new Map();
+  let policy = 'notify';
+  manager.settingsStore = { getState: async () => ({ launcherUpdatePolicy: policy }) };
+  manager.ipcMain = { handle: (name, handler) => handlers.set(name, handler) };
+  manager.started = false;
+  manager.start();
+  await handlers.get('updater:check')();
+  assert.equal(calls.download.length, 0);
+  policy = 'auto';
+  await handlers.get('updater:check')();
+  assert.equal(calls.download.length, 1);
+});
 const releaseAssets = [
   { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-x64.exe', browser_download_url: 'https://example.com/win-x64.exe', size: 1024 },
   { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-ia32.exe', browser_download_url: 'https://example.com/win-ia32.exe', size: 1024 },
@@ -16,11 +58,11 @@ const releaseAssets = [
   { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Linux-x64.AppImage', browser_download_url: 'https://example.com/linux-x64.AppImage', size: 1024 },
   { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Linux-armv7l.AppImage', browser_download_url: 'https://example.com/linux-armv7l.AppImage', size: 1024 },
   { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-macOS-arm64.zip', browser_download_url: 'https://example.com/mac-arm64.zip', size: 1024 }
-];
+].map((asset) => ({ ...asset, digest: `sha256:${fixtureHash}` }));
 
 const githubAssets = [
   { name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-x64.exe', browser_download_url: 'https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/v9.9.9/The-Melody-of-Oblivion-Remake-v9.9.9-Windows-x64.exe', size: 1024 }
-];
+].map((asset) => ({ ...asset, digest: `sha256:${fixtureHash}` }));
 
 function fixture({
   isPackaged = true,
@@ -48,6 +90,7 @@ function fixture({
     platform,
     arch,
     env: {},
+    hashFile: async () => fixtureHash,
     shell: { showItemInFolder: (filePath) => calls.showItemInFolder.push(filePath) },
     onUpdateAvailable: (version, releaseUrl) => calls.updateAvailable.push({ version, releaseUrl }),
     onUpdateReady: (version, installAction) => calls.updateReady.push({ version, installAction }),
@@ -124,7 +167,7 @@ test('检查 Release 发现新版本后自动后台下载', async () => {
   assert.equal(state.progress, 100);
   assert.equal(calls.download.length, 1);
   assert.match(calls.download[0].url, /win-x64\.exe$/);
-  assert.match(calls.download[0].targetPath, /The-Melody-of-Oblivion-Remake-v9\.9\.9-Windows-x64\.exe$/);
+  assert.match(calls.download[0].targetPath, /The-Melody-of-Oblivion-Remake-v9\.9\.9-Windows-x64\.exe\.part$/);
 });
 
 test('已是最新版本时不触发下载', async () => {
@@ -286,4 +329,123 @@ test('已是最新版本时更新日志被清空', async () => {
   const state = await manager.check();
   assert.equal(state.status, 'current');
   assert.equal(state.releaseNotes, null);
+});
+
+test('update selection ignores checksums and refuses another architecture', () => {
+  const binary = releaseAssets[0];
+  const checksum = { ...binary, name: `${binary.name}.sha256` };
+  assert.equal(pickAsset([checksum, binary], 'win32', 'x64'), binary);
+  assert.equal(pickAsset([binary], 'win32', 'arm64'), null);
+});
+
+test('missing or mismatched SHA-256 never makes an update installable', async () => {
+  const { manager: missing } = fixture({
+    assets: releaseAssets.map(({ digest: _digest, ...asset }) => asset)
+  });
+  assert.match((await missing.check()).message, /缺少 SHA-256/);
+  await assert.rejects(missing.install(), /尚未下载完成/);
+
+  const { manager, calls } = fixture();
+  manager.hashFile = async () => 'b'.repeat(64);
+  const state = await manager.check();
+  assert.equal(state.status, 'error');
+  assert.match(state.message, /SHA-256 不匹配/);
+  assert.equal(calls.updateReady.length, 0);
+  await assert.rejects(manager.install(), /尚未下载完成/);
+});
+
+test('sidecar SHA-256 is used when release metadata has no digest', async () => {
+  const binary = { ...releaseAssets[0], digest: null };
+  const sidecar = { name: `${binary.name}.sha256`, browser_download_url: 'https://example.com/checksum' };
+  const { manager } = fixture({
+    fetchImpl: async (url) => ({
+      ok: true,
+      json: async () => ({ tag_name: 'v9.9.9', assets: [sidecar, binary] }),
+      text: async () => {
+        assert.equal(url, sidecar.browser_download_url);
+        return `${fixtureHash}  ${binary.name}\n`;
+      }
+    })
+  });
+  assert.equal((await manager.check()).status, 'downloaded');
+});
+
+test('real file verification accepts valid bytes and removes a tampered update', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-update-integrity-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const expected = Buffer.from('valid update bytes');
+  const binary = {
+    name: 'Launcher-v9.9.9-Windows-x64.exe',
+    browser_download_url: 'https://example.com/update',
+    size: expected.length,
+    digest: `sha256:${crypto.createHash('sha256').update(expected).digest('hex')}`
+  };
+  let bytes = Buffer.from('wrong update bytes');
+  let ready = 0;
+  const manager = new UpdateManager({
+    app: { isPackaged: true, getVersion: () => '1.0.0' },
+    platform: 'win32',
+    arch: 'x64',
+    env: { PORTABLE_EXECUTABLE_DIR: directory },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ tag_name: 'v9.9.9', assets: [binary] }) }),
+    downloadFile: async (_url, filePath) => fs.writeFile(filePath, bytes),
+    onUpdateReady: () => { ready += 1; }
+  });
+  assert.equal(bytes.length, expected.length);
+  assert.match((await manager.check()).message, /SHA-256 不匹配/);
+  assert.deepEqual(await fs.readdir(directory), []);
+  assert.equal(ready, 0);
+
+  bytes = expected;
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.deepEqual(await fs.readFile(manager.updateFilePath), expected);
+  assert.deepEqual(await fs.readdir(directory), [binary.name]);
+  assert.equal(ready, 1);
+});
+
+async function updateDownloadServer(t, handler) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-update-stream-'));
+  const server = http.createServer(handler);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  return { url: `http://127.0.0.1:${server.address().port}`, target: path.join(directory, 'update.part') };
+}
+
+test('an active update stream can outlast its connection timeout', async (t) => {
+  const { url, target } = await updateDownloadServer(t, (_request, response) => {
+    response.writeHead(200, { 'content-length': 5 });
+    response.write('a');
+    let count = 1;
+    const timer = setInterval(() => {
+      response.write('a');
+      if (++count === 5) {
+        clearInterval(timer);
+        response.end();
+      }
+    }, 40);
+    response.on('close', () => clearInterval(timer));
+  });
+  await downloadToFile(url, target, undefined, {
+    enforceMinSpeed: false, connectTimeoutMs: 100, stallTimeoutMs: 1000
+  });
+  assert.equal(await fs.readFile(target, 'utf8'), 'aaaaa');
+});
+
+test('update downloads still abort a missing response or stalled body', async (t) => {
+  const { url, target } = await updateDownloadServer(t, (request, response) => {
+    if (request.url === '/stall') {
+      response.writeHead(200, { 'content-length': 5 });
+      response.write('a');
+    }
+  });
+  await assert.rejects(downloadToFile(`${url}/connect`, target, undefined, {
+    enforceMinSpeed: false, connectTimeoutMs: 100, stallTimeoutMs: 200
+  }), { code: 'CONNECT_TIMEOUT' });
+  await assert.rejects(downloadToFile(`${url}/stall`, target, undefined, {
+    enforceMinSpeed: false, connectTimeoutMs: 1000, stallTimeoutMs: 100
+  }), { code: 'STALL_SOURCE' });
 });

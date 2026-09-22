@@ -52,20 +52,24 @@ function isNewerVersion(candidate, current) {
 function pickAsset(assets, platform, arch) {
   const keyword = PLATFORM_KEYWORDS[platform];
   if (!keyword) return null;
+  const extension = { win32: '.exe', darwin: '.zip', linux: '.AppImage' }[platform];
   const candidates = (Array.isArray(assets) ? assets : []).filter((asset) => (
     typeof asset?.name === 'string'
     && typeof asset?.browser_download_url === 'string'
     && asset.name.includes(keyword)
+    && asset.name.endsWith(extension)
+    && !/[\\/]/.test(asset.name)
   ));
   if (candidates.length === 0) return null;
-  const archKeywords = arch === 'arm' ? ['armv7l', 'arm'] : [arch];
+  const archKeywords = arch === 'arm' ? ['armv7l', 'arm']
+    : arch === 'x64' ? ['x64', 'x86_64'] : [arch];
   for (const archKeyword of archKeywords) {
     const hit = candidates.find((asset) => (
-      asset.name.toLowerCase().includes(String(archKeyword).toLowerCase())
+      asset.name.toLowerCase().endsWith(`-${archKeyword}${extension}`.toLowerCase())
     ));
     if (hit) return hit;
   }
-  return candidates[0];
+  return null;
 }
 
 function isGithubUrl(url) {
@@ -122,10 +126,17 @@ async function sha256File(filePath) {
   return hash.digest('hex');
 }
 
-async function downloadToFile(url, targetPath, onProgress, { enforceMinSpeed = true } = {}) {
+async function downloadToFile(url, targetPath, onProgress, {
+  enforceMinSpeed = true,
+  connectTimeoutMs = DOWNLOAD_CONNECT_TIMEOUT_MS,
+  stallTimeoutMs = DOWNLOAD_STALL_TIMEOUT_MS
+} = {}) {
   const controller = new AbortController();
-  const connectTimeout = AbortSignal.timeout(DOWNLOAD_CONNECT_TIMEOUT_MS);
-  const signal = AbortSignal.any([controller.signal, connectTimeout]);
+  let connectionTimedOut = false;
+  const connectTimer = setTimeout(() => {
+    connectionTimedOut = true;
+    controller.abort();
+  }, connectTimeoutMs);
   const startedAt = Date.now();
   let loaded = 0;
   let windowStartedAt = startedAt;
@@ -136,19 +147,18 @@ async function downloadToFile(url, targetPath, onProgress, { enforceMinSpeed = t
   let monitor = null;
 
   try {
-    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal });
+    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: controller.signal });
+    clearTimeout(connectTimer);
     if (!response.ok || !response.body) {
       throw new Error(`下载更新失败（HTTP ${response.status}）`);
     }
     const total = Number(response.headers.get('content-length')) || 0;
     const source = Readable.fromWeb(response.body);
+    lastByteAt = Date.now();
     monitor = setInterval(() => {
       const now = Date.now();
       const windowBytes = loaded - windowLoadedBytes;
-      if (windowBytes > 0) {
-        lastByteAt = now;
-      }
-      if (now - lastByteAt >= DOWNLOAD_STALL_TIMEOUT_MS) {
+      if (now - lastByteAt >= stallTimeoutMs) {
         stallAborted = true;
         controller.abort();
         return;
@@ -167,9 +177,10 @@ async function downloadToFile(url, targetPath, onProgress, { enforceMinSpeed = t
       }
       windowStartedAt = now;
       windowLoadedBytes = loaded;
-    }, 1000);
+    }, Math.min(1000, stallTimeoutMs));
     source.on('data', (chunk) => {
       loaded += chunk.length;
+      lastByteAt = Date.now();
       onProgress?.(total > 0 ? (loaded / total) * 100 : 0);
     });
     await pipeline(source, createWriteStream(targetPath));
@@ -185,13 +196,14 @@ async function downloadToFile(url, targetPath, onProgress, { enforceMinSpeed = t
       stallError.code = 'STALL_SOURCE';
       throw stallError;
     }
-    if (connectTimeout.aborted && isAbortError(error)) {
+    if (connectionTimedOut) {
       const timeoutError = new Error('连接下载源超时');
       timeoutError.code = 'CONNECT_TIMEOUT';
       throw timeoutError;
     }
     throw error;
   } finally {
+    clearTimeout(connectTimer);
     if (monitor) clearInterval(monitor);
   }
 }
@@ -201,9 +213,11 @@ class UpdateManager {
     app,
     BrowserWindow,
     ipcMain,
+    settingsStore = null,
     fetchImpl = globalThis.fetch,
     downloadFile = downloadToFile,
     fileSystem = fs,
+    hashFile = sha256File,
     spawnProcess = spawn,
     shell = null,
     onUpdateAvailable = null,
@@ -215,9 +229,11 @@ class UpdateManager {
     this.app = app;
     this.BrowserWindow = BrowserWindow;
     this.ipcMain = ipcMain;
+    this.settingsStore = settingsStore;
     this.fetchImpl = fetchImpl;
     this.downloadFile = downloadFile;
     this.fileSystem = fileSystem;
+    this.hashFile = hashFile;
     this.spawnProcess = spawnProcess;
     this.shell = shell;
     this.onUpdateAvailable = onUpdateAvailable;
@@ -257,7 +273,10 @@ class UpdateManager {
     if (this.started) return;
     this.started = true;
     this.ipcMain.handle('updater:get-state', () => this.publicState());
-    this.ipcMain.handle('updater:check', () => this.check());
+    this.ipcMain.handle('updater:check', async () => {
+      const settings = await this.settingsStore?.getState();
+      return this.check({ autoDownload: settings ? settings.launcherUpdatePolicy === 'auto' : true });
+    });
     this.ipcMain.handle('updater:download', () => this.download());
     this.ipcMain.handle('updater:install', () => this.install());
   }
@@ -344,13 +363,14 @@ class UpdateManager {
       if (actual !== expectedSize) throw new Error(`更新包校验失败：文件大小不匹配（期望 ${formatBytes(expectedSize)}，实际 ${formatBytes(actual)}）`);
     }
 
-    const checksumAsset = this.checksumAssetFor(updateAsset);
-    if (!checksumAsset) return;
-
-    const checksumText = await this.fetchText(checksumAsset.browser_download_url);
-    const expectedSha256 = parseSha256(checksumText);
+    let expectedSha256 = /^sha256:([a-f0-9]{64})$/i.exec(String(updateAsset?.digest ?? ''))?.[1]?.toLowerCase();
+    if (!expectedSha256) {
+      const checksumAsset = this.checksumAssetFor(updateAsset);
+      if (!checksumAsset) throw new Error('更新包校验失败：发布版本缺少 SHA-256 校验信息，请从发布页手动下载');
+      expectedSha256 = parseSha256(await this.fetchText(checksumAsset.browser_download_url));
+    }
     if (!expectedSha256) throw new Error('更新包校验失败：校验文件内容无效');
-    const actualSha256 = await sha256File(filePath);
+    const actualSha256 = await this.hashFile(filePath);
     if (expectedSha256 !== actualSha256) throw new Error('更新包校验失败：SHA-256 不匹配，请重试下载');
   }
 
@@ -358,7 +378,7 @@ class UpdateManager {
     if (!this.app.isPackaged) {
       return this.setState({ status: 'unavailable', message: '开发模式不检查更新' });
     }
-    if (['checking', 'downloading'].includes(this.state.status)) return this.publicState();
+    if (['checking', 'downloading', 'verifying'].includes(this.state.status)) return this.publicState();
     this.setState({ status: 'checking', progress: 0, message: '正在检查启动器更新…' });
     try {
       const release = await this.fetchLatestRelease();
@@ -439,11 +459,12 @@ class UpdateManager {
     if (!asset) throw new Error('Release 中未找到适合当前系统的更新文件');
     const directory = this.getUpdateDirectory();
     const targetPath = path.join(directory, asset.name);
+    const temporaryPath = `${targetPath}.part`;
     this.setState({ status: 'downloading', progress: 0, message: '正在后台下载更新 0%' });
     try {
       await this.fileSystem.mkdir(directory, { recursive: true });
       await this.assertEnoughStorage(directory, asset.size);
-      await this.downloadUpdateFile(asset.browser_download_url, targetPath, (value) => {
+      await this.downloadUpdateFile(asset.browser_download_url, temporaryPath, (value) => {
         const downloaded = percent(value);
         this.setState({
           status: 'downloading',
@@ -452,7 +473,8 @@ class UpdateManager {
         });
       });
       this.setState({ status: 'verifying', progress: 100, message: '正在校验更新包…' });
-      await this.verifyDownloadedFile(asset, targetPath);
+      await this.verifyDownloadedFile(asset, temporaryPath);
+      await this.fileSystem.rename(temporaryPath, targetPath);
       this.updateFilePath = await this.finalizeDownload(targetPath);
       this.setState({
         status: 'downloaded',
@@ -464,6 +486,7 @@ class UpdateManager {
       });
       this.onUpdateReady?.(this.state.availableVersion, this.state.installAction);
     } catch (error) {
+      await this.fileSystem.rm?.(temporaryPath, { force: true }).catch(() => {});
       const code = errorCode(error);
       const message = String(errorMessage(error));
       const friendly = message.startsWith('更新包校验失败')
@@ -492,7 +515,16 @@ class UpdateManager {
     const backupPath = `${currentAppImage}.old`;
     await this.fileSystem.rm?.(backupPath, { force: true });
     await this.fileSystem.rename(currentAppImage, backupPath);
-    await this.fileSystem.rename(targetPath, currentAppImage);
+    try {
+      await this.fileSystem.rename(targetPath, currentAppImage);
+    } catch (error) {
+      try {
+        await this.fileSystem.rename(backupPath, currentAppImage);
+      } catch (restoreError) {
+        throw new AggregateError([error, restoreError], `更新替换失败，旧版本恢复失败，备份位于 ${backupPath}`);
+      }
+      throw error;
+    }
     return currentAppImage;
   }
 

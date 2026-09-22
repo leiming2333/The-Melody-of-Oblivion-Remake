@@ -40,6 +40,12 @@ const offlineNameInput = document.querySelector('#offlineNameInput');
 const offlineSkinModelInputs = [...document.querySelectorAll('input[name="offlineSkinModel"]')];
 const addOfflineButton = document.querySelector('#addOfflineButton');
 const accountFormHint = document.querySelector('#accountFormHint');
+const microsoftLoginButton = document.querySelector('#microsoftLoginButton');
+const microsoftDevicePanel = document.querySelector('#microsoftDevicePanel');
+const microsoftDeviceCode = document.querySelector('#microsoftDeviceCode');
+const microsoftCopyCodeButton = document.querySelector('#microsoftCopyCodeButton');
+const microsoftLoginHint = document.querySelector('#microsoftLoginHint');
+const microsoftCancelLoginButton = document.querySelector('#microsoftCancelLoginButton');
 const littleSkinUsernameInput = document.querySelector('#littleSkinUsernameInput');
 const littleSkinPasswordInput = document.querySelector('#littleSkinPasswordInput');
 const littleSkinLoginButton = document.querySelector('#littleSkinLoginButton');
@@ -152,6 +158,8 @@ let autoJavaDetection = null;
 let autoJavaDetectionPromise = null;
 let javaDownloadActive = false;
 let javaRequirementRequest = 0;
+let microsoftLoginSessionId;
+let microsoftLoginActive = false;
 let littleSkinLoginActive = false;
 let launcherUpdateState = { status: 'idle', progress: 0, installAction: null, message: '尚未检查更新' };
 
@@ -516,6 +524,10 @@ function renderAccountList() {
       : account.type === 'yggdrasil'
         ? `LittleSkin 外置 · ${account.uuid}`
         : `Microsoft · ${account.uuid}`;
+    if (account.loginError) {
+      detail.textContent = account.loginError;
+      detail.title = account.loginError;
+    }
     copy.append(detail);
 
     const actions = document.createElement('span');
@@ -833,6 +845,76 @@ javaDownloadCancelButton.addEventListener('click', async () => {
     showToast(readableError(error));
   }
 });
+
+function setMicrosoftLoginBusy(active) {
+  microsoftLoginActive = active;
+  microsoftLoginButton.disabled = active;
+  microsoftCancelLoginButton.disabled = !active;
+}
+
+async function copyMicrosoftDeviceCode(code = microsoftDeviceCode.textContent, notify = true) {
+  const normalizedCode = String(code ?? '').trim();
+  if (!/^[A-Z0-9-]{6,24}$/i.test(normalizedCode)) return false;
+  try {
+    await accountsApi?.copyMicrosoftCode?.(normalizedCode);
+    microsoftCopyCodeButton.textContent = '已复制';
+    window.setTimeout(() => {
+      microsoftCopyCodeButton.textContent = '复制';
+    }, 1600);
+    if (notify) showToast('登录代码已复制');
+    return true;
+  } catch (error) {
+    if (notify) showToast(readableError(error));
+    return false;
+  }
+}
+
+async function beginMicrosoftLogin() {
+  if (microsoftLoginActive) return;
+  if (!accountsApi?.beginMicrosoft || !accountsApi?.completeMicrosoft) {
+    showToast('请在 Electron 启动器中使用 Microsoft 登录');
+    return;
+  }
+
+  setMicrosoftLoginBusy(true);
+  microsoftDevicePanel.hidden = false;
+  microsoftDeviceCode.textContent = '正在连接…';
+  microsoftLoginHint.textContent = '正在向 Microsoft 申请登录代码';
+  try {
+    const session = await accountsApi.beginMicrosoft();
+    microsoftLoginSessionId = session.sessionId;
+    microsoftDeviceCode.textContent = session.userCode;
+    const copied = await copyMicrosoftDeviceCode(session.userCode, false);
+    microsoftLoginHint.textContent = copied
+      ? '代码已复制；授权页面完成后会自动登录'
+      : '授权页面已打开，完成后会自动登录';
+    const completedState = await accountsApi.completeMicrosoft(session.sessionId);
+    if (microsoftLoginSessionId !== session.sessionId) return;
+    accountState = completedState;
+    updateAccountCard();
+    renderAccountList();
+    microsoftDevicePanel.hidden = true;
+    showToast(`Microsoft 登录成功：${accountState.current?.name ?? 'Minecraft 玩家'}`);
+  } catch (error) {
+    const message = readableError(error);
+    if (!message.includes('登录已取消')) {
+      microsoftLoginHint.textContent = message;
+      showToast(message);
+    }
+  } finally {
+    microsoftLoginSessionId = undefined;
+    setMicrosoftLoginBusy(false);
+  }
+}
+
+async function cancelMicrosoftLogin() {
+  const sessionId = microsoftLoginSessionId;
+  microsoftLoginSessionId = undefined;
+  if (sessionId) await accountsApi?.cancelMicrosoft?.(sessionId);
+  microsoftDevicePanel.hidden = true;
+  setMicrosoftLoginBusy(false);
+  showToast('Microsoft 登录已取消');
+}
 
 function setLittleSkinLoginBusy(active) {
   littleSkinLoginActive = active;
@@ -1210,6 +1292,7 @@ async function loadLoaderCatalog(force = false) {
   const loaderType = loaderTypeSelect.value;
   const requestToken = ++loaderLoadToken;
   loaderVersions = [];
+  loaderCatalogLoading = false;
 
   if (!gameVersion) {
     renderLoaderCatalog();
@@ -1391,6 +1474,7 @@ function invalidateVersionCatalogForDirectoryChange() {
   // 安装状态只对当前游戏目录有效。切换目录后不能继续复用上一个目录的
   // 版本和加载器状态，否则旧目录中的版本会被错误显示为“已安装”。
   loaderLoadToken += 1;
+  loaderCatalogLoading = false;
   versionCatalogLoadToken += 1;
   localProfilesLoaded = false;
   remoteVersions = [];
@@ -1663,7 +1747,7 @@ document.querySelector('#closeButton').addEventListener('click', () => {
 accountButton.addEventListener('click', () => {
   renderAccountList();
   accountDialog.showModal();
-  offlineNameInput.focus();
+  microsoftLoginButton.focus();
 });
 
 addOfflineButton.addEventListener('click', addOfflineAccount);
@@ -1674,12 +1758,20 @@ offlineNameInput.addEventListener('keydown', (event) => {
   }
 });
 
+microsoftLoginButton.addEventListener('click', beginMicrosoftLogin);
+microsoftCopyCodeButton.addEventListener('click', () => copyMicrosoftDeviceCode());
+microsoftCancelLoginButton.addEventListener('click', cancelMicrosoftLogin);
 littleSkinLoginButton.addEventListener('click', beginLittleSkinLogin);
 littleSkinPasswordInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     beginLittleSkinLogin();
   }
+});
+
+accountsApi?.onMicrosoftProgress?.((progress) => {
+  if (!microsoftLoginActive || progress?.sessionId !== microsoftLoginSessionId) return;
+  if (progress.message) microsoftLoginHint.textContent = progress.message;
 });
 
 document.querySelector('#settingsButton').addEventListener('click', async () => {

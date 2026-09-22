@@ -14,6 +14,7 @@ const { validateProfileId } = require('./version-manager');
 const { offlineUuidForSkinModel } = require('../accounts/account-store');
 
 const inflateRaw = promisify(zlib.inflateRaw);
+const gunzip = promisify(zlib.gunzip);
 const LAUNCHER_NAME = 'melody-of-oblivion';
 const LAUNCHER_VERSION = '1.1.2';
 const DEFAULT_FEATURES = Object.freeze({
@@ -145,9 +146,7 @@ function mergeMetadata(parent, child) {
       clientJarId: child.jar ?? child.id
     };
   }
-  const legacyArguments = [parent.minecraftArguments, child.minecraftArguments]
-    .filter(Boolean)
-    .join(' ');
+  const legacyArguments = child.minecraftArguments ?? parent.minecraftArguments;
   return {
     ...parent,
     ...child,
@@ -290,39 +289,132 @@ async function extractNativeArchive(archivePath, destination, excludes = []) {
   }
 }
 
-async function extractTarGz(archivePath, destination) {
-  const gunzip = zlib.createGunzip();
-  const input = require('node:fs').createReadStream(archivePath);
-  await new Promise((resolve, reject) => {
-    const chunks = [];
-    gunzip.on('data', (chunk) => chunks.push(chunk));
-    gunzip.on('end', () => resolve(Buffer.concat(chunks)));
-    gunzip.on('error', reject);
-    input.on('error', reject);
-    input.pipe(gunzip);
-  }).then(async (tar) => {
-    let offset = 0;
-    while (offset + 512 <= tar.length) {
-      // 两块全零表示归档结束
-      if (tar.subarray(offset, offset + 512).every((b) => b === 0)) break;
-      const name = tar.subarray(offset, offset + 100).toString('utf8').replace(/\0/g, '');
-      const sizeOctal = tar.subarray(offset + 124, offset + 136).toString('utf8').replace(/\0/g, '').trim();
-      const size = sizeOctal ? parseInt(sizeOctal, 8) : 0;
-      const typeFlag = tar[offset + 156];
-      offset += 512;
-      // 只处理普通文件（0 或 '\0'）和目录（5）
-      if (name && typeFlag !== 5) {
-        const slashName = name.replaceAll('\\', '/');
-        const segments = slashName.split('/').filter(Boolean);
-        if (segments.length > 0) {
-          const destinationPath = safePath(destination, ...segments);
-          await fs.mkdir(path.dirname(destinationPath), { recursive: true });
-          if (size > 0) await fs.writeFile(destinationPath, tar.subarray(offset, offset + size));
-        }
-      }
-      offset += Math.ceil(size / 512) * 512;
+function tarText(header, offset, length) {
+  return header.subarray(offset, offset + length).toString('utf8').split('\0', 1)[0];
+}
+
+function tarOctal(header, offset, length) {
+  const value = tarText(header, offset, length).trim();
+  if (value && !/^[0-7]+$/.test(value)) throw new Error('TAR 归档数值字段无效');
+  const number = value ? parseInt(value, 8) : 0;
+  if (!Number.isSafeInteger(number)) throw new Error('TAR 归档数值过大');
+  return number;
+}
+
+function tarPaxAttributes(content) {
+  const attributes = Object.create(null);
+  let offset = 0;
+  while (offset < content.length) {
+    const separator = content.indexOf(32, offset);
+    const lengthText = content.subarray(offset, separator).toString('ascii');
+    const length = Number(lengthText);
+    if (separator < offset || !/^\d+$/.test(lengthText)
+      || !Number.isSafeInteger(length) || length <= separator - offset + 2
+      || offset + length > content.length || content[offset + length - 1] !== 10) {
+      throw new Error('TAR PAX 扩展记录无效');
     }
-  });
+    const record = content.subarray(separator + 1, offset + length - 1).toString('utf8');
+    const equals = record.indexOf('=');
+    if (equals < 1) throw new Error('TAR PAX 扩展记录无效');
+    attributes[record.slice(0, equals)] = record.slice(equals + 1);
+    offset += length;
+  }
+  return attributes;
+}
+
+async function assertArchivePathSafe(root, target) {
+  let current = path.resolve(root);
+  for (const segment of path.relative(current, target).split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    try {
+      if ((await fs.lstat(current)).isSymbolicLink()) {
+        throw new Error('TAR 归档路径不能穿过符号链接');
+      }
+    } catch (error) {
+      if (error.code === 'ENOENT') break;
+      throw error;
+    }
+  }
+}
+
+async function extractTarGz(archivePath, destination) {
+  const tar = await gunzip(await fs.readFile(archivePath));
+  const links = [];
+  const directories = [];
+  let globalAttributes = {};
+  let nextAttributes = {};
+  let offset = 0;
+  while (offset < tar.length) {
+    if (offset + 512 > tar.length) throw new Error('TAR 归档文件头不完整');
+    const header = tar.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const checksum = header.reduce((sum, byte, index) => (
+      sum + (index >= 148 && index < 156 ? 32 : byte)
+    ), 0);
+    if (checksum !== tarOctal(header, 148, 8)) throw new Error('TAR 归档文件头校验失败');
+    const type = String.fromCharCode(header[156] || 48);
+    const attributes = { ...globalAttributes, ...nextAttributes };
+    let size = tarOctal(header, 124, 12);
+    if (!['x', 'g', 'L', 'K'].includes(type) && attributes.size !== undefined) {
+      if (!/^\d+$/.test(attributes.size)) throw new Error('TAR PAX 文件大小无效');
+      size = Number(attributes.size);
+    }
+    offset += 512;
+    if (!Number.isSafeInteger(size) || size < 0 || offset + size > tar.length) {
+      throw new Error('TAR 归档文件内容不完整');
+    }
+    const content = tar.subarray(offset, offset + size);
+    offset += Math.ceil(size / 512) * 512;
+    if (type === 'x' || type === 'g') {
+      const pax = tarPaxAttributes(content);
+      if (type === 'g') globalAttributes = { ...globalAttributes, ...pax };
+      else nextAttributes = { ...nextAttributes, ...pax };
+      continue;
+    }
+    if (type === 'L' || type === 'K') {
+      nextAttributes[type === 'L' ? 'path' : 'linkpath'] = tarText(content, 0, content.length);
+      continue;
+    }
+    nextAttributes = {};
+    const prefix = tarText(header, 257, 6) === 'ustar' ? tarText(header, 345, 155) : '';
+    const name = attributes.path ?? [prefix, tarText(header, 0, 100)].filter(Boolean).join('/');
+    if (!name || path.posix.isAbsolute(name) || path.win32.isAbsolute(name)) {
+      throw new Error('TAR 归档文件路径无效');
+    }
+    const destinationPath = safePath(destination, ...normalizeZipPath(name));
+    await assertArchivePathSafe(destination, destinationPath);
+    const mode = tarOctal(header, 100, 8) & 0o777;
+    if (type === '5') {
+      await fs.mkdir(destinationPath, { recursive: true });
+      directories.push({ destinationPath, mode });
+    } else if (type === '0') {
+      await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+      await fs.writeFile(destinationPath, content, { mode });
+      await fs.chmod(destinationPath, mode);
+    } else if (type === '1' || type === '2') {
+      const linkName = attributes.linkpath ?? tarText(header, 157, 100);
+      if (!linkName || path.posix.isAbsolute(linkName) || path.win32.isAbsolute(linkName)) {
+        throw new Error('TAR 归档链接路径无效');
+      }
+      const target = type === '2'
+        ? safePath(destination, path.dirname(destinationPath), linkName)
+        : safePath(destination, linkName);
+      links.push({ destinationPath, linkName, target, type });
+    } else {
+      throw new Error(`TAR 归档包含不支持的文件类型：${type}`);
+    }
+  }
+  // Create links after file writes so archive symlinks cannot redirect extraction.
+  for (const { destinationPath, linkName, target, type } of links) {
+    await assertArchivePathSafe(destination, destinationPath);
+    await assertArchivePathSafe(destination, target);
+    await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+    if (type === '2') await fs.symlink(linkName, destinationPath);
+    else await fs.link(target, destinationPath);
+  }
+  for (const { destinationPath, mode } of directories.reverse()) {
+    await fs.chmod(destinationPath, mode);
+  }
 }
 
 async function extractArchive(archivePath, destination, excludes = []) {

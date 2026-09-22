@@ -304,18 +304,6 @@ class ModpackManager {
       await fs.mkdir(stagingDirectory, { recursive: true });
       const warnings = [];
       try {
-        onProgress({ phase: 'copying-overrides', message: '正在复制整合包配置与覆盖文件…' });
-        try {
-          for (const overrideDirectory of pack.overrideDirectories) {
-            throwIfAborted(signal);
-            await copyDirectoryContents(
-              safePath(packRoot, ...safeRelativePath(overrideDirectory).split('/')),
-              stagingDirectory
-            );
-          }
-        } catch (error) {
-          throw new Error(`覆盖文件复制失败：${error.message}`);
-        }
         throwIfAborted(signal);
 
         let files = pack.files.filter((file) => file.required !== false || installOptionalFiles);
@@ -329,10 +317,11 @@ class ModpackManager {
             completedFiles: 0,
             totalFiles: selectedFiles.length
           });
-          await runPool(selectedFiles, Math.min(this.concurrency, 8), async (entry, index) => {
+          await runPool(selectedFiles, Math.min(this.concurrency, 8), async (entry, index, poolSignal) => {
             try {
-              resolved[index] = await resolveCurseForgeFile(entry, signal);
+              resolved[index] = await resolveCurseForgeFile(entry, poolSignal);
             } catch (error) {
+              throwIfAborted(poolSignal);
               if (entry.required !== false) {
                 throw new Error(`必需文件解析失败：${error.message}`);
               }
@@ -363,15 +352,29 @@ class ModpackManager {
           baseProgress: { modpackName: pack.name }
         });
         progressTracker.start(`准备下载 ${tasks.length} 个整合包文件`);
-        await runPool(tasks, this.concurrency, async (task) => {
+        await runPool(tasks, this.concurrency, async (task, _index, poolSignal) => {
           const result = await downloadFile({
             ...task,
-            signal,
+            signal: poolSignal,
             segmentConcurrency: this.segmentConcurrency,
             ...progressTracker.hooks(task)
           });
           progressTracker.complete(task, result);
         }, signal);
+
+        onProgress({ phase: 'copying-overrides', message: '正在复制整合包配置与覆盖文件…' });
+        try {
+          for (const overrideDirectory of pack.overrideDirectories) {
+            throwIfAborted(signal);
+            await copyDirectoryContents(
+              safePath(packRoot, ...safeRelativePath(overrideDirectory).split('/')),
+              stagingDirectory
+            );
+          }
+        } catch (error) {
+          throw new Error(`覆盖文件复制失败：${error.message}`);
+        }
+        throwIfAborted(signal);
 
         const metadata = {
           schemaVersion: 1,

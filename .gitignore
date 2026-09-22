@@ -5,6 +5,7 @@ release*/
 pet-diagnostics/
 site-backup/
 remotion-promo/
+.minecraft/
 
 .env
 .env.*

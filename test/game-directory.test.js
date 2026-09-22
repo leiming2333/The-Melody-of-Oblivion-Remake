@@ -6,6 +6,7 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { MinecraftDownloader } = require('../src/main/minecraft/downloader');
 const { ManagedJavaRuntime } = require('../src/main/minecraft/managed-java-runtime');
+const { ModpackManager } = require('../src/main/minecraft/modpack-manager');
 const {
   launcherDirectory,
   registerMinecraftIpc,
@@ -90,6 +91,11 @@ async function ipcFixture(t, patch = {}) {
     invoke: (channel, sender, ...args) => handlers.get(channel)({ sender }, ...args)
   };
 }
+
+test('packaged macOS local game directory stays outside the application bundle', () => {
+  const app = { isPackaged: true, getPath: () => path.resolve('Applications', 'Launcher.app', 'Contents', 'MacOS', 'Launcher') };
+  assert.equal(resolveGameDirectory(app, 'local', { env: {}, platform: 'darwin' }), path.resolve('Applications', '.minecraft'));
+});
 
 function ipcSender(id) {
   const sender = new EventEmitter();
@@ -242,4 +248,25 @@ test('Java 取消仅影响所属窗口的 Java 任务，游戏取消保持 Java 
   assert.deepEqual(await secondJava, { javaPath: 'installed-java', majorVersion: 17 });
   assert.deepEqual(await invoke('minecraft:cancel-java-download', owner), { cancelled: 0 });
   assert.equal(owner.listenerCount('destroyed'), 0);
+});
+
+test('modpack IPC forwards optional-file choices and defaults to required files', async (t) => {
+  const { invoke } = await ipcFixture(t);
+  const sender = ipcSender(1);
+  const received = [];
+  t.mock.method(ModpackManager.prototype, 'install', async (filePath, onProgress, options) => {
+    received.push({ filePath, optional: options.installOptionalFiles, aborted: options.signal.aborted });
+    onProgress({ phase: 'complete' });
+    return { targetId: 'instance-pack' };
+  });
+  assert.deepEqual(await invoke('minecraft:install-modpack', sender, 'pack.mrpack', {
+    installOptionalFiles: true
+  }), { targetId: 'instance-pack' });
+  await invoke('minecraft:install-modpack', sender, 'pack.zip');
+  assert.deepEqual(received, [
+    { filePath: 'pack.mrpack', optional: true, aborted: false },
+    { filePath: 'pack.zip', optional: false, aborted: false }
+  ]);
+  assert.equal(sender.messages.length, 2);
+  assert.equal(sender.listenerCount('destroyed'), 0);
 });

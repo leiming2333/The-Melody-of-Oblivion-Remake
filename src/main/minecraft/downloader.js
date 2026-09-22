@@ -374,13 +374,13 @@ async function downloadFileSegmented(url, temporary, task) {
 
   const chunkPaths = segments.map((segment) => `${temporary}.chunk-${segment.index}`);
   try {
-    await runPool(segments, segments.length, async (segment) => {
+    await runPool(segments, segments.length, async (segment, _index, poolSignal) => {
       await fsPromises.rm(chunkPaths[segment.index], { force: true });
       await downloadSegment(
         url,
         segment,
         chunkPaths[segment.index],
-        task.signal,
+        poolSignal,
         task.onChunk
       );
     }, task.signal);
@@ -520,14 +520,27 @@ async function downloadFile(task) {
 }
 
 async function runPool(items, concurrency, worker, signal) {
+  throwIfAborted(signal);
+  const controller = new AbortController();
+  const poolSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   let cursor = 0;
+  let failed = false;
+  let failure;
 
   async function runWorker() {
-    while (cursor < items.length) {
-      throwIfAborted(signal);
+    while (cursor < items.length && !poolSignal.aborted) {
       const itemIndex = cursor;
       cursor += 1;
-      await worker(items[itemIndex], itemIndex);
+      try {
+        await worker(items[itemIndex], itemIndex, poolSignal);
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+          controller.abort(error);
+        }
+        return;
+      }
     }
   }
 
@@ -536,6 +549,8 @@ async function runPool(items, concurrency, worker, signal) {
     () => runWorker()
   );
   await Promise.all(workers);
+  throwIfAborted(signal);
+  if (failed) throw failure;
 }
 
 function libraryTasks(metadata, gameDirectory, sourceManager, preferredSourceId) {
@@ -926,9 +941,9 @@ class MinecraftDownloader {
     let checkedFiles = 0;
     let lastProgressAt = 0;
     onProgress({ versionId, checkedFiles, totalFiles: verificationTasks.length });
-    await runPool(verificationTasks, Math.min(8, this.concurrency), async (task) => {
-      throwIfAborted(signal);
-      if (!(await fileMatches(task.destination, { ...task, signal }))) {
+    await runPool(verificationTasks, Math.min(8, this.concurrency), async (task, _index, poolSignal) => {
+      throwIfAborted(poolSignal);
+      if (!(await fileMatches(task.destination, { ...task, signal: poolSignal }))) {
         missing.push(task.label);
       }
       checkedFiles += 1;
@@ -961,7 +976,7 @@ class MinecraftDownloader {
     }
 
     onProgress({ phase: 'preparing', message: '正在获取版本清单…', versionId });
-    const { manifest, source } = await this.sourceManager.getVersionManifest();
+    const { manifest, source } = await this.sourceManager.getVersionManifest({ signal });
     throwIfAborted(signal);
     const versionEntry = manifest.versions.find((version) => version.id === versionId);
     if (!versionEntry) {
@@ -977,7 +992,8 @@ class MinecraftDownloader {
     const metadataResult = await this.sourceManager.fetchJsonFromSources(
       'version-json',
       { versionId, originalUrl: versionEntry.url },
-      source.id
+      source.id,
+      { signal }
     );
     throwIfAborted(signal);
     const metadata = metadataResult.data;
@@ -1011,7 +1027,8 @@ class MinecraftDownloader {
       const assetIndexResult = await this.sourceManager.fetchJsonFromSources(
         'asset-index',
         { originalUrl: metadata.assetIndex.url },
-        preferredSourceId
+        preferredSourceId,
+        { signal }
       );
       throwIfAborted(signal);
       assetIndex = assetIndexResult.data;
@@ -1066,10 +1083,10 @@ class MinecraftDownloader {
       `准备下载 ${downloadTasks.length} 个文件（${this.concurrency} 路并发）`
     );
 
-    await runPool(downloadTasks, this.concurrency, async (task) => {
+    await runPool(downloadTasks, this.concurrency, async (task, _index, poolSignal) => {
       const result = await downloadFile({
         ...task,
-        signal,
+        signal: poolSignal,
         segmentConcurrency: this.segmentConcurrency,
         ...progressTracker.hooks(task)
       });

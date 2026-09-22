@@ -25,6 +25,9 @@ function launcherDirectory(app, {
   if (env.PORTABLE_EXECUTABLE_DIR) return path.resolve(env.PORTABLE_EXECUTABLE_DIR);
   if (platform === 'linux' && env.APPIMAGE) return path.dirname(path.resolve(env.APPIMAGE));
   if (!app.isPackaged) return path.resolve(app.getAppPath());
+  if (platform === 'darwin') {
+    return path.resolve(path.dirname(app.getPath('exe')), '..', '..', '..');
+  }
   return path.dirname(path.resolve(app.getPath('exe')));
 }
 
@@ -40,6 +43,7 @@ function registerMinecraftIpc({
   shell,
   settingsStore,
   accountStore,
+  microsoftAuth,
   yggdrasilAuth
 }) {
   const activeDownloads = new Map();
@@ -206,7 +210,7 @@ function registerMinecraftIpc({
     return modpackManager.inspect(filePath);
   });
 
-  ipcMain.handle('minecraft:install-modpack', async (event, filePath) => {
+  ipcMain.handle('minecraft:install-modpack', async (event, filePath, options = {}) => {
     await applyDownloadSettings();
     return runDownloadTask(event, `modpack:${path.basename(String(filePath ?? ''))}`, (signal) => (
       modpackManager.install(filePath, (progress) => {
@@ -286,6 +290,9 @@ function registerMinecraftIpc({
       throw new Error('请先等待下载完成或取消下载，再启动游戏');
     }
     let currentAccount = accountStore ? await accountStore.getCurrentAccount() : undefined;
+    if (currentAccount?.type === 'microsoft' && microsoftAuth) {
+      currentAccount = await microsoftAuth.ensureAccount(currentAccount);
+    }
     if (currentAccount?.type === 'yggdrasil' && yggdrasilAuth) {
       currentAccount = await yggdrasilAuth.ensureAccount(currentAccount);
     }

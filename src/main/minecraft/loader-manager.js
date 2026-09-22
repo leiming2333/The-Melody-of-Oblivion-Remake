@@ -20,7 +20,8 @@ const {
   writeInstallationMarker,
   writeJsonAtomic
 } = require('./downloader');
-const { findJavaExecutable, runJavaInstaller } = require('./java-runtime');
+const { runJavaInstaller } = require('./java-runtime');
+const { ManagedJavaRuntime } = require('./managed-java-runtime');
 
 const FABRIC_META_BASES = Object.freeze({
   bmclapi: `${BMCLAPI_BASE}/fabric-meta/v2`,
@@ -140,14 +141,20 @@ async function fetchFirst(candidates, parser, signal) {
   for (const candidate of candidates) {
     try {
       throwIfAborted(signal);
-      const response = await fetchWithTimeout(
+      const data = await fetchWithTimeout(
         candidate.url,
         { signal },
-        LOADER_METADATA_TIMEOUT_MS
+        LOADER_METADATA_TIMEOUT_MS,
+        async (response) => {
+          if (!response.ok) {
+            await response.body?.cancel().catch(() => {});
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return parser(response, candidate);
+        }
       );
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return {
-        data: await parser(response, candidate),
+        data,
         source: candidate.source,
         url: candidate.url
       };
@@ -167,14 +174,20 @@ async function fetchFastest(candidates, parser, signal) {
       ? AbortSignal.any([signal, controllers[index].signal])
       : controllers[index].signal;
     try {
-      const response = await fetchWithTimeout(
+      const data = await fetchWithTimeout(
         candidate.url,
         { signal: requestSignal },
-        LOADER_METADATA_TIMEOUT_MS
+        LOADER_METADATA_TIMEOUT_MS,
+        async (response) => {
+          if (!response.ok) {
+            await response.body?.cancel().catch(() => {});
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return parser(response, candidate);
+        }
       );
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return {
-        data: await parser(response, candidate),
+        data,
         source: candidate.source,
         url: candidate.url
       };
@@ -202,12 +215,16 @@ class MinecraftLoaderManager {
     gameDirectory,
     sourceManager,
     downloader,
+    javaRuntime,
+    runInstaller = runJavaInstaller,
     concurrency = DEFAULT_FILE_CONCURRENCY,
     segmentConcurrency = DEFAULT_SEGMENT_CONCURRENCY
   }) {
     this.gameDirectory = gameDirectory;
     this.sourceManager = sourceManager;
     this.downloader = downloader;
+    this.javaRuntime = javaRuntime ?? new ManagedJavaRuntime({ gameDirectory });
+    this.runInstaller = runInstaller;
     this.concurrency = concurrency;
     this.segmentConcurrency = segmentConcurrency;
     this.javaPath = '';
@@ -269,7 +286,8 @@ class MinecraftLoaderManager {
     });
   }
 
-  async listLoaderVersions(gameVersion, loaderType, { force = false } = {}) {
+  async listLoaderVersions(gameVersion, loaderType, { force = false, signal } = {}) {
+    throwIfAborted(signal);
     validateGameVersion(gameVersion);
     validateLoaderType(loaderType);
     const cacheKey = `${loaderType}:${gameVersion}`;
@@ -302,7 +320,8 @@ class MinecraftLoaderManager {
           (sourceId) => `${FABRIC_META_BASES[sourceId]}/versions/loader/${encodeURIComponent(gameVersion)}`,
           preferred.id
         ),
-        (response) => response.json()
+        (response) => response.json(),
+        signal
       );
       versions = fetched.data.map((entry) => ({
         version: entry.loader.version,
@@ -323,7 +342,8 @@ class MinecraftLoaderManager {
             : forgeLoaderVersions(gameVersion, parseMavenVersions(await response.text()));
           if (parsed.length === 0) throw new Error('未返回 Forge 安装器版本');
           return parsed;
-        }
+        },
+        signal
       );
       versions = fetched.data;
     } else {
@@ -336,7 +356,8 @@ class MinecraftLoaderManager {
             : `${officialBase}/${metadataPath}`,
           preferred.id
         ),
-        (response) => response.text()
+        (response) => response.text(),
+        signal
       );
       const mavenVersions = parseMavenVersions(fetched.data);
       versions = neoForgeLoaderVersions(gameVersion, mavenVersions);
@@ -348,6 +369,7 @@ class MinecraftLoaderManager {
       source: { id: fetched.source.id, label: fetched.source.label },
       versions
     };
+    throwIfAborted(signal);
     this.cache.set(cacheKey, { fetchedAt: Date.now(), result });
     return this.withInstalledState(result, await installedIdsPromise);
   }
@@ -369,8 +391,9 @@ class MinecraftLoaderManager {
     };
   }
 
-  async validateLoaderVersion(gameVersion, loaderType, loaderVersion) {
-    const list = await this.listLoaderVersions(gameVersion, loaderType);
+  async validateLoaderVersion(gameVersion, loaderType, loaderVersion, signal) {
+    const list = await this.listLoaderVersions(gameVersion, loaderType, { signal });
+    throwIfAborted(signal);
     const entry = list.versions.find((version) => version.version === loaderVersion);
     if (!entry) {
       throw new Error(`${loaderType} 不支持 Minecraft ${gameVersion}，或加载器版本不存在`);
@@ -408,10 +431,10 @@ class MinecraftLoaderManager {
       initialSourceId: preferredSourceId
     });
     progressTracker.start(`准备下载 ${tasks.length} 个 Fabric 文件（${this.concurrency} 路并发）`);
-    await runPool(tasks, this.concurrency, async (task) => {
+    await runPool(tasks, this.concurrency, async (task, _index, poolSignal) => {
       const downloaded = await downloadFile({
         ...task,
-        signal,
+        signal: poolSignal,
         segmentConcurrency: this.segmentConcurrency,
         ...progressTracker.hooks(task)
       });
@@ -489,10 +512,20 @@ class MinecraftLoaderManager {
       completedFiles: 1,
       totalFiles: 2
     });
-    const javaExecutable = await findJavaExecutable(javaPath);
+    const baseMetadata = JSON.parse(await fs.readFile(
+      safePath(this.gameDirectory, 'versions', gameVersion, `${gameVersion}.json`),
+      'utf8'
+    ));
+    const requiredJavaVersion = baseMetadata.javaVersion?.majorVersion ?? 8;
+    const javaExecutable = await this.javaRuntime.resolve(
+      javaPath,
+      requiredJavaVersion,
+      undefined,
+      signal
+    );
     throwIfAborted(signal);
     let lastMessageAt = 0;
-    await runJavaInstaller({
+    await this.runInstaller({
       javaExecutable,
       installerPath,
       gameDirectory: this.gameDirectory,
@@ -539,7 +572,7 @@ class MinecraftLoaderManager {
       throw new Error('加载器版本号格式无效');
     }
 
-    const { entry, source } = await this.validateLoaderVersion(gameVersion, loaderType, loaderVersion);
+    const { entry, source } = await this.validateLoaderVersion(gameVersion, loaderType, loaderVersion, signal);
     throwIfAborted(signal);
     onProgress({
       phase: 'preparing',

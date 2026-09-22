@@ -180,3 +180,153 @@ test('账户可以持久化、切换和删除', async (context) => {
   assert.equal(finalState.accounts.length, 1);
   assert.equal(finalState.current.name, 'Alex');
 });
+
+for (const type of ['microsoft', 'yggdrasil']) {
+  const secondSecret = type === 'microsoft' ? 'microsoftRefreshToken' : 'clientToken';
+  const uuid = '01234567-89ab-cdef-0123-456789abcdef';
+  const id = `${type === 'microsoft' ? 'microsoft' : 'littleskin'}:${uuid}`;
+  const secretCodec = {
+    encode: (value) => `encoded:${value}`,
+    decode: (value) => {
+      if (!value.startsWith('encoded:') || value === 'encoded:damaged-ciphertext') {
+        throw new Error('Cannot decrypt credentials');
+      }
+      return value.slice('encoded:'.length);
+    }
+  };
+  const damagedAccount = {
+    id, type, uuid, name: 'Player_01',
+    accessToken: 'encoded:old-access',
+    [secondSecret]: 'encoded:damaged-ciphertext'
+  };
+
+  test(`${type} 损坏凭据允许账户恢复且保留原始密文`, async (t) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-damaged-account-test-'));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const filePath = path.join(root, 'accounts.json');
+    const offlineAccount = { id: 'offline:steve', type: 'offline', name: 'Steve', uuid: offlineUuid('Steve') };
+    const healthyAccount = {
+      id: `${type}:healthy`, type, name: 'Player_02',
+      uuid: 'fedcba98-7654-3210-fedc-ba9876543210',
+      accessToken: 'encoded:healthy-access', [secondSecret]: 'encoded:healthy-secret'
+    };
+    await fs.writeFile(filePath, JSON.stringify({ currentId: id, accounts: [damagedAccount, offlineAccount, healthyAccount] }));
+    const store = new AccountStore(filePath, { secretCodec });
+
+    const state = await store.getState();
+    assert.match(state.current.loginError, /重新登录/);
+    assert.equal(state.current.accessToken, undefined);
+    assert.equal(state.current[secondSecret], undefined);
+    assert.equal(Object.getOwnPropertySymbols(state.current).length, 0);
+    assert.equal(JSON.stringify(state).includes('ciphertext'), false);
+    await assert.rejects(store.getCurrentAccount(), /Player_01.*重新登录/);
+    await assert.rejects(store.getAccount(id), /重新登录/);
+    assert.equal((await store.getAccount(offlineAccount.id)).name, 'Steve');
+    assert.equal((await store.getAccount(healthyAccount.id)).accessToken, 'healthy-access');
+
+    await store.addOffline('NewPlayer');
+    const savedAccounts = JSON.parse(await fs.readFile(filePath, 'utf8')).accounts;
+    const savedAccount = savedAccounts.find((account) => account.id === id);
+    assert.equal(savedAccount.accessToken, damagedAccount.accessToken);
+    assert.equal(savedAccount[secondSecret], damagedAccount[secondSecret]);
+    assert.equal(savedAccounts.find((account) => account.id === healthyAccount.id).accessToken, healthyAccount.accessToken);
+    await store.select(offlineAccount.id);
+    assert.equal((await store.getCurrentAccount()).name, 'Steve');
+    await store.select(id);
+    const removed = await store.remove(id);
+    assert.equal(removed.current.name, 'Steve');
+    assert.equal(removed.accounts.some((account) => account.id === id), false);
+  });
+
+  test(`${type} 重新登录替换损坏凭据并清除错误`, async (t) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-account-relogin-test-'));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const filePath = path.join(root, 'accounts.json');
+    await fs.writeFile(filePath, JSON.stringify({ currentId: id, accounts: [damagedAccount] }));
+    const store = new AccountStore(filePath, { secretCodec });
+    const credentials = { uuid, name: 'Player_01', accessToken: 'new-access', [secondSecret]: 'new-secret' };
+    const state = type === 'microsoft'
+      ? await store.upsertMicrosoft(credentials)
+      : await store.upsertYggdrasil(credentials);
+
+    assert.equal(state.current.loginError, undefined);
+    const account = await store.getCurrentAccount();
+    assert.equal(account.accessToken, 'new-access');
+    assert.equal(account[secondSecret], 'new-secret');
+    const saved = JSON.parse(await fs.readFile(filePath, 'utf8')).accounts[0];
+    assert.equal(saved.accessToken, 'encoded:new-access');
+    assert.equal(saved[secondSecret], 'encoded:new-secret');
+  });
+}
+
+test('安全存储不可用或旧明文凭据不会阻止离线账户操作', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-unavailable-secrets-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'accounts.json');
+  const account = {
+    id: 'microsoft:old', type: 'microsoft', name: 'Player_01',
+    uuid: '01234567-89ab-cdef-0123-456789abcdef',
+    accessToken: 'old-plaintext', microsoftRefreshToken: 'safe-storage:v1:lost-key'
+  };
+  await fs.writeFile(filePath, JSON.stringify({ currentId: account.id, accounts: [account] }));
+  const store = new AccountStore(filePath, {
+    secretCodec: {
+      decode: () => { throw new Error('Secure storage unavailable'); },
+      encode: () => { throw new Error('Secure storage unavailable'); }
+    }
+  });
+
+  assert.equal((await store.getState()).accounts.length, 1);
+  const state = await store.addOffline('Steve');
+  assert.equal(state.current.type, 'offline');
+  assert.equal((await store.getCurrentAccount()).name, 'Steve');
+  const preserved = JSON.parse(await fs.readFile(filePath, 'utf8')).accounts[0];
+  assert.equal(preserved.accessToken, account.accessToken);
+  assert.equal(preserved.microsoftRefreshToken, account.microsoftRefreshToken);
+  assert.equal((await store.remove(account.id)).accounts.length, 1);
+});
+
+test('账户文件替换失败时保留现有账户', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-account-save-failure-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'accounts.json');
+  const store = new AccountStore(filePath);
+  await store.addOffline('Steve');
+  const original = await store.getState();
+  const originalBytes = await fs.readFile(filePath);
+  t.mock.method(fs, 'rename', async () => { throw new Error('Replacement failed'); });
+
+  await assert.rejects(store.addOffline('Alex'), /Replacement failed/);
+  assert.deepEqual(await fs.readFile(filePath), originalBytes);
+  assert.deepEqual(await store.getState(), original);
+});
+
+test('账户保存期间读取始终获得现有文件', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-account-save-reader-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'accounts.json');
+  const store = new AccountStore(filePath);
+  await store.addOffline('Steve');
+  const original = await store.getState();
+  const rename = fs.rename;
+  let entered;
+  let release;
+  const replacementStarted = new Promise((resolve) => { entered = resolve; });
+  const replacementAllowed = new Promise((resolve) => { release = resolve; });
+  t.mock.method(fs, 'rename', async (...args) => {
+    entered();
+    await replacementAllowed;
+    return rename(...args);
+  });
+
+  const saving = store.addOffline('Alex');
+  await replacementStarted;
+  try {
+    assert.deepEqual(await store.getState(), original);
+    assert.equal((await store.getCurrentAccount()).name, 'Steve');
+  } finally {
+    release();
+    await saving;
+  }
+  assert.equal((await store.getCurrentAccount()).name, 'Alex');
+});

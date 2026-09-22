@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const {
   ModpackManager,
   createInstanceId,
@@ -171,6 +172,47 @@ test('可以从最小 mrpack 压缩包读取安装信息', async (t) => {
     requiredFileCount: 0,
     optionalFileCount: 0
   });
+});
+
+test('Modrinth 安装先下载索引文件，再应用通用与客户端覆盖文件', async (t) => {
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-overrides-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const archivePath = path.join(temporaryRoot, 'overrides.mrpack');
+  const downloadedContent = 'downloaded configuration';
+  const index = {
+    formatVersion: 1,
+    game: 'minecraft',
+    name: 'Override Pack',
+    dependencies: { minecraft: '1.21.1' },
+    files: ['common.txt', 'client.txt', 'download-only.txt'].map((name) => ({
+      path: `config/${name}`,
+      downloads: [`https://cdn.modrinth.com/data/${name}`],
+      hashes: { sha1: crypto.createHash('sha1').update(downloadedContent).digest('hex') },
+      fileSize: Buffer.byteLength(downloadedContent)
+    }))
+  };
+  await fs.writeFile(archivePath, storedZip([
+    ['modrinth.index.json', JSON.stringify(index)],
+    ['overrides/config/common.txt', 'common override'],
+    ['overrides/config/client.txt', 'common client configuration'],
+    ['client-overrides/config/client.txt', 'client override']
+  ]));
+  let downloads = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    downloads += 1;
+    return new Response(downloadedContent);
+  });
+  const manager = new ModpackManager({
+    gameDirectory: path.join(temporaryRoot, 'game'),
+    loaderManager: { installLoader: async () => ({ profileId: '1.21.1' }) }
+  });
+
+  const result = await manager.install(archivePath);
+  const configurationRoot = path.join(manager.gameDirectory, 'melody-instances', result.instanceId, 'config');
+  assert.equal(downloads, 3);
+  assert.equal(await fs.readFile(path.join(configurationRoot, 'common.txt'), 'utf8'), 'common override');
+  assert.equal(await fs.readFile(path.join(configurationRoot, 'client.txt'), 'utf8'), 'client override');
+  assert.equal(await fs.readFile(path.join(configurationRoot, 'download-only.txt'), 'utf8'), downloadedContent);
 });
 
 test('CurseForge 文件缺少下载地址时给出受限提示', async () => {

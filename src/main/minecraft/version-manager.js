@@ -1,11 +1,12 @@
 const fs = require('node:fs/promises');
+const path = require('node:path');
 const { hasInstallationMarker, safePath } = require('./downloader');
 
 const PROFILE_ID_PATTERN = /^[0-9A-Za-z._+-]{1,120}$/;
 
 function validateProfileId(profileId) {
   const normalized = String(profileId ?? '');
-  if (!PROFILE_ID_PATTERN.test(normalized)) {
+  if (!PROFILE_ID_PATTERN.test(normalized) || normalized === '.' || normalized === '..') {
     throw new Error('游戏版本 ID 格式无效');
   }
   return normalized;
@@ -165,6 +166,11 @@ class MinecraftVersionManager {
     const validatedId = validateProfileId(profileId);
     const versionsRoot = safePath(this.gameDirectory, 'versions');
     const profileRoot = safePath(versionsRoot, validatedId);
+    const relativePath = path.relative(versionsRoot, profileRoot);
+    if (!relativePath || relativePath === '..'
+      || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+      throw new Error('游戏版本目录无效');
+    }
     let stat;
     try {
       stat = await fs.lstat(profileRoot);

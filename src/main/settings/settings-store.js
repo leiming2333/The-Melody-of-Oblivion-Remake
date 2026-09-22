@@ -72,7 +72,6 @@ class SettingsStore {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     const temporary = `${this.filePath}.part`;
     await fs.writeFile(temporary, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
-    await fs.rm(this.filePath, { force: true });
     await fs.rename(temporary, this.filePath);
     return normalized;
   }

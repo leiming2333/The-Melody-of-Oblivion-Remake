@@ -31,6 +31,24 @@ test('删除版本只接受安全的启动配置 ID', () => {
   assert.equal(validateProfileId('fabric-loader-0.16.10-1.21.1'), 'fabric-loader-0.16.10-1.21.1');
   assert.throws(() => validateProfileId('../outside'), /格式无效/);
   assert.throws(() => validateProfileId(''), /格式无效/);
+  assert.throws(() => validateProfileId('.'), /格式无效/);
+  assert.throws(() => validateProfileId('..'), /格式无效/);
+});
+
+test('deleting dot IDs never trashes the versions root', async (t) => {
+  const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-delete-root-test-'));
+  t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
+  await writeProfile(gameDirectory, '1.21.1', { type: 'release' });
+  const trashed = [];
+  const manager = new MinecraftVersionManager({
+    gameDirectory,
+    trashItem: async (target) => trashed.push(target)
+  });
+  for (const profileId of ['.', '..']) {
+    await assert.rejects(manager.deleteProfile(profileId), /格式无效/);
+  }
+  assert.deepEqual(trashed, []);
+  await fs.access(path.join(gameDirectory, 'versions', '1.21.1', '1.21.1.json'));
 });
 
 test('本地版本会先扫描原版与加载器配置，并检查继承完整性', async (t) => {

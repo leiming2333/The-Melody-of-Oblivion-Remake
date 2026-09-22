@@ -90,7 +90,7 @@ const translations = {
       "The launch list shows only complete local versions, so switching stays direct and remote catalog noise stays out of the way.",
     "features.accountTitle": "Account and skin sync",
     "features.accountBody":
-      "Create an offline account or sign in with LittleSkin Yggdrasil. Skin avatars stay in sync, and online tokens are encrypted only through secure system storage.",
+      "Offline, Microsoft, and LittleSkin Yggdrasil accounts live side by side. Online tokens are encrypted only through secure system storage and are never persisted as plain text.",
     "features.loaderTitle": "One-stop loader setup",
     "features.loaderBody":
       "Fabric, Forge, and NeoForge share the same version picker and progress flow — no separate installers to hunt down.",
@@ -121,7 +121,7 @@ const translations = {
     "roadmap.phase1Title": "Launch core",
     "roadmap.phase1Body": "Version inheritance, arguments, native extraction, and process status.",
     "roadmap.phase2Title": "Accounts and downloads",
-    "roadmap.phase2Body": "Offline accounts and LittleSkin sign-in, multi-source downloads, integrity checks, and background tasks.",
+    "roadmap.phase2Body": "Microsoft and LittleSkin sign-in, multi-source downloads, integrity checks, and background tasks.",
     "roadmap.phase3Title": "Modpacks and experience polish",
     "roadmap.phase3Body": "Modrinth and CurseForge instances now separate required and optional files, surface restricted-file warnings, and report failures by install phase.",
     "roadmap.phase4Title": "First public release",

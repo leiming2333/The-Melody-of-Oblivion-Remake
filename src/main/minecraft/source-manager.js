@@ -36,13 +36,20 @@ function createTimeoutSignal(timeoutMs) {
   return { controller, timer };
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('下载已取消');
+  error.name = 'AbortError';
+  throw error;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000, consumeResponse) {
   const { controller, timer } = createTimeoutSignal(timeoutMs);
   const signals = [controller.signal, options.signal].filter(Boolean);
   const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
 
   try {
-    return await fetch(url, {
+    const response = await fetch(url, {
       redirect: 'follow',
       ...options,
       headers: {
@@ -51,19 +58,21 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
       },
       signal
     });
+    return consumeResponse ? await consumeResponse(response) : response;
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function fetchJson(url, timeoutMs = 15000) {
-  const response = await fetchWithTimeout(url, {}, timeoutMs);
-
-  if (!response.ok) {
-    throw new Error(`请求失败：HTTP ${response.status} ${url}`);
-  }
-
-  return response.json();
+async function fetchJson(url, timeoutMs = 15000, signal) {
+  throwIfAborted(signal);
+  return fetchWithTimeout(url, { signal }, timeoutMs, async (response) => {
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`请求失败：HTTP ${response.status} ${url}`);
+    }
+    return response.json();
+  });
 }
 
 function officialAssetUrl(hash) {
@@ -115,12 +124,14 @@ class MinecraftSourceManager {
     probeTimeoutMs = 6500,
     cacheDurationMs = 5 * 60 * 1000,
     benchmarkTimeoutMs = 6000,
-    benchmarkCacheDurationMs = 2 * 60 * 1000
+    benchmarkCacheDurationMs = 2 * 60 * 1000,
+    metadataTimeoutMs = 15000
   } = {}) {
     this.probeTimeoutMs = probeTimeoutMs;
     this.cacheDurationMs = cacheDurationMs;
     this.benchmarkTimeoutMs = benchmarkTimeoutMs;
     this.benchmarkCacheDurationMs = benchmarkCacheDurationMs;
+    this.metadataTimeoutMs = metadataTimeoutMs;
     this.downloadPreference = 'auto';
     this.selectionCache = undefined;
     this.downloadSelectionCache = undefined;
@@ -138,11 +149,11 @@ class MinecraftSourceManager {
     return normalized;
   }
 
-  async probe(source) {
+  async probe(source, signal) {
     const startedAt = Date.now();
     const response = await fetchWithTimeout(
       source.manifestUrl,
-      { method: 'HEAD', headers: { Accept: 'application/json' } },
+      { method: 'HEAD', headers: { Accept: 'application/json' }, signal },
       this.probeTimeoutMs
     );
 
@@ -157,7 +168,8 @@ class MinecraftSourceManager {
     };
   }
 
-  async selectSource({ force = false } = {}) {
+  async selectSource({ force = false, signal } = {}) {
+    throwIfAborted(signal);
     if (this.downloadPreference !== 'auto') {
       return { ...SOURCES[this.downloadPreference], checkedAt: Date.now() };
     }
@@ -170,12 +182,13 @@ class MinecraftSourceManager {
       return this.selectionCache;
     }
 
-    const probes = Object.values(SOURCES).map((source) => this.probe(source));
+    const probes = Object.values(SOURCES).map((source) => this.probe(source, signal));
 
     try {
       this.selectionCache = await Promise.any(probes);
       return this.selectionCache;
     } catch {
+      throwIfAborted(signal);
       throw new Error('BMCLAPI 与 Mojang 官方源均无法连接，请检查网络后重试');
     }
   }
@@ -308,7 +321,7 @@ class MinecraftSourceManager {
       .sort((left, right) => right.benchmark.bytesPerSecond - left.benchmark.bytesPerSecond);
 
     if (successful.length === 0) {
-      const fallback = await this.selectSource({ force });
+      const fallback = await this.selectSource({ force, signal });
       this.downloadSelectionCache = {
         ...fallback,
         preference: 'auto',
@@ -347,11 +360,13 @@ class MinecraftSourceManager {
     return unique([...libraryUrls, lss233Url]);
   }
 
-  async fetchJsonFromSources(type, context, preferredSourceId) {
+  async fetchJsonFromSources(type, context, preferredSourceId, { signal } = {}) {
+    throwIfAborted(signal);
     const sourceOrder = this.sourceOrder(preferredSourceId);
     const errors = [];
 
     for (const sourceId of sourceOrder) {
+      throwIfAborted(signal);
       const url = resolveSourceUrl(sourceId, type, context);
       if (!url) {
         continue;
@@ -359,11 +374,12 @@ class MinecraftSourceManager {
 
       try {
         return {
-          data: await fetchJson(url),
+          data: await fetchJson(url, this.metadataTimeoutMs, signal),
           source: SOURCES[sourceId],
           url
         };
       } catch (error) {
+        throwIfAborted(signal);
         errors.push(error);
       }
     }
@@ -371,7 +387,8 @@ class MinecraftSourceManager {
     throw errors.at(-1) ?? new Error('没有可用的下载地址');
   }
 
-  async getVersionManifest({ force = false } = {}) {
+  async getVersionManifest({ force = false, signal } = {}) {
+    throwIfAborted(signal);
     if (
       !force &&
       this.manifestCache &&
@@ -384,14 +401,21 @@ class MinecraftSourceManager {
     let latency;
     if (this.downloadPreference === 'auto') {
       const startedAt = Date.now();
+      const selectionController = new AbortController();
+      const selectionSignal = signal
+        ? AbortSignal.any([signal, selectionController.signal])
+        : selectionController.signal;
       try {
         result = await Promise.any(Object.values(SOURCES).map(async (source) => ({
-          data: await fetchJson(source.manifestUrl),
+          data: await fetchJson(source.manifestUrl, this.metadataTimeoutMs, selectionSignal),
           source,
           url: source.manifestUrl
         })));
       } catch {
+        throwIfAborted(signal);
         throw new Error('BMCLAPI 与 Mojang 官方源均无法连接，请检查网络后重试');
+      } finally {
+        selectionController.abort();
       }
       latency = Date.now() - startedAt;
       this.selectionCache = {
@@ -400,11 +424,12 @@ class MinecraftSourceManager {
         checkedAt: Date.now()
       };
     } else {
-      const selected = await this.selectSource({ force });
+      const selected = await this.selectSource({ force, signal });
       const startedAt = Date.now();
-      result = await this.fetchJsonFromSources('manifest', {}, selected.id);
+      result = await this.fetchJsonFromSources('manifest', {}, selected.id, { signal });
       latency = Date.now() - startedAt;
     }
+    throwIfAborted(signal);
     this.manifestCache = {
       manifest: result.data,
       source: {
@@ -425,6 +450,7 @@ module.exports = {
   OFFICIAL_MANIFEST,
   SOURCES,
   MinecraftSourceManager,
+  fetchJson,
   fetchWithTimeout,
   officialAssetUrl,
   resolveSourceUrl

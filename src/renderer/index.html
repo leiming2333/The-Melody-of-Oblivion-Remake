@@ -123,9 +123,26 @@
           </header>
 
           <div id="accountList" class="account-list" aria-label="已添加账户"></div>
-          <p id="accountEmpty" class="account-empty">还没有账户，可选择离线或 LittleSkin 外置登录。</p>
+          <p id="accountEmpty" class="account-empty">还没有账户，可选择 Microsoft、离线或 LittleSkin 外置登录。</p>
 
-          <div class="standard-account-methods" aria-label="离线登录">
+          <div class="standard-account-methods" aria-label="Microsoft 与离线登录">
+          <section class="microsoft-account-form" aria-label="Microsoft 账户">
+            <button id="microsoftLoginButton" class="microsoft-account-button" type="button">
+              <span class="microsoft-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              <span><strong>Microsoft 登录</strong><small>Xbox Live · Minecraft Java</small></span>
+              <b>登录</b>
+            </button>
+            <div id="microsoftDevicePanel" class="microsoft-device-panel" hidden>
+              <span>在浏览器中输入代码</span>
+              <div class="microsoft-device-code-row">
+                <strong id="microsoftDeviceCode">—</strong>
+                <button id="microsoftCopyCodeButton" type="button">复制</button>
+              </div>
+              <small id="microsoftLoginHint">等待 Microsoft 授权…</small>
+              <button id="microsoftCancelLoginButton" type="button">取消</button>
+            </div>
+          </section>
+
           <section class="offline-account-form" aria-labelledby="offlineAccountTitle">
             <div class="account-section-title">
               <strong id="offlineAccountTitle">离线账户</strong>

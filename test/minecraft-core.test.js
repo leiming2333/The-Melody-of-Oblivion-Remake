@@ -10,6 +10,7 @@ const {
   LSS233_LIBRARY_BASE,
   MinecraftSourceManager,
   OFFICIAL_MANIFEST,
+  fetchJson,
   resolveSourceUrl
 } = require('../src/main/minecraft/source-manager');
 const {
@@ -439,6 +440,137 @@ test('取消文件流后清理临时文件', async (t) => {
   );
   await assert.rejects(fs.stat(destination), { code: 'ENOENT' });
   await assert.rejects(fs.stat(`${destination}.part`), { code: 'ENOENT' });
+});
+
+test('failed pools cancel active downloads and wait for cleanup before returning', async () => {
+  const originalError = new Error('first download failed');
+  let releaseFailure;
+  const failureReady = new Promise((resolve) => { releaseFailure = resolve; });
+  let cleanupFinished = false;
+  const started = [];
+  await assert.rejects(runPool([0, 1, 2], 2, async (item, _index, signal) => {
+    started.push(item);
+    if (item === 0) {
+      await failureReady;
+      throw originalError;
+    }
+    releaseFailure();
+    await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+    await new Promise((resolve) => setImmediate(resolve));
+    cleanupFinished = true;
+  }), (error) => error === originalError);
+  assert.equal(cleanupFinished, true);
+  assert.deepEqual(started, [0, 1]);
+});
+
+test('failed pools also drain workers that do not support cancellation', async () => {
+  let releaseFailure;
+  const failureReady = new Promise((resolve) => { releaseFailure = resolve; });
+  const events = [];
+  await assert.rejects(runPool([0, 1, 2], 2, async (item) => {
+    events.push(`start:${item}`);
+    if (item === 0) {
+      await failureReady;
+      throw new Error('failed');
+    }
+    releaseFailure();
+    await new Promise((resolve) => setImmediate(resolve));
+    events.push(`finish:${item}`);
+  }), /failed/);
+  events.push('returned');
+  assert.deepEqual(events, ['start:0', 'start:1', 'finish:1', 'returned']);
+});
+
+test('JSON metadata deadlines include stalled response bodies', async (t) => {
+  let requests = 0;
+  const server = http.createServer((_request, response) => {
+    requests += 1;
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.write('{');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  const url = `http://127.0.0.1:${server.address().port}/metadata`;
+  await assert.rejects(fetchJson(url, 500), { name: 'AbortError' });
+  assert.equal(requests, 1);
+});
+
+test('cancelling JSON metadata prevents fallback source requests', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const controller = new AbortController();
+  const requested = [];
+  global.fetch = async (url, options) => {
+    requested.push(url);
+    return new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => {
+        reject(Object.assign(new Error('cancelled'), { name: 'AbortError' }));
+      }, { once: true });
+    });
+  };
+  const manager = new MinecraftSourceManager();
+  const request = manager.fetchJsonFromSources('version-json', {
+    versionId: '1.21.1', originalUrl: 'https://metadata.test/version.json'
+  }, 'official', { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(request, { name: 'AbortError' });
+  assert.deepEqual(requested, ['https://metadata.test/version.json']);
+});
+
+test('cancelling parallel manifest requests preserves cancellation and does not cache', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const controller = new AbortController();
+  const requested = [];
+  global.fetch = async (url, options) => {
+    requested.push(url);
+    return new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => {
+        reject(Object.assign(new Error('cancelled'), { name: 'AbortError' }));
+      }, { once: true });
+    });
+  };
+  const manager = new MinecraftSourceManager();
+  const request = manager.getVersionManifest({ signal: controller.signal });
+  controller.abort();
+  await assert.rejects(request, { name: 'AbortError' });
+  assert.equal(requested.length, 2);
+  assert.equal(manager.manifestCache, undefined);
+});
+
+test('installation propagates cancellation through every metadata stage', async (t) => {
+  const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-metadata-cancel-test-'));
+  t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
+  for (const stage of ['manifest', 'version-json', 'asset-index']) {
+    const controller = new AbortController();
+    const versionId = `cancel-${stage}`;
+    const source = { id: 'official', label: 'Official' };
+    const cancel = () => {
+      controller.abort();
+      throw Object.assign(new Error('cancelled'), { name: 'AbortError' });
+    };
+    const sourceManager = {
+      downloadPreference: 'official',
+      async getVersionManifest({ signal }) {
+        assert.equal(signal, controller.signal);
+        if (stage === 'manifest') cancel();
+        return { source, manifest: { versions: [{ id: versionId, url: 'https://metadata.test/version' }] } };
+      },
+      async fetchJsonFromSources(type, _context, _sourceId, { signal }) {
+        assert.equal(signal, controller.signal);
+        if (stage === type) cancel();
+        return { source, data: { id: versionId, assetIndex: { id: 'test', url: 'https://metadata.test/assets' } } };
+      }
+    };
+    const downloader = new MinecraftDownloader({ gameDirectory, sourceManager });
+    await assert.rejects(downloader.installVersion(versionId, () => {}, {
+      signal: controller.signal
+    }), { name: 'AbortError' });
+    assert.equal(await hasValidInstallationMarker(gameDirectory, versionId), false);
+  }
 });
 
 test('小文件长时间无数据时切换备用地址', { timeout: 5000 }, async (t) => {

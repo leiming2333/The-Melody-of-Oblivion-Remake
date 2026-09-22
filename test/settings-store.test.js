@@ -74,3 +74,45 @@ test('启动设置可以持久化并自动规范内存值', async (t) => {
   });
   assert.deepEqual(await new SettingsStore(filePath).getState(), saved);
 });
+
+test('设置文件替换失败时保留原有配置', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-settings-save-failure-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'settings.json');
+  const store = new SettingsStore(filePath);
+  const original = await store.update({ gameDirectoryMode: 'system', memoryMb: 8192, launcherUpdatePolicy: 'off' });
+  const originalBytes = await fs.readFile(filePath);
+  t.mock.method(fs, 'rename', async () => { throw new Error('Replacement failed'); });
+
+  await assert.rejects(store.update({ memoryMb: 4096 }), /Replacement failed/);
+  assert.deepEqual(await fs.readFile(filePath), originalBytes);
+  assert.deepEqual(await store.getState(), original);
+});
+
+test('设置保存期间读取始终获得现有配置', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-settings-save-reader-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'settings.json');
+  const store = new SettingsStore(filePath);
+  const original = await store.update({ gameDirectoryMode: 'system', memoryMb: 8192, launcherUpdatePolicy: 'off' });
+  const rename = fs.rename;
+  let entered;
+  let release;
+  const replacementStarted = new Promise((resolve) => { entered = resolve; });
+  const replacementAllowed = new Promise((resolve) => { release = resolve; });
+  t.mock.method(fs, 'rename', async (...args) => {
+    entered();
+    await replacementAllowed;
+    return rename(...args);
+  });
+
+  const saving = store.update({ memoryMb: 4096 });
+  await replacementStarted;
+  try {
+    assert.deepEqual(await store.getState(), original);
+  } finally {
+    release();
+    await saving;
+  }
+  assert.equal((await store.getState()).memoryMb, 4096);
+});

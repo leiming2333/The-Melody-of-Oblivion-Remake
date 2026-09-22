@@ -3,15 +3,28 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const { offlineUuidForSkinModel } = require('../src/main/accounts/account-store');
 const {
   expandArgumentEntries,
   extractNativeArchive,
+  extractTarGz,
+  mergeMetadata,
   prepareLaunch,
   readVersionMetadata,
   rulesAllow,
   splitLegacyArguments
 } = require('../src/main/minecraft/launch-core');
+
+test('legacy loader arguments replace inherited arguments while modern arrays merge', () => {
+  const parent = { minecraftArguments: '--username Player --version base', arguments: { game: ['parent'], jvm: [] }, libraries: [] };
+  const child = { minecraftArguments: '--username Player --version forge --tweakClass Forge', arguments: { game: ['child'] } };
+  const merged = mergeMetadata(parent, child);
+  assert.equal(splitLegacyArguments(merged.minecraftArguments).filter((arg) => arg === '--username').length, 1);
+  assert.equal(merged.minecraftArguments, child.minecraftArguments);
+  assert.deepEqual(merged.arguments.game, ['parent', 'child']);
+  assert.equal(mergeMetadata(parent, {}).minecraftArguments, parent.minecraftArguments);
+});
 
 function storedZip(entries) {
   const localParts = [];
@@ -47,6 +60,36 @@ function storedZip(entries) {
   end.writeUInt32LE(centralDirectory.length, 12);
   end.writeUInt32LE(localOffset, 16);
   return Buffer.concat([...localParts, centralDirectory, end]);
+}
+
+function tarArchive(entries) {
+  const parts = [];
+  for (const { name, content = '', type = '0', mode = 0o755, link = '', prefix = '' } of entries) {
+    const data = Buffer.from(content);
+    const header = Buffer.alloc(512);
+    header.write(name, 0, 100);
+    header.write(`${mode.toString(8).padStart(7, '0')}\0`, 100, 8);
+    header.write(`${data.length.toString(8).padStart(11, '0')}\0`, 124, 12);
+    header.fill(32, 148, 156);
+    header.write(type, 156, 1);
+    header.write(link, 157, 100);
+    header.write('ustar\0', 257, 6);
+    header.write('00', 263, 2);
+    header.write(prefix, 345, 155);
+    const checksum = header.reduce((sum, byte) => sum + byte, 0);
+    header.write(`${checksum.toString(8).padStart(6, '0')}\0 `, 148, 8);
+    parts.push(header, data, Buffer.alloc((512 - data.length % 512) % 512));
+  }
+  return zlib.gzipSync(Buffer.concat([...parts, Buffer.alloc(1024)]));
+}
+
+function paxRecord(key, value) {
+  const suffix = ` ${key}=${value}\n`;
+  let length = Buffer.byteLength(suffix) + 1;
+  while (String(length).length + Buffer.byteLength(suffix) !== length) {
+    length = String(length).length + Buffer.byteLength(suffix);
+  }
+  return `${length}${suffix}`;
 }
 
 async function writeFile(filePath, content = '') {
@@ -219,6 +262,87 @@ test('完整启动参数包含内存、继承类路径与离线账户信息', as
     `-javaagent:${injectorPath}=littleskin.cn`
   ));
   assert.ok(yggdrasilPrepared.argumentsList.includes('little-access-token'));
+});
+
+test('TAR Java extraction preserves executable modes, directories and empty files', async (t) => {
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-tar-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const archivePath = path.join(temporaryRoot, 'java.tar.gz');
+  await fs.writeFile(archivePath, tarArchive([
+    { name: 'jre/bin/', type: '5' },
+    { name: 'java', prefix: 'jre/bin', mode: 0o755, content: '#!/bin/sh\nexit 0\n' },
+    { name: 'jre/lib/empty', mode: 0o644 }
+  ]));
+  const chmodCalls = [];
+  const originalChmod = fs.chmod;
+  fs.chmod = async (target, mode) => {
+    chmodCalls.push({ target, mode });
+    return originalChmod(target, mode);
+  };
+  try {
+    const destination = path.join(temporaryRoot, 'out');
+    await extractTarGz(archivePath, destination);
+    const executable = path.join(destination, 'jre', 'bin', 'java');
+    assert.equal(await fs.readFile(executable, 'utf8'), '#!/bin/sh\nexit 0\n');
+    assert.equal((await fs.stat(path.join(destination, 'jre', 'lib', 'empty'))).size, 0);
+    assert.ok(chmodCalls.some((call) => call.target === executable && call.mode === 0o755));
+    if (process.platform !== 'win32') {
+      assert.equal((await fs.stat(executable)).mode & 0o777, 0o755);
+      await fs.access(executable, require('node:fs').constants.X_OK);
+    }
+  } finally {
+    fs.chmod = originalChmod;
+  }
+});
+
+test('TAR extraction honors PAX and GNU extended filenames', async (t) => {
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-tar-names-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const archivePath = path.join(temporaryRoot, 'java.tar.gz');
+  const paxName = `jre/${'p'.repeat(110)}/file`;
+  const gnuName = `jre/${'g'.repeat(110)}/file`;
+  await fs.writeFile(archivePath, tarArchive([
+    { name: 'PaxHeader', type: 'x', content: paxRecord('path', paxName) },
+    { name: 'placeholder', content: 'pax' },
+    { name: '././@LongLink', type: 'L', content: `${gnuName}\0` },
+    { name: 'placeholder', content: 'gnu' }
+  ]));
+  const destination = path.join(temporaryRoot, 'out');
+  await extractTarGz(archivePath, destination);
+  assert.equal(await fs.readFile(path.join(destination, paxName), 'utf8'), 'pax');
+  assert.equal(await fs.readFile(path.join(destination, gnuName), 'utf8'), 'gnu');
+});
+
+test('TAR extraction rejects escaping paths, links and special files', async (t) => {
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-tar-unsafe-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  for (const [index, entry] of [
+    { name: '../escape', content: 'unsafe' },
+    { name: 'link', type: '2', link: '../escape' },
+    { name: 'device', type: '3' }
+  ].entries()) {
+    const archivePath = path.join(temporaryRoot, `${index}.tar.gz`);
+    await fs.writeFile(archivePath, tarArchive([entry]));
+    await assert.rejects(extractTarGz(archivePath, path.join(temporaryRoot, 'out')));
+  }
+  await assert.rejects(fs.access(path.join(temporaryRoot, 'escape')), { code: 'ENOENT' });
+});
+
+test('TAR extraction restores safe relative Java symlinks', {
+  skip: process.platform === 'win32'
+}, async (t) => {
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-tar-links-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const archivePath = path.join(temporaryRoot, 'java.tar.gz');
+  await fs.writeFile(archivePath, tarArchive([
+    { name: 'jre/bin/java', type: '2', link: '../lib/java' },
+    { name: 'jre/lib/java', content: 'java executable' }
+  ]));
+  const destination = path.join(temporaryRoot, 'out');
+  await extractTarGz(archivePath, destination);
+  const executable = path.join(destination, 'jre', 'bin', 'java');
+  assert.ok((await fs.lstat(executable)).isSymbolicLink());
+  assert.equal(await fs.readFile(executable, 'utf8'), 'java executable');
 });
 
 test('旧版启动配置没有 Java 字段时使用托管 Java 8', async (t) => {

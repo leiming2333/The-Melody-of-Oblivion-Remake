@@ -7,13 +7,15 @@ const SKIN_MODELS = Object.freeze(['steve', 'alex']);
 const MICROSOFT_SECRET_FIELDS = Object.freeze(['accessToken', 'microsoftRefreshToken']);
 const YGGDRASIL_SECRET_FIELDS = Object.freeze(['accessToken', 'clientToken']);
 const ONLINE_ACCOUNT_TYPES = Object.freeze(['microsoft', 'yggdrasil']);
+const UNREADABLE_SECRETS = Symbol('unreadableSecrets');
+const CREDENTIALS_UNAVAILABLE_MESSAGE = '登录凭据不可用，请重新登录或删除该账户';
 
 const passthroughSecretCodec = Object.freeze({
   decode: (value) => value,
   encode: (value) => value
 });
 
-function transformAccountSecrets(value, transform) {
+function transformAccountSecrets(value, transform, { recoverErrors = false } = {}) {
   if (!Array.isArray(value?.accounts)) return value;
   return {
     ...value,
@@ -23,8 +25,19 @@ function transformAccountSecrets(value, transform) {
       const fields = account.type === 'microsoft'
         ? MICROSOFT_SECRET_FIELDS
         : YGGDRASIL_SECRET_FIELDS;
-      for (const field of fields) {
-        if (typeof copy[field] === 'string' && copy[field]) copy[field] = transform(copy[field]);
+      if (copy[UNREADABLE_SECRETS]) {
+        Object.assign(copy, copy[UNREADABLE_SECRETS]);
+        return copy;
+      }
+      try {
+        for (const field of fields) {
+          if (typeof copy[field] === 'string' && copy[field]) copy[field] = transform(copy[field]);
+        }
+      } catch (error) {
+        if (!recoverErrors) throw error;
+        // Preserve the original ciphertext for unrelated saves without exposing it as a usable token.
+        copy[UNREADABLE_SECRETS] = Object.fromEntries(fields.map((field) => [field, account[field]]));
+        for (const field of fields) copy[field] = undefined;
       }
       return copy;
     })
@@ -143,7 +156,7 @@ class AccountStore {
       const content = await fs.readFile(this.filePath, 'utf8');
       const decoded = transformAccountSecrets(JSON.parse(content), (value) => (
         this.secretCodec.decode(value)
-      ));
+      ), { recoverErrors: true });
       return normalizeState(decoded);
     } catch (error) {
       if (error.code === 'ENOENT' || error instanceof SyntaxError) {
@@ -160,7 +173,6 @@ class AccountStore {
       this.secretCodec.encode(value)
     ));
     await fs.writeFile(temporary, `${JSON.stringify(encoded, null, 2)}\n`, 'utf8');
-    await fs.rm(this.filePath, { force: true });
     await fs.rename(temporary, this.filePath);
   }
 
@@ -175,8 +187,10 @@ class AccountStore {
         microsoftRefreshToken: _microsoftRefreshToken,
         clientToken: _clientToken,
         xuid: _xuid,
+        [UNREADABLE_SECRETS]: unreadableSecrets,
         ...visible
       } = account;
+      if (unreadableSecrets) visible.loginError = CREDENTIALS_UNAVAILABLE_MESSAGE;
       return visible;
     };
     return {
@@ -198,12 +212,19 @@ class AccountStore {
 
   async getCurrentAccount() {
     const state = await this.read();
-    return state.accounts.find((account) => account.id === state.currentId) ?? null;
+    return this.requireReadableAccount(state.accounts.find((account) => account.id === state.currentId));
   }
 
   async getAccount(accountId) {
     const state = await this.read();
-    return state.accounts.find((account) => account.id === accountId) ?? null;
+    return this.requireReadableAccount(state.accounts.find((account) => account.id === accountId));
+  }
+
+  requireReadableAccount(account) {
+    if (account?.[UNREADABLE_SECRETS]) {
+      throw new Error(`${account.name}：${CREDENTIALS_UNAVAILABLE_MESSAGE}`);
+    }
+    return account ?? null;
   }
 
   async addOffline(playerName, skinModel = 'steve') {
@@ -262,6 +283,7 @@ class AccountStore {
         createdAt: existing?.createdAt ?? new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
+      delete account[UNREADABLE_SECRETS];
       if (existingIndex >= 0) state.accounts[existingIndex] = account;
       else state.accounts.push(account);
       state.currentId = id;
@@ -298,6 +320,7 @@ class AccountStore {
         createdAt: existing?.createdAt ?? new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
+      delete account[UNREADABLE_SECRETS];
       if (existingIndex >= 0) state.accounts[existingIndex] = account;
       else state.accounts.push(account);
       state.currentId = id;
