@@ -1,8 +1,7 @@
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, shell } = require('electron');
 const { registerAccountIpc } = require('./accounts/ipc');
 const { AccountStore } = require('./accounts/account-store');
-const { MicrosoftAuthManager } = require('./accounts/microsoft-auth');
 const { YggdrasilAuthManager } = require('./accounts/yggdrasil-auth');
 const { registerMinecraftIpc } = require('./minecraft/ipc');
 const { registerSettingsIpc } = require('./settings/ipc');
@@ -125,40 +124,17 @@ function createSecretCodec() {
   };
 }
 
-function loadMicrosoftClientId() {
-  // 优先使用环境变量（本地开发/测试覆盖）
-  const envClientId = String(process.env.MELODY_MICROSOFT_CLIENT_ID ?? '').trim();
-  if (/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){2}[0-9a-f]{4}-[0-9a-f]{12}$/i.test(envClientId)) {
-    return envClientId.toLowerCase();
-  }
-  // 构建时注入的 Client ID（src/main/accounts/microsoft-client-id.json，已 gitignore）
-  try {
-    const { clientId } = require('./accounts/microsoft-client-id.json');
-    if (/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){2}[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId ?? '')) {
-      return String(clientId).toLowerCase();
-    }
-  } catch {}
-  return undefined;
-}
-
 app.whenReady().then(async () => {
   const settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
   const accountStore = new AccountStore(
     path.join(app.getPath('userData'), 'accounts.json'),
     { secretCodec: createSecretCodec() }
   );
-  const microsoftAuth = new MicrosoftAuthManager({
-    accountStore,
-    clientId: loadMicrosoftClientId()
-  });
   const yggdrasilAuth = new YggdrasilAuthManager({ accountStore });
   registerAccountIpc({
     app,
     ipcMain,
-    shell,
-    clipboard,
     accountStore,
-    microsoftAuth,
     yggdrasilAuth
   });
   registerSettingsIpc({ BrowserWindow, dialog, ipcMain, settingsStore });
@@ -168,7 +144,6 @@ app.whenReady().then(async () => {
     shell,
     settingsStore,
     accountStore,
-    microsoftAuth,
     yggdrasilAuth
   });
   const updateManager = new UpdateManager({
