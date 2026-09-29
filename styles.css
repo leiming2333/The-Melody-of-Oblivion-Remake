@@ -88,9 +88,13 @@ h2{font-size:clamp(32px,3.3vw,48px);line-height:1.3;font-weight:800;margin-botto
 .download-layout h2{margin-bottom:13px}
 .platforms{font-size:12px;font-weight:800;letter-spacing:1.4px;margin:27px 0 0;color:#476348}
 .platforms span{padding:0 10px;color:#80957e}
-.download-action{display:flex;align-items:flex-start;flex-direction:column;gap:13px;min-width:230px}
+.download-action{display:flex;align-items:stretch;flex-direction:column;gap:11px;width:min(100%,310px)}
+.download-action label{font-size:12px;font-weight:700;color:#476348}
+.download-action select{width:100%;min-height:46px;padding:0 12px;border:1px solid #9bac9a;border-radius:2px;background:#f5f7f0;color:#263629;font:inherit;font-size:14px}
+.download-action select:focus-visible{outline:2px solid #648a51;outline-offset:2px}
 .download-action .button{width:100%}
 .download-action small{color:#647365;font-size:11px;line-height:1.5}
+#download-status{min-height:17px}
 .site-footer{background:#111915;border-top:1px solid #344037;padding:28px 0}
 .footer-inner{display:flex;align-items:center;gap:30px}
 .footer-inner p{font-size:11px;color:#89998b;margin:0 auto}

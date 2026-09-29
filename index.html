@@ -26,7 +26,7 @@
       </nav>
       <div class="header-actions">
         <button type="button" class="language-button" id="language-button" aria-label="Switch language">EN</button>
-        <a class="header-download" href="https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases" data-download-link data-i18n="nav.get">获取启动器 <span aria-hidden="true">↗</span></a>
+        <a class="header-download" href="#download" data-i18n="nav.get">获取启动器 <span aria-hidden="true">↗</span></a>
         <button type="button" class="menu-button" id="menu-button" aria-label="打开导航菜单" aria-controls="site-nav" aria-expanded="false"><span></span><span></span></button>
       </div>
     </div>
@@ -41,10 +41,10 @@
           <p class="hero-subtitle" data-i18n="hero.subtitle">打开游戏，接着玩。</p>
           <p class="hero-description" data-i18n="hero.description">版本、账户、模组加载器都放在一个地方。选好要玩的世界，剩下的交给启动器。</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases" data-download-link><span aria-hidden="true">↓</span><span data-i18n="hero.download">下载启动器</span></a>
+            <a class="button button-primary" href="#download"><span aria-hidden="true">↓</span><span data-i18n="hero.download">下载启动器</span></a>
             <a class="button button-outline" href="#launcher"><span data-i18n="hero.preview">看看界面</span><span aria-hidden="true">↘</span></a>
           </div>
-          <p class="hero-release" data-i18n="hero.release">在 GitHub Releases 获取各平台版本</p>
+          <p class="hero-release" data-i18n="hero.release">通过本站选择版本，使用 HTTPS 下载</p>
         </div>
         <div class="hero-bottom"><span>01 / MELODY LAUNCHER</span><a href="#launcher" aria-label="向下查看"><span aria-hidden="true">↓</span></a></div>
       </div>
@@ -76,7 +76,32 @@
       </div>
     </section>
     <section class="scene-section" aria-label="Minecraft 场景"><div class="scene-image" aria-hidden="true"></div><div class="shell scene-content"><span>READY WHEN YOU ARE</span><p data-i18n="scene.text">世界已经在那儿了。<br>出发吧。</p></div></section>
-    <section class="download-section" id="download"><div class="shell download-layout"><div><p class="section-label">GET STARTED / 03</p><h2 data-i18n="download.title">下一次冒险，从这里开始。</h2><p data-i18n="download.body">前往 GitHub Releases，选择适合你系统的安装包。</p><p class="platforms">WINDOWS <span>·</span> macOS <span>·</span> LINUX</p></div><div class="download-action"><a class="button button-primary" href="https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases" data-download-link><span aria-hidden="true">↓</span><span data-i18n="download.button">查看发行版本</span></a><small data-i18n="download.note">非官方项目，与 Mojang Studios 或 Microsoft 无关。</small></div></div></section>
+    <section class="download-section" id="download">
+      <div class="shell download-layout">
+        <div>
+          <p class="section-label">GET STARTED / 03</p>
+          <h2 data-i18n="download.title">下一次冒险，从这里开始。</h2>
+          <p data-i18n="download.body">选择系统与架构，获取最新版本的安装包。</p>
+          <p class="platforms">WINDOWS <span>·</span> macOS <span>·</span> LINUX</p>
+        </div>
+        <div class="download-action">
+          <label for="download-platform" data-i18n="download.platform">选择系统</label>
+          <select id="download-platform">
+            <option value="Windows-x64">Windows · x64</option>
+            <option value="Windows-ia32">Windows · x86</option>
+            <option value="Windows-arm64">Windows · ARM64</option>
+            <option value="macOS-arm64">macOS · Apple Silicon</option>
+            <option value="macOS-x64">macOS · Intel</option>
+            <option value="Linux-x64">Linux · x64</option>
+            <option value="Linux-arm64">Linux · ARM64</option>
+            <option value="Linux-armv7l">Linux · ARMv7</option>
+          </select>
+          <a class="button button-primary" id="download-button" href="https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases" rel="noopener"><span aria-hidden="true">↓</span><span id="download-button-label" data-i18n="download.button">查看发行版本</span></a>
+          <small id="download-status" role="status" aria-live="polite"></small>
+          <small data-i18n="download.note">非官方项目，与 Mojang Studios 或 Microsoft 无关。</small>
+        </div>
+      </div>
+    </section>
   </main>
   <aside class="partner-window" id="partner-window" aria-label="合作推广">
     <button class="partner-window-close" type="button" id="partner-window-close" aria-label="关闭广告">×</button>

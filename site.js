@@ -11,7 +11,7 @@ const translations = {
   "hero.description": "Versions, accounts, and mod loaders live in one place. Choose the world you want to play; the launcher handles the setup.",
   "hero.download": "Download launcher",
   "hero.preview": "See the launcher",
-  "hero.release": "Find builds for every platform on GitHub Releases",
+  "hero.release": "Choose a build here and download over HTTPS",
   "intro.title": "Find the version you want<br>at a glance.",
   "intro.body": "The launch screen shows games you've actually installed. Switch versions or accounts and open settings without digging through a download catalog.",
   "fact.accounts": "account types",
@@ -30,7 +30,8 @@ const translations = {
   "feature.java.body": "The launcher checks your selected Java first. If it doesn't fit, it prepares a verified runtime.",
   "scene.text": "Your world is waiting.<br>Let's go.",
   "download.title": "Your next adventure starts here.",
-  "download.body": "Open GitHub Releases and pick the build for your system.",
+  "download.body": "Choose your system and architecture to get the latest build.",
+  "download.platform": "Choose system",
   "download.button": "View releases",
   "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft.",
   "partner.tag": "Advertisement · Partner promotion",
@@ -44,6 +45,13 @@ const languageButton = document.querySelector("#language-button");
 const menuButton = document.querySelector("#menu-button");
 const navigation = document.querySelector("#site-nav");
 const partnerWindow = document.querySelector("#partner-window");
+const downloadPlatform = document.querySelector("#download-platform");
+const downloadButton = document.querySelector("#download-button");
+const downloadStatus = document.querySelector("#download-status");
+const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
+const releaseApiUrl = "https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest";
+let latestRelease = null;
+let releaseLoadFailed = false;
 const originalCopy = Object.fromEntries(
   [...document.querySelectorAll("[data-i18n]")].map((element) => [element.dataset.i18n, element.innerHTML])
 );
@@ -63,7 +71,48 @@ function setLanguage(language) {
   document.querySelector(".launcher-figure img").alt = english
     ? "Screenshot of the Melody Launcher interface"
     : "忘却的旋律启动器界面截图";
+  updateDownloadLink();
   try { localStorage.setItem("melody-site-language", language); } catch {}
+}
+
+function detectPlatform() {
+  const platform = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+  if (platform.includes("win")) return "Windows-x64";
+  if (platform.includes("mac")) return "macOS-arm64";
+  if (platform.includes("linux")) return "Linux-x64";
+  return "Windows-x64";
+}
+
+function updateDownloadLink() {
+  const english = document.documentElement.lang === "en";
+  const target = downloadPlatform.value;
+  const extension = target.startsWith("Windows") ? ".exe" : target.startsWith("macOS") ? ".zip" : ".AppImage";
+  const asset = latestRelease?.assets?.find((item) =>
+    item.name.endsWith(`-${target}${extension}`) && item.browser_download_url?.startsWith("https://github.com/")
+  );
+
+  downloadButton.href = asset?.browser_download_url || releasesUrl;
+  downloadButton.querySelector("#download-button-label").textContent = asset
+    ? (english ? "Download installer" : "下载安装包")
+    : (english ? "View releases" : "查看发行版本");
+  downloadStatus.textContent = asset
+    ? `${latestRelease.tag_name} · ${(asset.size / 1048576).toFixed(1)} MB · HTTPS`
+    : releaseLoadFailed
+      ? (english ? "Could not load the download list. Open Releases to choose a file." : "暂时无法读取安装包列表，可前往发行页面选择。")
+      : latestRelease
+        ? (english ? "No build for this platform in the latest release." : "最新版本暂无该平台的安装包。")
+        : (english ? "Checking the latest release…" : "正在查询最新版本…");
+}
+
+async function loadLatestRelease() {
+  try {
+    const response = await fetch(releaseApiUrl, { headers: { Accept: "application/vnd.github+json" } });
+    if (!response.ok) throw new Error(`GitHub API: ${response.status}`);
+    latestRelease = await response.json();
+  } catch {
+    releaseLoadFailed = true;
+  }
+  updateDownloadLink();
 }
 
 function closeMenu() {
@@ -93,6 +142,9 @@ document.querySelector("#partner-window-close").addEventListener("click", () => 
 });
 
 document.querySelector("#current-year").textContent = String(new Date().getFullYear());
+downloadPlatform.value = detectPlatform();
+downloadPlatform.addEventListener("change", updateDownloadLink);
 let savedLanguage;
 try { savedLanguage = localStorage.getItem("melody-site-language"); } catch {}
 setLanguage(savedLanguage || (navigator.language?.toLowerCase().startsWith("zh") ? "zh" : "en"));
+loadLatestRelease();
