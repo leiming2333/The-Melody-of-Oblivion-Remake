@@ -38,6 +38,83 @@ function loaderFixture() {
   return { context, finish: (versions) => finish({ versions }) };
 }
 
+test('offline avatar follows the selected Steve or Alex skin', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const context = { URL };
+  vm.createContext(context);
+  vm.runInContext(source.slice(
+    source.indexOf('const defaultSkinUrls ='),
+    source.indexOf('const selectedGameStorageKey =')
+  ), context);
+  vm.runInContext(source.slice(
+    source.indexOf('function normalizedOnlineSkinUrl('),
+    source.indexOf('function rememberSelectedGame(')
+  ), context);
+  const classes = new Set();
+  const avatar = {
+    style: {},
+    classList: { toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name) }
+  };
+  context.avatar = avatar;
+  context.account = { type: 'offline', skinModel: 'steve' };
+  vm.runInContext('applySkinAvatar(avatar, account)', context);
+  const steveImage = avatar.style.backgroundImage;
+  assert.equal(classes.has('is-alex'), false);
+  assert.equal(classes.has('has-player-skin'), true);
+
+  context.account.skinModel = 'alex';
+  vm.runInContext('applySkinAvatar(avatar, account)', context);
+  assert.equal(classes.has('is-alex'), true);
+  assert.notEqual(avatar.style.backgroundImage, steveImage);
+
+  context.account.skinModel = 'steve';
+  vm.runInContext('applySkinAvatar(avatar, account)', context);
+  assert.equal(classes.has('is-alex'), false);
+  assert.equal(avatar.style.backgroundImage, steveImage);
+
+  context.account = null;
+  vm.runInContext('applySkinAvatar(avatar, account)', context);
+  assert.equal(avatar.style.backgroundImage, steveImage);
+
+  context.account = { type: 'microsoft', skinModel: 'alex' };
+  vm.runInContext('applySkinAvatar(avatar, account)', context);
+  assert.equal(classes.has('is-alex'), true);
+  assert.equal(classes.has('has-player-skin'), true);
+  assert.notEqual(avatar.style.backgroundImage, steveImage);
+});
+
+test('canceling Microsoft login before a device code arrives discards that session', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  let resolveBegin;
+  const calls = [];
+  const context = {
+    microsoftLoginButton: {},
+    microsoftCancelLoginButton: {},
+    microsoftDevicePanel: {},
+    microsoftDeviceCode: {},
+    microsoftLoginHint: {},
+    accountsApi: {
+      beginMicrosoft: () => new Promise((resolve) => { resolveBegin = resolve; }),
+      completeMicrosoft: () => { calls.push('complete'); },
+      cancelMicrosoft: async (id) => { calls.push(['cancel', id]); }
+    },
+    showToast: () => {}
+  };
+  vm.createContext(context);
+  vm.runInContext('let microsoftLoginSessionId; let microsoftLoginActive = false; let microsoftLoginRequestId = 0;', context);
+  vm.runInContext(source.slice(
+    source.indexOf('function setMicrosoftLoginBusy('),
+    source.indexOf('function setLittleSkinLoginBusy(')
+  ), context);
+  const pending = vm.runInContext('beginMicrosoftLogin()', context);
+  await vm.runInContext('cancelMicrosoftLogin()', context);
+  resolveBegin({ sessionId: 'stale-session', userCode: 'ABCD-EFGH' });
+  await pending;
+  assert.deepEqual(calls, [['cancel', 'stale-session']]);
+  assert.equal(context.microsoftDevicePanel.hidden, true);
+  assert.equal(context.microsoftLoginButton.disabled, false);
+});
+
 test('switching back to vanilla during a loader request restores the action button', async () => {
   const { context, finish } = loaderFixture();
   const pending = context.loadLoaderCatalog();
