@@ -49,7 +49,7 @@ const downloadPlatform = document.querySelector("#download-platform");
 const downloadButton = document.querySelector("#download-button");
 const downloadStatus = document.querySelector("#download-status");
 const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
-const releaseApiUrl = "https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest";
+const releaseApiUrl = "/api/latest-release";
 let latestRelease = null;
 let releaseLoadFailed = false;
 const originalCopy = Object.fromEntries(
@@ -91,7 +91,9 @@ function updateDownloadLink() {
     item.name.endsWith(`-${target}${extension}`) && item.browser_download_url?.startsWith("https://github.com/")
   );
 
-  downloadButton.href = asset?.browser_download_url || releasesUrl;
+  downloadButton.href = asset
+    ? `/api/download?tag=${encodeURIComponent(latestRelease.tag_name)}&asset=${encodeURIComponent(asset.name)}`
+    : releasesUrl;
   downloadButton.querySelector("#download-button-label").textContent = asset
     ? (english ? "Download installer" : "下载安装包")
     : (english ? "View releases" : "查看发行版本");

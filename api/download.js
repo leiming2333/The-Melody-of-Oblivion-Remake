@@ -1,0 +1,14 @@
+const ASSET_NAME = /^The-Melody-of-Oblivion-Remake-v(\d+\.\d+\.\d+)-(?:Windows-(?:x64|ia32|arm64)\.exe|Linux-(?:x64|arm64|armv7l)\.AppImage|macOS-(?:x64|arm64)\.zip)$/;
+
+module.exports = function download(request, response) {
+  const { tag, asset } = request.query ?? {};
+  const match = typeof asset === 'string' ? ASSET_NAME.exec(asset) : null;
+  if (!match || tag !== `v${match[1]}`) {
+    response.status(400).json({ error: 'Invalid release asset' });
+    return;
+  }
+
+  const destination = `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(asset)}`;
+  response.setHeader('Cache-Control', 'public, max-age=300');
+  response.redirect(302, destination);
+};

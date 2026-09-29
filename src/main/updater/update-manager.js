@@ -7,6 +7,8 @@ const { pipeline } = require('node:stream/promises');
 const { spawn } = require('node:child_process');
 
 const UPDATE_CHANNEL = 'updater:state';
+const WEBSITE_ORIGIN = 'https://the-melody-of-o-r.ccwu.cc';
+const WEBSITE_RELEASE_URL = `${WEBSITE_ORIGIN}/api/latest-release`;
 const LATEST_RELEASE_URL = 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest';
 const PLATFORM_KEYWORDS = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux: 'Linux' });
 const USER_AGENT = 'melody-of-oblivion-launcher-updater';
@@ -282,7 +284,7 @@ class UpdateManager {
   }
 
   async fetchLatestRelease() {
-    const candidates = [LATEST_RELEASE_URL, ...mirrorUrls(LATEST_RELEASE_URL)];
+    const candidates = [WEBSITE_RELEASE_URL, LATEST_RELEASE_URL, ...mirrorUrls(LATEST_RELEASE_URL)];
     let lastError = null;
     for (const url of candidates) {
       try {
@@ -425,9 +427,13 @@ class UpdateManager {
     return limited.replace(/\u0000/g, '');
   }
 
-  downloadCandidates(assetUrl) {
+  downloadCandidates(assetUrl, assetName) {
     if (!isGithubUrl(assetUrl)) return [{ url: assetUrl, enforceMinSpeed: false }];
+    const websiteUrl = new URL('/api/download', WEBSITE_ORIGIN);
+    websiteUrl.searchParams.set('tag', this.release?.tag_name ?? '');
+    websiteUrl.searchParams.set('asset', assetName);
     return [
+      { url: websiteUrl.href, enforceMinSpeed: true },
       { url: assetUrl, enforceMinSpeed: true },
       ...mirrorUrls(assetUrl).map((url) => ({ url, enforceMinSpeed: true })),
       // 所有镜像均不可用时，最后回退官方直连并放宽限速
@@ -435,8 +441,8 @@ class UpdateManager {
     ];
   }
 
-  async downloadUpdateFile(assetUrl, targetPath, onProgress) {
-    const candidates = this.downloadCandidates(assetUrl);
+  async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress) {
+    const candidates = this.downloadCandidates(assetUrl, assetName);
     let lastError = null;
     for (const candidate of candidates) {
       try {
@@ -464,7 +470,7 @@ class UpdateManager {
     try {
       await this.fileSystem.mkdir(directory, { recursive: true });
       await this.assertEnoughStorage(directory, asset.size);
-      await this.downloadUpdateFile(asset.browser_download_url, temporaryPath, (value) => {
+      await this.downloadUpdateFile(asset.browser_download_url, asset.name, temporaryPath, (value) => {
         const downloaded = percent(value);
         this.setState({
           status: 'downloading',

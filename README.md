@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
-[![Source](https://img.shields.io/badge/Source-v1.5.1-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.5.2-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> The current release is `1.5.1`. Downloads are available through [GitHub Releases](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases). Back up your Minecraft data before testing.
+> The current release is `1.5.2`. Downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases. Back up your Minecraft data before testing.
 
 ## About this project
 
