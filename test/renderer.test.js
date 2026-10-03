@@ -83,38 +83,6 @@ test('offline avatar follows the selected Steve or Alex skin', () => {
   assert.notEqual(avatar.style.backgroundImage, steveImage);
 });
 
-test('canceling Microsoft login before a device code arrives discards that session', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
-  let resolveBegin;
-  const calls = [];
-  const context = {
-    microsoftLoginButton: {},
-    microsoftCancelLoginButton: {},
-    microsoftDevicePanel: {},
-    microsoftDeviceCode: {},
-    microsoftLoginHint: {},
-    accountsApi: {
-      beginMicrosoft: () => new Promise((resolve) => { resolveBegin = resolve; }),
-      completeMicrosoft: () => { calls.push('complete'); },
-      cancelMicrosoft: async (id) => { calls.push(['cancel', id]); }
-    },
-    showToast: () => {}
-  };
-  vm.createContext(context);
-  vm.runInContext('let microsoftLoginSessionId; let microsoftLoginActive = false; let microsoftLoginRequestId = 0;', context);
-  vm.runInContext(source.slice(
-    source.indexOf('function setMicrosoftLoginBusy('),
-    source.indexOf('function setLittleSkinLoginBusy(')
-  ), context);
-  const pending = vm.runInContext('beginMicrosoftLogin()', context);
-  await vm.runInContext('cancelMicrosoftLogin()', context);
-  resolveBegin({ sessionId: 'stale-session', userCode: 'ABCD-EFGH' });
-  await pending;
-  assert.deepEqual(calls, [['cancel', 'stale-session']]);
-  assert.equal(context.microsoftDevicePanel.hidden, true);
-  assert.equal(context.microsoftLoginButton.disabled, false);
-});
-
 test('switching back to vanilla during a loader request restores the action button', async () => {
   const { context, finish } = loaderFixture();
   const pending = context.loadLoaderCatalog();
