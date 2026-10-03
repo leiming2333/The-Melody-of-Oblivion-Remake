@@ -23,7 +23,7 @@ const translations = {
   "feature.download.title": "Downloads that keep moving",
   "feature.download.body": "Official and mirror sources are tested automatically. Large files download in parts, and slow or failed routes can be switched.",
   "feature.accounts.title": "Switch accounts when you need to",
-  "feature.accounts.body": "Use offline or LittleSkin sign-in. Your avatar updates with the current account.",
+  "feature.accounts.body": "Use offline, Microsoft, or LittleSkin sign-in. Your avatar updates with the current account.",
   "feature.loaders.title": "Set up mods in one place",
   "feature.loaders.body": "Install Fabric, Forge, and NeoForge for the version you choose, or import Modrinth and CurseForge modpacks.",
   "feature.java.title": "Java handled for you",
