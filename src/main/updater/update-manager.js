@@ -13,7 +13,7 @@ const LATEST_RELEASE_URL = 'https://api.github.com/repos/leiming2333/The-Melody-
 const PLATFORM_KEYWORDS = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux: 'Linux' });
 const USER_AGENT = 'melody-of-oblivion-launcher-updater';
 
-// GitHub 加速镜像（参考 HMCL 多下载源思路）：直连过慢或失败时按序切换
+// 更新安装包优先使用镜像，过慢或失败时按序切换，最后回退官方源。
 const GITHUB_MIRRORS = Object.freeze([
   'https://ghproxy.net',
   'https://gh-proxy.com',
@@ -433,9 +433,9 @@ class UpdateManager {
     websiteUrl.searchParams.set('tag', this.release?.tag_name ?? '');
     websiteUrl.searchParams.set('asset', assetName);
     return [
+      ...mirrorUrls(assetUrl).map((url) => ({ url, enforceMinSpeed: true })),
       { url: websiteUrl.href, enforceMinSpeed: true },
       { url: assetUrl, enforceMinSpeed: true },
-      ...mirrorUrls(assetUrl).map((url) => ({ url, enforceMinSpeed: true })),
       // 所有镜像均不可用时，最后回退官方直连并放宽限速
       { url: assetUrl, enforceMinSpeed: false }
     ];

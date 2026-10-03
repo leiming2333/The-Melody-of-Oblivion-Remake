@@ -13,6 +13,84 @@ const {
 
 const CLIENT_ID = '11111111-2222-3333-4444-555555555555';
 
+test('读取授权响应时保留超时、断网和无效 JSON 错误', async () => {
+  for (const [error, expected] of [
+    [new DOMException('timed out', 'TimeoutError'), /连接超时/],
+    [new TypeError('connection terminated'), /连接失败.*connection terminated/],
+    [new SyntaxError('invalid JSON'), /无效的 JSON 响应/]
+  ]) {
+    const manager = new MicrosoftAuthManager({
+      clientId: CLIENT_ID,
+      fetchImpl: async () => ({ ok: true, json: async () => { throw error; } })
+    });
+    await assert.rejects(manager.begin(1), expected);
+    assert.equal(manager.sessions.size, 0);
+  }
+});
+
+test('取消读取令牌响应不会保存账户，并清理登录会话', async () => {
+  let manager;
+  let sessionId;
+  let saved = false;
+  manager = new MicrosoftAuthManager({
+    clientId: CLIENT_ID,
+    accountStore: { upsertMicrosoft() { saved = true; } },
+    fetchImpl: async (url) => url === DEVICE_CODE_ENDPOINT
+      ? jsonResponse({ device_code: 'device', user_code: 'ABCD-EFGH' })
+      : { ok: true, json: async () => {
+        manager.cancel(sessionId, 1);
+        throw new DOMException('aborted', 'AbortError');
+      } }
+  });
+  sessionId = (await manager.begin(1)).sessionId;
+  await assert.rejects(manager.complete(sessionId, 1), /登录已取消/);
+  assert.equal(saved, false);
+  assert.equal(manager.sessions.size, 0);
+});
+
+test('皮肤备用服务失败不影响登录和过期令牌刷新', async () => {
+  for (const refresh of [false, true]) {
+    const responses = minecraftExchangeResponses();
+    responses[4] = jsonResponse({ id: '0123456789abcdef0123456789abcdef', name: 'Player_01', skins: [] });
+    if (refresh) responses.unshift(jsonResponse({ access_token: 'new-ms-token', refresh_token: 'rotated-refresh' }));
+    const fetchImpl = async () => {
+      if (responses.length) return responses.shift();
+      throw new TypeError('skin service unavailable');
+    };
+    let account;
+    if (refresh) {
+      const manager = new MicrosoftAuthManager({
+        clientId: CLIENT_ID, fetchImpl,
+        accountStore: {
+          async upsertMicrosoft(value) { account = value; },
+          async getAccount() { return account; }
+        }
+      });
+      account = await manager.ensureAccount({ type: 'microsoft', microsoftClientId: CLIENT_ID, microsoftRefreshToken: 'old-refresh', accessTokenExpiresAt: 0 });
+      assert.equal(account.microsoftRefreshToken, 'rotated-refresh');
+    } else {
+      account = await exchangeMicrosoftForMinecraft({ clientId: CLIENT_ID, accessToken: 'ms-token', refreshToken: 'refresh', fetchImpl });
+    }
+    assert.equal(account.name, 'Player_01');
+    assert.equal(account.accessToken, 'minecraft-token');
+    assert.equal(account.skinUrl, undefined);
+  }
+});
+
+test('皮肤备用请求期间取消仍然终止登录', async () => {
+  const controller = new AbortController();
+  const responses = minecraftExchangeResponses();
+  responses[4] = jsonResponse({ id: '0123456789abcdef0123456789abcdef', name: 'Player_01', skins: [] });
+  await assert.rejects(exchangeMicrosoftForMinecraft({
+    clientId: CLIENT_ID, accessToken: 'ms-token', signal: controller.signal,
+    fetchImpl: async () => {
+      if (responses.length) return responses.shift();
+      controller.abort();
+      throw new DOMException('aborted', 'AbortError');
+    }
+  }), /登录已取消/);
+});
+
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,

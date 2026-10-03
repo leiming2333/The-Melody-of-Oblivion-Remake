@@ -27,22 +27,23 @@ function combinedSignal(signal, timeoutMs = 15000) {
 }
 
 async function fetchJson(fetchImpl, url, options = {}, timeoutMs = 15000) {
-  let response;
+  const signal = combinedSignal(options.signal, timeoutMs);
   try {
-    response = await fetchImpl(url, {
+    const response = await fetchImpl(url, {
       ...options,
-      signal: combinedSignal(options.signal, timeoutMs)
+      signal
     });
+    const payload = await response.json();
+    if (signal.aborted) throw signal.reason;
+    return { response, payload };
   } catch (error) {
     if (options.signal?.aborted) throw new Error('Microsoft 登录已取消');
-    if (error.name === 'TimeoutError') throw new Error('Microsoft 登录服务连接超时');
+    if (signal.reason?.name === 'TimeoutError' || error.name === 'TimeoutError') {
+      throw new Error('Microsoft 登录服务连接超时');
+    }
+    if (error instanceof SyntaxError) throw new Error('Microsoft 登录服务返回了无效的 JSON 响应，请稍后重试');
     throw new Error(`Microsoft 登录服务连接失败：${error.message}`);
   }
-  let payload = {};
-  try {
-    payload = await response.json();
-  } catch {}
-  return { response, payload };
 }
 
 function providerError(payload, fallback) {
@@ -183,15 +184,21 @@ async function exchangeMicrosoftForMinecraft({
   const uuid = hyphenateUuid(profileResult.payload.id);
   let skinUrl = normalizeSkinUrl(skin?.url, ['textures.minecraft.net']);
   if (!skinUrl) {
-    const sessionProfile = await fetchJson(
-      fetchImpl,
-      `${MINECRAFT_SESSION_PROFILE_ENDPOINT}/${profileResult.payload.id}?unsigned=false`,
-      { signal }
-    );
-    if (sessionProfile.response.ok) {
-      skinUrl = skinUrlFromProfile(sessionProfile.payload, ['textures.minecraft.net']);
+    try {
+      const sessionProfile = await fetchJson(
+        fetchImpl,
+        `${MINECRAFT_SESSION_PROFILE_ENDPOINT}/${profileResult.payload.id}?unsigned=false`,
+        { signal }
+      );
+      if (sessionProfile.response.ok) {
+        skinUrl = skinUrlFromProfile(sessionProfile.payload, ['textures.minecraft.net']);
+      }
+    } catch (error) {
+      // 皮肤是可选信息，服务故障不应阻止登录；主动取消仍需终止流程。
+      if (signal?.aborted) throw error;
     }
   }
+  if (signal?.aborted) throw new Error('Microsoft 登录已取消');
   return {
     id: `microsoft:${uuid}`,
     type: 'microsoft',

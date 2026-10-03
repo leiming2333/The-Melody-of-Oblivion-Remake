@@ -32,6 +32,8 @@ const translations = {
   "download.title": "Your next adventure starts here.",
   "download.body": "Choose your system and architecture to get the latest build.",
   "download.platform": "Choose system",
+  "download.source": "Download source (switch if a download fails)",
+  "download.official": "GitHub official",
   "download.button": "View releases",
   "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft.",
   "partner.tag": "Advertisement · Partner promotion",
@@ -46,6 +48,7 @@ const menuButton = document.querySelector("#menu-button");
 const navigation = document.querySelector("#site-nav");
 const partnerWindow = document.querySelector("#partner-window");
 const downloadPlatform = document.querySelector("#download-platform");
+const downloadSource = document.querySelector("#download-source");
 const downloadButton = document.querySelector("#download-button");
 const downloadStatus = document.querySelector("#download-status");
 const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
@@ -92,7 +95,7 @@ function updateDownloadLink() {
   );
 
   downloadButton.href = asset
-    ? `/api/download?tag=${encodeURIComponent(latestRelease.tag_name)}&asset=${encodeURIComponent(asset.name)}`
+    ? `/api/download?tag=${encodeURIComponent(latestRelease.tag_name)}&asset=${encodeURIComponent(asset.name)}&source=${encodeURIComponent(downloadSource.value)}`
     : releasesUrl;
   downloadButton.querySelector("#download-button-label").textContent = asset
     ? (english ? "Download installer" : "下载安装包")
@@ -146,6 +149,7 @@ document.querySelector("#partner-window-close").addEventListener("click", () => 
 document.querySelector("#current-year").textContent = String(new Date().getFullYear());
 downloadPlatform.value = detectPlatform();
 downloadPlatform.addEventListener("change", updateDownloadLink);
+downloadSource.addEventListener("change", updateDownloadLink);
 let savedLanguage;
 try { savedLanguage = localStorage.getItem("melody-site-language"); } catch {}
 setLanguage(savedLanguage || (navigator.language?.toLowerCase().startsWith("zh") ? "zh" : "en"));

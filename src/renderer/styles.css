@@ -1020,9 +1020,16 @@ textarea {
   padding: 28px;
 }
 
-.settings-dialog form {
+.settings-dialog {
   max-height: calc(100vh - 48px);
+  -webkit-app-region: no-drag;
+}
+
+.settings-dialog form {
+  max-height: calc(100vh - 50px);
   overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
   scrollbar-color: rgba(221, 145, 107, 0.5) transparent;
   scrollbar-width: thin;
 }
@@ -2125,10 +2132,9 @@ progress:indeterminate::-moz-progress-bar {
 }
 
 .launcher-update-notes {
-  max-height: 180px;
   margin: 8px 0 0;
   padding: 10px 12px;
-  overflow: auto;
+  overflow: visible;
   border: 1px solid rgba(221, 145, 107, 0.28);
   border-radius: 5px;
   color: rgba(255, 255, 255, 0.62);

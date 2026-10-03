@@ -96,6 +96,13 @@
             <option value="Linux-arm64">Linux · ARM64</option>
             <option value="Linux-armv7l">Linux · ARMv7</option>
           </select>
+          <label for="download-source" data-i18n="download.source">下载线路（下载失败可切换）</label>
+          <select id="download-source">
+            <option value="ghproxy">ghproxy.net</option>
+            <option value="ghfast">ghfast.top</option>
+            <option value="gh-proxy">gh-proxy.com</option>
+            <option value="official" data-i18n="download.official">GitHub 官方</option>
+          </select>
           <a class="button button-primary" id="download-button" href="https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases" rel="noopener"><span aria-hidden="true">↓</span><span id="download-button-label" data-i18n="download.button">查看发行版本</span></a>
           <small id="download-status" role="status" aria-live="polite"></small>
           <small data-i18n="download.note">非官方项目，与 Mojang Studios 或 Microsoft 无关。</small>

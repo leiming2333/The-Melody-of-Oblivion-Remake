@@ -272,12 +272,12 @@ test('Release 接口直连失败时自动尝试镜像源', async () => {
   assert.ok(requestedUrls[2].startsWith(`${GITHUB_MIRRORS[0]}/https://api.github.com/`));
 });
 
-test('网站下载入口失败时回退 GitHub 和镜像源', async () => {
+test('镜像下载失败时自动切换下一条镜像', async () => {
   const { manager, calls } = fixture({
     assets: githubAssets,
     downloadFile: async (url, targetPath, onProgress) => {
       calls.download.push({ url, targetPath });
-      if (!url.startsWith(`${GITHUB_MIRRORS[0]}/`)) {
+      if (!url.startsWith(`${GITHUB_MIRRORS[1]}/`)) {
         throw new Error('下载更新失败（HTTP 403）');
       }
       onProgress?.(100);
@@ -286,10 +286,20 @@ test('网站下载入口失败时回退 GitHub 和镜像源', async () => {
   });
   const state = await manager.check();
   assert.equal(state.status, 'downloaded');
-  assert.match(calls.download[0].url, /^https:\/\/the-melody-of-o-r\.ccwu\.cc\/api\/download\?/);
-  assert.match(calls.download[0].url, /asset=The-Melody-of-Oblivion-Remake-v9\.9\.9-Windows-x64\.exe/);
-  assert.equal(calls.download[1].url, githubAssets[0].browser_download_url);
-  assert.ok(calls.download.some((call) => call.url.startsWith(`${GITHUB_MIRRORS[0]}/https://github.com/`)));
+  assert.equal(calls.download[0].url, `${GITHUB_MIRRORS[0]}/${githubAssets[0].browser_download_url}`);
+  assert.equal(calls.download[1].url, `${GITHUB_MIRRORS[1]}/${githubAssets[0].browser_download_url}`);
+});
+
+test('所有镜像失败时回退官网下载入口', async () => {
+  const { manager, calls } = fixture({
+    assets: githubAssets,
+    downloadFile: async (url) => {
+      calls.download.push({ url });
+      if (!url.startsWith('https://the-melody-of-o-r.ccwu.cc/')) throw new Error('镜像不可用');
+    }
+  });
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(calls.download.length, GITHUB_MIRRORS.length + 1);
 });
 
 test('所有下载源均失败时报告聚合错误', async () => {
