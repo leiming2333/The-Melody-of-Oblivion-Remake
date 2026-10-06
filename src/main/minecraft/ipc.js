@@ -39,7 +39,7 @@ function registerMinecraftIpc({
   settingsStore,
   accountStore,
   microsoftAuth,
-    yggdrasilAuth,
+  yggdrasilAuth,
   javaProbeCache
 }) {
   const activeDownloads = new Map();

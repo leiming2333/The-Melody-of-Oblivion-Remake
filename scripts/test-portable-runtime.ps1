@@ -1,4 +1,4 @@
-﻿param([string]$Executable = 'release/The-Melody-of-Oblivion-Remake-v1.5.6-Windows-x64.exe')
+﻿param([string]$Executable = 'release/The-Melody-of-Oblivion-Remake-v1.5.5-Windows-x64.exe')
 $ErrorActionPreference = 'Stop'
 $exePath = (Resolve-Path -LiteralPath $Executable).Path
 $parent = Split-Path -Parent $exePath
