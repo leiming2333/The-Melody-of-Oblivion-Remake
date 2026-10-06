@@ -32,11 +32,13 @@ async function readManifest(directory, key) {
   try {
     const marker = JSON.parse(await fs.readFile(path.join(directory, '.complete.json'), 'utf8'));
     if (marker.version !== 1 || marker.key !== key || !Array.isArray(marker.files)) return null;
+    const realDirectory = await fs.realpath(directory);
     for (const entry of marker.files) {
       if (typeof entry.path !== 'string' || !entry.path || !/^[a-f0-9]{64}$/.test(entry.sha256)) return null;
       const filePath = safePath(directory, ...entry.path.split('/'));
       const realPath = await fs.realpath(filePath);
-      if (!realPath.startsWith(`${path.resolve(directory)}${path.sep}`)) return null;
+      const relative = path.relative(realDirectory, realPath);
+      if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
       if (await digest(filePath) !== entry.sha256) return null;
     }
     return marker.files;
