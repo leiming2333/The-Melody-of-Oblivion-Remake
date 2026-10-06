@@ -70,7 +70,7 @@
 
 Windows 提供单文件便携 EXE，无需安装。首次运行将 Electron 和程序文件释放到 EXE 旁的 `启动器运行文件` 子目录，后续复用已完成的运行目录，不再重复解压。各构建按内容指纹独立存放，更新不会覆盖正在运行的旧版本；释放中断的目录不会被当作完整版本使用。同时启动会等待首次释放完成。若 EXE 旁无法写入，回退到 `%LOCALAPPDATA%\MelodyOfOblivion\portable-runtime`。关闭所有启动器后可以删除运行文件目录，下次启动会重新释放；旧版本目录不会自动删除。
 
-也可选择 ZIP 包，完整解压后运行其中的 EXE，所有附带文件都需保留。ZIP 版内置更新仍下载便携 EXE，如需继续使用 ZIP 版，请将更新策略设为「仅提示」并手动下载新版 ZIP。运行发布包无需安装 Node.js，Java 仅用于运行 Minecraft。
+运行发布包无需安装 Node.js，Java 仅用于运行 Minecraft。
 
 ```powershell
 npm ci
@@ -94,7 +94,7 @@ Java 检测结果保存在用户数据目录的 `java-cache.json`，可执行文
 | `npm run check` | 检查主进程、预加载脚本与渲染脚本语法 |
 | `npm test` | 运行 Node.js 自动化测试 |
 | `npm run smoke` | 使用临时用户数据加载 Electron 窗口并退出 |
-| `npm run build:win` | 构建 Windows x64 持久运行目录便携 EXE 与 ZIP 版 |
+| `npm run build:win` | 构建 Windows x64 持久运行目录便携 EXE |
 | `npm run build:linux` | 构建 Linux x64 AppImage 与 deb 包 |
 | `npm run build:mac` | 构建 macOS x64 dmg 与 zip 包 |
 

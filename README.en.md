@@ -68,7 +68,7 @@ The automated test suite covers accounts, authentication, downloads, Java select
 
 ## Run from source
 
-On Windows, the single-file portable EXE requires no installation. It extracts once into a content-fingerprinted directory under `启动器运行文件` beside the EXE, then reuses the completed runtime. Builds have separate directories; concurrent extraction is serialized and incomplete releases are not reused. If the adjacent directory is unwritable, the runtime falls back to `%LOCALAPPDATA%/MelodyOfOblivion/portable-runtime`. Old runtimes are retained; you may remove the runtime directory when all launcher processes are closed. ZIP builds are also available; ZIP users should choose the notify-only update policy and manually extract newer ZIP releases to retain that format. Published builds do not require Node.js.
+On Windows, the single-file portable EXE requires no installation. It extracts once into a content-fingerprinted directory under `启动器运行文件` beside the EXE, then reuses the completed runtime. Builds have separate directories; concurrent extraction is serialized and incomplete releases are not reused. If the adjacent directory is unwritable, the runtime falls back to `%LOCALAPPDATA%/MelodyOfOblivion/portable-runtime`. Old runtimes are retained; you may remove the runtime directory when all launcher processes are closed. Published builds do not require Node.js.
 
 ```powershell
 npm ci
@@ -76,7 +76,7 @@ npm run dev
 ```
 
 
-System directory mode uses the operating system's Minecraft application-data directory (`%APPDATA%\.minecraft` on Windows). Local mode uses `.minecraft` beside the portable EXE, ZIP executable, or source checkout; runtime cache locations do not change it. Modpack instances are created below the selected `.minecraft/melody-instances`.
+System directory mode uses the operating system's Minecraft application-data directory (`%APPDATA%\.minecraft` on Windows). Local mode uses `.minecraft` beside the portable EXE or source checkout; runtime cache locations do not change it. Modpack instances are created below the selected `.minecraft/melody-instances`.
 
 Java probe results are persisted in `java-cache.json` in the launcher user-data directory and invalidated when runtime files change; manual redetection bypasses the cache. Background initialization starts after the home screen paints. Missing Java produces a nonmodal hint. `logs/startup-latest.json` records the most recent startup stages from main-process entry onwards; portable EXE extraction before Electron starts is not measured.
 
@@ -90,7 +90,7 @@ Download, loader, modpack, Java download and game-launch services initialize on 
 | `npm run check` | Syntax-check the main, preload, and renderer JavaScript |
 | `npm test` | Run the Node.js test suite |
 | `npm run smoke` | Load the Electron window with temporary user data and exit |
-| `npm run build:win` | Build Windows x64 portable EXE with a persistent runtime, and ZIP packages |
+| `npm run build:win` | Build Windows x64 portable EXE with a persistent runtime |
 | `npm run build:linux` | Build Linux x64 AppImage and deb packages |
 | `npm run build:mac` | Build macOS x64 dmg and zip packages |
 

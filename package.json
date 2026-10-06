@@ -43,8 +43,7 @@
       "icon": "src/renderer/assets/app-icon.ico",
       "artifactName": "The-Melody-of-Oblivion-Remake-v${version}-Windows-${arch}.${ext}",
       "target": [
-        "portable",
-        "zip"
+        "portable"
       ]
     },
     "portable": {
