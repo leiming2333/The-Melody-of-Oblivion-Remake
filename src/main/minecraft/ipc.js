@@ -38,7 +38,7 @@ function registerMinecraftIpc({
   shell,
   settingsStore,
   accountStore,
-  yggdrasilAuth,
+  microsoftAuth,  yggdrasilAuth,
   javaProbeCache
 }) {
   const activeDownloads = new Map();
@@ -311,8 +311,8 @@ function registerMinecraftIpc({
       throw new Error('请先等待下载完成或取消下载，再启动游戏');
     }
     let currentAccount = accountStore ? await accountStore.getCurrentAccount() : undefined;
-    if (currentAccount?.type === 'microsoft') {
-      throw new Error('Microsoft 登录已移除，请在账户管理中选择离线或 LittleSkin 账户');
+    if (currentAccount?.type === 'microsoft' && microsoftAuth) {
+      currentAccount = await microsoftAuth.ensureAccount(currentAccount);
     }
     if (currentAccount?.type === 'yggdrasil' && yggdrasilAuth) {
       currentAccount = await yggdrasilAuth.ensureAccount(currentAccount);
