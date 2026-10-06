@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const portableBuildHook = require('../scripts/portable-build-hook');
 const {
   detectJava,
   discoverJavaCandidates,
@@ -221,6 +222,62 @@ test('缺少指定 Java 时只提示从设置下载，不会自动请求网络',
   await assert.rejects(manager.resolve(undefined, 25), /需要 Java 25.*设置.*下载/);
   assert.equal(metadataRequests.length, 0);
   assert.equal(downloads.length, 0);
+});
+
+test('portable runtime fingerprints change when files change without a version bump', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-portable-build-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'runtime.exe'), 'runtime');
+  await fs.writeFile(path.join(root, 'app.asar'), 'first build');
+  const target = { name: 'portable', computeFinalScript: async (script) => script };
+  const context = { electronPlatformName: 'win32', appOutDir: root, arch: 1, targets: [target] };
+  await portableBuildHook(context);
+  const first = target.melodyCacheKeys.get(1);
+  const wrapped = target.computeFinalScript;
+  await portableBuildHook(context);
+  assert.equal(target.computeFinalScript, wrapped);
+  assert.equal(target.melodyCacheKeys.get(1), first);
+  await fs.writeFile(path.join(root, 'app.asar'), 'second build');
+  await portableBuildHook(context);
+  assert.notEqual(target.melodyCacheKeys.get(1), first);
+  const script = await target.computeFinalScript('PORTABLE_EXECUTABLE_DIR', true, new Map([[1, root]]));
+  assert.ok(script.includes(`64-${target.melodyCacheKeys.get(1)}`));
+  assert.ok(script.includes('$EXEDIR\\启动器运行文件'));
+  assert.ok(!script.includes('RMDir /r'));
+  await assert.rejects(target.computeFinalScript('unexpected template', true, new Map([[1, root]])), /Unexpected/);
+});
+
+test('portable runtime customization leaves ZIP-only and non-Windows builds alone', async () => {
+  const target = { name: 'portable', computeFinalScript: async () => '' };
+  const original = target.computeFinalScript;
+  await portableBuildHook({ electronPlatformName: 'linux', targets: [target] });
+  assert.equal(target.computeFinalScript, original);
+  await portableBuildHook({ electronPlatformName: 'win32', targets: [{ name: 'zip' }] });
+});
+
+test('Java 目录扫描不会阻塞注册表查询', async () => {
+  let releaseScan;
+  const registryStarted = new Promise((resolve) => { releaseScan = resolve; });
+  let scans = 0;
+  const candidates = await discoverJavaCandidates(undefined, {
+    platform: 'win32',
+    env: {},
+    launcherDirectory: path.resolve('launcher-fixture'),
+    fileSystem: {
+      readdir: async () => {
+        scans += 1;
+        await registryStarted;
+        return [];
+      },
+      access: async () => { throw new Error('ENOENT'); }
+    },
+    registryQuery: async () => {
+      assert.ok(scans > 0);
+      releaseScan();
+      return [];
+    }
+  });
+  assert.deepEqual(candidates, ['java.exe']);
 });
 
 test('已有系统 Java 时启动直接使用系统环境', async (t) => {

@@ -20,15 +20,21 @@ jobs:
           - os: windows-latest
             script: build:win
             arch: x64
-            pattern: release/*.exe
+            pattern: |
+              release/*.exe
+              release/*.zip
           - os: windows-latest
             script: build:win
             arch: ia32
-            pattern: release/*.exe
+            pattern: |
+              release/*.exe
+              release/*.zip
           - os: windows-latest
             script: build:win
             arch: arm64
-            pattern: release/*.exe
+            pattern: |
+              release/*.exe
+              release/*.zip
           - os: ubuntu-latest
             script: build:linux
             arch: x64

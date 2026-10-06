@@ -4,6 +4,8 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
+const { execFileSync } = require('node:child_process');
+const { createLazyServices } = require('../src/main/lazy-services');
 const { MinecraftDownloader } = require('../src/main/minecraft/downloader');
 const { ManagedJavaRuntime } = require('../src/main/minecraft/managed-java-runtime');
 const { ModpackManager } = require('../src/main/minecraft/modpack-manager');
@@ -91,6 +93,80 @@ async function ipcFixture(t, patch = {}) {
     invoke: (channel, sender, ...args) => handlers.get(channel)({ sender }, ...args)
   };
 }
+
+test('lazy download services reuse instances, apply new settings and reset on directory changes', async (t) => {
+  const { MinecraftLoaderManager } = require('../src/main/minecraft/loader-manager');
+  const oldList = MinecraftDownloader.prototype.listVersions;
+  const oldLoaders = MinecraftLoaderManager.prototype.listLoaderVersions;
+  t.after(() => {
+    MinecraftDownloader.prototype.listVersions = oldList;
+    MinecraftLoaderManager.prototype.listLoaderVersions = oldLoaders;
+  });
+  const seen = [];
+  MinecraftDownloader.prototype.listVersions = async function () { seen.push(this); return []; };
+  let loader;
+  MinecraftLoaderManager.prototype.listLoaderVersions = async function () { loader = this; return { versions: [] }; };
+  const fixture = await ipcFixture(t);
+  await fixture.invoke('minecraft:list-versions', {});
+  assert.equal(seen[0].concurrency, 16);
+  fixture.settingsStore.getState = async () => ({ gameDirectoryMode: 'system', downloadConcurrency: 4, downloadSource: 'official' });
+  await fixture.invoke('minecraft:list-versions', {});
+  assert.equal(seen[0], seen[1]);
+  assert.equal(seen[1].concurrency, 4);
+  fixture.settingsStore.getState = async () => ({ gameDirectoryMode: 'local', downloadConcurrency: 8, downloadSource: 'bmclapi', javaPath: 'selected-java' });
+  await fixture.invoke('minecraft:list-versions', {});
+  assert.notEqual(seen[1], seen[2]);
+  assert.notEqual(seen[1].gameDirectory, seen[2].gameDirectory);
+  assert.equal(seen[2].concurrency, 8);
+  await fixture.invoke('minecraft:list-loaders', {}, { gameVersion: '1.21.1', loaderType: 'fabric' });
+  assert.equal(loader.downloader, seen[2]);
+  assert.equal(loader.javaPath, 'selected-java');
+  assert.equal(loader.concurrency, 8);
+});
+
+test('lazy services initialize dependencies once and retry failed construction', () => {
+  const created = [];
+  let fail = true;
+  const services = createLazyServices({
+    download: () => { created.push('download'); return {}; },
+    loader: (registry) => {
+      if (fail) { fail = false; throw new Error('retry'); }
+      created.push('loader');
+      return { downloader: registry.download };
+    }
+  });
+  assert.deepEqual(created, []);
+  assert.equal(services.peek('loader'), undefined);
+  assert.throws(() => services.loader, /retry/);
+  assert.equal(services.loader.downloader, services.download);
+  assert.equal(services.loader, services.loader);
+  assert.deepEqual(created, ['loader', 'download']);
+});
+
+test('home screen version and Java checks do not load download or launch modules', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-lazy-startup-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const script = `
+    const assert = require('node:assert/strict');
+    const path = require('node:path');
+    const java = require('./src/main/minecraft/java-runtime');
+    java.detectJava = async () => ({ available: false });
+    java.installedJavaExecutable = async () => undefined;
+    const { registerMinecraftIpc } = require('./src/main/minecraft/ipc');
+    const handlers = new Map();
+    const app = { isPackaged: false, getAppPath: () => process.argv[1], getPath: () => process.argv[1] };
+    registerMinecraftIpc({ app, ipcMain: { handle: (name, fn) => handlers.set(name, fn) }, shell: {},
+      settingsStore: { getState: async () => ({ gameDirectoryMode: 'local' }) } });
+    (async () => {
+      await handlers.get('minecraft:list-local-versions')();
+      await handlers.get('minecraft:detect-java')({}, {});
+      for (const name of ['downloader','loader-manager','modpack-manager','launch-core','managed-java-runtime','source-manager','authlib-injector']) {
+        assert.equal(require.cache[require.resolve('./src/main/minecraft/' + name)], undefined, name + ' loaded during startup');
+      }
+    })().catch((error) => { console.error(error); process.exitCode = 1; });
+  `;
+  execFileSync(process.execPath, ['-e', script, root], { cwd: path.resolve(__dirname, '..'), timeout: 10000 });
+});
 
 test('packaged macOS local game directory stays outside the application bundle', () => {
   const app = { isPackaged: true, getPath: () => path.resolve('Applications', 'Launcher.app', 'Contents', 'MacOS', 'Launcher') };

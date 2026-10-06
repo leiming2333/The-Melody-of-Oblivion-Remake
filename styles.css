@@ -95,6 +95,11 @@ h2{font-size:clamp(32px,3.3vw,48px);line-height:1.3;font-weight:800;margin-botto
 .download-action .button{width:100%}
 .download-action small{color:#647365;font-size:11px;line-height:1.5}
 #download-status{min-height:17px}
+.cloud-downloads{display:flex;flex-direction:column;gap:12px;padding:16px 0;border-top:1px solid #9bac9a;border-bottom:1px solid #9bac9a}
+.cloud-downloads>span{font-size:12px;font-weight:700;color:#476348}
+.cloud-download{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.cloud-download a{font-size:14px;font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.cloud-download code{font-size:13px;color:#263629;user-select:all}
 .site-footer{background:#111915;border-top:1px solid #344037;padding:28px 0}
 .footer-inner{display:flex;align-items:center;gap:30px}
 .footer-inner p{font-size:11px;color:#89998b;margin:0 auto}

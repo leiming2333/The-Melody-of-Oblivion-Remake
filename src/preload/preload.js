@@ -2,6 +2,9 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('launcherEnvironment', {
+  diagnostics: Object.freeze({
+    markStartup: (stage) => ipcRenderer.send('startup:stage', stage)
+  }),
   windowControls: Object.freeze({
     minimize: () => ipcRenderer.send('window:minimize'),
     close: () => ipcRenderer.send('window:close')
@@ -16,7 +19,7 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     listVersions: (options = {}) => ipcRenderer.invoke('minecraft:list-versions', options),
     listLocalVersions: () => ipcRenderer.invoke('minecraft:list-local-versions'),
     getJavaRequirement: (targetId) => ipcRenderer.invoke('minecraft:get-java-requirement', targetId),
-    detectJava: () => ipcRenderer.invoke('minecraft:detect-java'),
+    detectJava: (options = {}) => ipcRenderer.invoke('minecraft:detect-java', options),
     downloadJava: (majorVersion) => ipcRenderer.invoke('minecraft:download-java', majorVersion),
     cancelJavaDownload: () => ipcRenderer.invoke('minecraft:cancel-java-download'),
     onJavaDownloadProgress: (callback) => {
@@ -56,7 +59,7 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
   settings: Object.freeze({
     getState: () => ipcRenderer.invoke('settings:get-state'),
     update: (patch) => ipcRenderer.invoke('settings:update', patch),
-    detectJava: () => ipcRenderer.invoke('settings:detect-java'),
+    detectJava: (options = {}) => ipcRenderer.invoke('settings:detect-java', options),
     selectJava: () => ipcRenderer.invoke('settings:select-java')
   }),
   updater: Object.freeze({

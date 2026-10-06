@@ -272,6 +272,14 @@ test('Release 接口直连失败时自动尝试镜像源', async () => {
   assert.ok(requestedUrls[2].startsWith(`${GITHUB_MIRRORS[0]}/https://api.github.com/`));
 });
 
+test('Windows portable updates ignore installer assets', () => {
+  const setup = { ...releaseAssets[0],
+    name: 'The-Melody-of-Oblivion-Remake-v9.9.9-Windows-Setup-x64.exe' };
+  const assets = [setup, ...releaseAssets];
+  assert.equal(pickAsset(assets, 'win32', 'x64'), releaseAssets[0]);
+  assert.equal(pickAsset([setup], 'win32', 'x64'), null);
+});
+
 test('镜像下载失败时自动切换下一条镜像', async () => {
   const { manager, calls } = fixture({
     assets: githubAssets,

@@ -1,4 +1,4 @@
-const ASSET_NAME = /^The-Melody-of-Oblivion-Remake-v(\d+\.\d+\.\d+)-(?:Windows-(?:x64|ia32|arm64)\.exe|Linux-(?:x64|arm64|armv7l)\.AppImage|macOS-(?:x64|arm64)\.zip)$/;
+const ASSET_NAME = /^The-Melody-of-Oblivion-Remake-v(\d+\.\d+\.\d+)-(?:Windows-(?:Setup-)?(?:x64|ia32|arm64)\.exe|Windows-(?:x64|ia32|arm64)\.zip|Linux-(?:x64|arm64|armv7l)\.AppImage|macOS-(?:x64|arm64)\.zip)$/;
 
 module.exports = function download(request, response) {
   const { tag, asset, source = 'official' } = request.query ?? {};

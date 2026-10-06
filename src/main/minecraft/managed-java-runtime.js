@@ -1,12 +1,11 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { findJavaExecutable, javaMajorVersion } = require('./java-runtime');
+const { findJavaExecutable, javaMajorVersion, installedJavaExecutable, SUPPORTED_JAVA_MAJORS } = require('./java-runtime');
 const { DEFAULT_SEGMENT_CONCURRENCY, downloadFile, throwIfAborted } = require('./downloader');
 
 const ADOPTIUM_API = 'https://api.adoptium.net/v3';
 const AZUL_API = 'https://api.azul.com/metadata/v1/zulu';
-const SUPPORTED_JAVA_MAJORS = [8, 16, 17, 21, 25];
 
 function adoptiumPlatform(platform = process.platform) {
   if (platform === 'win32') return 'windows';
@@ -198,16 +197,7 @@ class ManagedJavaRuntime {
   }
 
   async installedExecutable(majorVersion) {
-    try {
-      const root = this.runtimeRoot(majorVersion);
-      const marker = JSON.parse(await fs.readFile(path.join(root, '.melody-runtime.json'), 'utf8'));
-      if (marker.schemaVersion !== 1 || marker.majorVersion !== majorVersion) return undefined;
-      const executable = path.resolve(root, marker.executable);
-      if (!executable.startsWith(`${path.resolve(root)}${path.sep}`)) return undefined;
-      return await this.probeJava(executable) === majorVersion ? executable : undefined;
-    } catch {
-      return undefined;
-    }
+    return installedJavaExecutable(this.gameDirectory, majorVersion, this.probeJava);
   }
 
   async resolve(explicitPath, requiredMajorVersion, onProgress = () => {}, signal) {

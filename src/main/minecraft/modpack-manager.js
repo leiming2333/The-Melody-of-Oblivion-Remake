@@ -427,23 +427,9 @@ class ModpackManager {
   }
 
   async resolveLaunchTarget(targetId) {
-    const value = String(targetId ?? '');
-    if (!value.startsWith('instance-')) return undefined;
-    const instanceId = value.slice('instance-'.length);
-    if (!INSTANCE_ID_PATTERN.test(instanceId)) throw new Error('整合包实例 ID 无效');
-    const instanceDirectory = safePath(this.gameDirectory, 'melody-instances', instanceId);
-    const metadata = await readJson(safePath(instanceDirectory, '.melody-instance.json'));
-    if (!metadata || metadata.schemaVersion !== 1 || metadata.instanceId !== instanceId) {
-      throw new Error('整合包实例不存在或配置已损坏');
-    }
-    return {
-      instanceDirectory,
-      instanceId,
-      name: metadata.name,
-      profileId: metadata.profileId,
-      targetId: value
-    };
+    return require('./launch-target').resolveLaunchTarget(this.gameDirectory, targetId);
   }
+
 }
 
 module.exports = {

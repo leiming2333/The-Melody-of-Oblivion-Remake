@@ -1,3 +1,6 @@
+const { StartupMetrics } = require('./startup-metrics');
+const startupMetrics = new StartupMetrics();
+startupMetrics.mark('main-entry');
 const path = require('node:path');
 const { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, shell } = require('electron');
 const { registerAccountIpc } = require('./accounts/ipc');
@@ -7,6 +10,7 @@ const { registerMinecraftIpc } = require('./minecraft/ipc');
 const { registerSettingsIpc } = require('./settings/ipc');
 const { SettingsStore } = require('./settings/settings-store');
 const { UpdateManager } = require('./updater/update-manager');
+const { JavaProbeCache } = require('./minecraft/java-probe-cache');
 
 const isSmokeTest = process.argv.includes('--smoke-test');
 const iconFile = process.platform === 'win32' ? 'app-icon.ico'
@@ -27,6 +31,12 @@ ipcMain.on('window:minimize', (event) => {
 
 ipcMain.on('window:close', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
+});
+
+ipcMain.on('startup:stage', (_event, stage) => {
+  if (['renderer-painted', 'settings-loaded', 'accounts-loaded', 'profiles-loaded', 'java-detected'].includes(stage)) {
+    startupMetrics.mark(stage);
+  }
 });
 
 ipcMain.handle('shell:open-external', async (_event, url) => {
@@ -87,11 +97,13 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
   mainWindow.once('ready-to-show', () => {
+    startupMetrics.mark('window-ready');
     if (process.platform !== 'darwin') {
       mainWindow.setIcon(appIconPath);
     }
     if (!isSmokeTest) {
       mainWindow.show();
+      startupMetrics.mark('window-shown');
     }
   });
 
@@ -125,6 +137,9 @@ function createSecretCodec() {
 }
 
 app.whenReady().then(async () => {
+  startupMetrics.attach(app.getPath('userData'));
+  startupMetrics.mark('electron-ready');
+  const javaProbeCache = new JavaProbeCache(path.join(app.getPath('userData'), 'java-cache.json'));
   const settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
   const accountStore = new AccountStore(
     path.join(app.getPath('userData'), 'accounts.json'),
@@ -137,14 +152,15 @@ app.whenReady().then(async () => {
     accountStore,
     yggdrasilAuth
   });
-  registerSettingsIpc({ BrowserWindow, dialog, ipcMain, settingsStore });
+  registerSettingsIpc({ BrowserWindow, dialog, ipcMain, settingsStore, javaProbeCache });
   registerMinecraftIpc({
     app,
     ipcMain,
     shell,
     settingsStore,
     accountStore,
-    yggdrasilAuth
+    yggdrasilAuth,
+    javaProbeCache
   });
   const updateManager = new UpdateManager({
     app,
@@ -203,6 +219,7 @@ app.whenReady().then(async () => {
   });
   updateManager.start();
   createWindow();
+  startupMetrics.mark('window-created');
 
   const settings = await settingsStore.getState();
   if (settings.launcherUpdatePolicy !== 'off') {

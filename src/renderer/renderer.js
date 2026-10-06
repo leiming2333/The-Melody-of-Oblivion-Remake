@@ -1,4 +1,5 @@
 const environment = window.launcherEnvironment;
+const localGameDirectoryHint = '游戏文件将生成在启动器所在目录的 .minecraft 文件夹中。';
 const windowControls = environment?.windowControls;
 const minecraft = environment?.minecraft;
 const accountsApi = environment?.accounts;
@@ -575,7 +576,7 @@ function applySettingsToForm() {
   renderJavaPathSetting();
   gameDirectoryModeSelect.value = launcherSettings.gameDirectoryMode ?? 'local';
   gameDirectoryHint.textContent = gameDirectoryModeSelect.value === 'local'
-    ? '游戏文件将生成在启动器所在目录的 .minecraft 文件夹中。'
+    ? localGameDirectoryHint
     : '使用操作系统的 Minecraft 默认游戏目录。';
   downloadSourceSelect.value = launcherSettings.downloadSource;
   downloadConcurrencySelect.value = String(launcherSettings.downloadConcurrency);
@@ -626,11 +627,12 @@ function applyAutoJavaDetection(result) {
 }
 
 // 系统级 Java 检测只发起一次，多处共享结果
-function detectSystemJava() {
+function detectSystemJava(force = false) {
+  if (force) autoJavaDetectionPromise = null;
   if (!autoJavaDetectionPromise) {
     autoJavaDetectionPromise = (minecraft?.detectJava
-      ? minecraft.detectJava()
-      : settingsApi.detectJava()).catch(() => null);
+      ? minecraft.detectJava({ force })
+      : settingsApi.detectJava({ force })).catch(() => null);
   }
   return autoJavaDetectionPromise;
 }
@@ -1765,7 +1767,7 @@ settingsDialog.addEventListener('close', async () => {
 
 gameDirectoryModeSelect.addEventListener('change', () => {
   gameDirectoryHint.textContent = gameDirectoryModeSelect.value === 'local'
-    ? '游戏文件将生成在启动器所在目录的 .minecraft 文件夹中。'
+    ? localGameDirectoryHint
     : '使用操作系统的 Minecraft 默认游戏目录。';
 });
 
@@ -1789,7 +1791,7 @@ javaRedetectButton.addEventListener('click', async () => {
   showToast('正在重新检测 Java…');
   autoJavaDetectionPromise = null;
   try {
-    const result = await detectSystemJava();
+    const result = await detectSystemJava(true);
     if (result?.available) {
       window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
       selectedJavaPath = '';
@@ -2099,9 +2101,6 @@ document.querySelector('#manageButton').addEventListener('click', async () => {
   }
 });
 
-loadAccountState();
-loadLauncherSettings();
-loadLocalProfiles().catch((error) => showToast(`版本检查失败：${readableError(error)}`));
 updateLaunchButtonState();
 
 // —— 首次启动 Java 环境检测 ——
@@ -2117,9 +2116,7 @@ async function performJavaCheck() {
   } catch {
     // 检测失败时继续弹出引导，不阻断使用
   }
-  if (javaCheckDialog.open) return;
-  javaCheckHint.textContent = '当前未检测到可用的 Java，可在启动设置中下载运行环境或选择已安装的 Java。';
-  javaCheckDialog.showModal();
+  showToast('未检测到 Java，可在「启动设置」中下载；你可以继续使用启动器');
 }
 
 javaCheckSkipButton.addEventListener('click', () => {
@@ -2133,7 +2130,7 @@ javaCheckRetryButton.addEventListener('click', async () => {
   javaCheckHint.textContent = '正在重新检测 Java…';
   autoJavaDetectionPromise = null;
   try {
-    const result = await detectSystemJava();
+    const result = await detectSystemJava(true);
     if (result?.available) {
       window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
       applyAutoJavaDetection(result);
@@ -2154,4 +2151,18 @@ javaCheckDownloadButton.addEventListener('click', () => {
   void openJavaSettings();
 });
 
-performJavaCheck();
+// Paint the home screen before starting filesystem scans and background setup.
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  environment?.diagnostics?.markStartup('renderer-painted');
+  setTimeout(() => {
+    void loadAccountState().then(() => environment?.diagnostics?.markStartup('accounts-loaded'));
+    void loadLocalProfiles().then(() => environment?.diagnostics?.markStartup('profiles-loaded'))
+      .catch((error) => showToast(`版本检查失败：${readableError(error)}`));
+    void loadLauncherSettings().then(async () => {
+      environment?.diagnostics?.markStartup('settings-loaded');
+      await refreshAutoJavaDetection();
+      environment?.diagnostics?.markStartup('java-detected');
+      await performJavaCheck();
+    });
+  }, 150);
+}));

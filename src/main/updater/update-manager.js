@@ -60,6 +60,7 @@ function pickAsset(assets, platform, arch) {
     && typeof asset?.browser_download_url === 'string'
     && asset.name.includes(keyword)
     && asset.name.endsWith(extension)
+    && (platform !== 'win32' || !/-Windows-Setup-/i.test(asset.name))
     && !/[\\/]/.test(asset.name)
   ));
   if (candidates.length === 0) return null;

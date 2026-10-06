@@ -107,3 +107,39 @@ test('clearing the game selection during a loader request clears the loading sta
   assert.equal(context.loaderVersions.length, 0);
   assert.equal(context.downloadVersionButton.disabled, true);
 });
+
+test('startup paints before background initialization and missing Java stays nonmodal', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const frames = [];
+  const timers = [];
+  const events = [];
+  const context = {
+    requestAnimationFrame: (callback) => frames.push(callback),
+    setTimeout: (callback) => timers.push(callback),
+    environment: { diagnostics: { markStartup: (stage) => events.push(stage) } },
+    loadAccountState: async () => events.push('accounts-start'),
+    loadLocalProfiles: async () => events.push('profiles-start'),
+    loadLauncherSettings: async () => events.push('settings-start'),
+    refreshAutoJavaDetection: async () => { events.push('java-start'); return { available: false }; },
+    settingsApi: { detectJava() {} },
+    window: { localStorage: { getItem: () => null } },
+    JAVA_CHECK_SKIP_KEY: 'java-skip',
+    javaCheckDialog: { showModal: () => { throw new Error('Startup must not open a modal'); } },
+    showToast: (text) => events.push(text)
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('async function performJavaCheck()'),
+    source.indexOf("javaCheckSkipButton.addEventListener")), context);
+  vm.runInContext(source.slice(source.indexOf('requestAnimationFrame(() => requestAnimationFrame(() =>')), context);
+  assert.deepEqual(events, []);
+  frames.shift()();
+  assert.deepEqual(events, []);
+  frames.shift()();
+  assert.deepEqual(events, ['renderer-painted']);
+  timers.shift()();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(events.indexOf('renderer-painted') < events.indexOf('java-start'));
+  assert.ok(events.some((event) => event.includes('未检测到 Java')));
+  assert.ok(events.includes('profiles-loaded'));
+  assert.ok(events.includes('java-detected'));
+});

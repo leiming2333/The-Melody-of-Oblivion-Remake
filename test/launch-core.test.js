@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
+const { copyCachedNativeArchive } = require('../src/main/minecraft/native-cache');
 const { offlineUuidForSkinModel } = require('../src/main/accounts/account-store');
 const {
   expandArgumentEntries,
@@ -24,6 +25,55 @@ test('legacy loader arguments replace inherited arguments while modern arrays me
   assert.equal(merged.minecraftArguments, child.minecraftArguments);
   assert.deepEqual(merged.arguments.game, ['parent', 'child']);
   assert.equal(mergeMetadata(parent, {}).minecraftArguments, parent.minecraftArguments);
+});
+
+test('native archives are cached, verified and copied separately for concurrent games', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-native-cache-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const archivePath = path.join(root, 'natives.jar');
+  await fs.writeFile(archivePath, storedZip([['native.dll', 'original DLL'], ['META-INF/info', 'excluded']]));
+  let extractions = 0;
+  const extract = async (...args) => { extractions += 1; await extractNativeArchive(...args); };
+  const run = (name) => copyCachedNativeArchive({ gameDirectory: root, archivePath,
+    destination: path.join(root, name), excludes: ['META-INF/'], extract });
+  await Promise.all([run('first'), run('second')]);
+  assert.equal(extractions, 1);
+  assert.equal(await fs.readFile(path.join(root, 'first', 'native.dll'), 'utf8'), 'original DLL');
+  await fs.rm(path.join(root, 'first'), { recursive: true });
+  await run('third');
+  assert.equal(extractions, 1);
+  assert.equal(await fs.readFile(path.join(root, 'second', 'native.dll'), 'utf8'), 'original DLL');
+  await assert.rejects(fs.access(path.join(root, 'third', 'META-INF', 'info')));
+  await assert.rejects(fs.access(path.join(root, 'third', '.complete.json')));
+  const cacheRoot = path.join(root, 'launcher-cache', 'native-archives');
+  const indexPath = (await fs.readdir(cacheRoot)).find((name) => name.endsWith('.json'));
+  const index = JSON.parse(await fs.readFile(path.join(cacheRoot, indexPath), 'utf8'));
+  await fs.writeFile(path.join(cacheRoot, index.directory, 'native.dll'), 'tampered DLL');
+  await run('repaired');
+  assert.equal(extractions, 2);
+  assert.equal(await fs.readFile(path.join(root, 'repaired', 'native.dll'), 'utf8'), 'original DLL');
+  await fs.writeFile(archivePath, storedZip([['native.dll', 'modified DLL']]));
+  await run('updated');
+  assert.equal(extractions, 3);
+  assert.equal(await fs.readFile(path.join(root, 'updated', 'native.dll'), 'utf8'), 'modified DLL');
+});
+
+test('failed or changing native archives never become reusable cache entries', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-native-failure-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const archivePath = path.join(root, 'native.jar');
+  await fs.writeFile(archivePath, storedZip([['native.dll', 'one']]));
+  const options = { gameDirectory: root, archivePath, destination: path.join(root, 'run') };
+  await assert.rejects(copyCachedNativeArchive({ ...options,
+    extract: async () => { throw new Error('Extraction interrupted'); } }), /interrupted/);
+  assert.deepEqual(await fs.readdir(path.join(root, 'launcher-cache', 'native-archives')), []);
+  await assert.rejects(copyCachedNativeArchive({ ...options, extract: async (...args) => {
+    await extractNativeArchive(...args);
+    await fs.writeFile(archivePath, storedZip([['native.dll', 'two']]));
+  } }), /发生变化/);
+  assert.deepEqual(await fs.readdir(path.join(root, 'launcher-cache', 'native-archives')), []);
+  await copyCachedNativeArchive({ ...options, extract: extractNativeArchive });
+  assert.equal(await fs.readFile(path.join(root, 'run', 'native.dll'), 'utf8'), 'two');
 });
 
 function storedZip(entries) {

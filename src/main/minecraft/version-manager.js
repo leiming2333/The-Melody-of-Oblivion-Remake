@@ -1,6 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { hasInstallationMarker, safePath } = require('./downloader');
+const { hasInstallationMarker, safePath } = require('./installation-files');
 
 const PROFILE_ID_PATTERN = /^[0-9A-Za-z._+-]{1,120}$/;
 

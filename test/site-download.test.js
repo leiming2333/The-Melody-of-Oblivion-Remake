@@ -16,6 +16,16 @@ function response() {
   };
 }
 
+test('Setup and ZIP download routes preserve the exact versioned asset name', () => {
+  for (const name of ['Windows-Setup-x64.exe', 'Windows-x64.zip']) {
+    const asset = `The-Melody-of-Oblivion-Remake-v1.5.3-${name}`;
+    const res = response();
+    download({ query: { tag: 'v1.5.3', asset } }, res);
+    assert.equal(res.code, 302);
+    assert.ok(res.destination.endsWith(`/v1.5.3/${asset}`));
+  }
+});
+
 test('download endpoint redirects only a matching release asset', () => {
   const asset = 'The-Melody-of-Oblivion-Remake-v1.5.2-Windows-x64.exe';
   const valid = response();

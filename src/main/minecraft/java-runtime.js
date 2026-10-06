@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const SUPPORTED_JAVA_MAJORS = Object.freeze([8, 16, 17, 21, 25]);
 
 // Windows 注册表中的 Java 安装位置（参考 PCL/HMCL 的 JavaSoft 查找）
 const WINDOWS_REGISTRY_KEYS = Object.freeze([
@@ -163,33 +164,32 @@ async function discoverJavaCandidates(explicitPath, {
     : platform === 'darwin'
       ? [...unixJavaDirectories(env), ...macOSJavaDirectories(env)]
       : unixJavaDirectories(env);
-  for (const baseDirectory of baseDirectories) {
-    candidates.push(...await scanJavaBaseDirectory(baseDirectory, executable, platform, fileSystem));
-  }
-
-  if (platform === 'win32') {
-    for (const home of await registryQuery(env)) {
-      candidates.push(path.join(home, 'bin', executable));
-    }
+  // 文件系统扫描与注册表查询同时执行，保留原有候选优先级。
+  const [directoryCandidates, registryHomes] = await Promise.all([
+    Promise.all(baseDirectories.map((baseDirectory) =>
+      scanJavaBaseDirectory(baseDirectory, executable, platform, fileSystem))),
+    platform === 'win32' ? registryQuery(env) : []
+  ]);
+  candidates.push(...directoryCandidates.flat());
+  for (const home of registryHomes) {
+    candidates.push(path.join(home, 'bin', executable));
   }
 
   // 裸命令交给 spawn 按 PATH 解析（兜底）
   candidates.push(executable);
 
-  const existing = [];
-  for (const candidate of unique(candidates)) {
-    if (!candidate) continue;
+  const existing = await Promise.all(unique(candidates).map(async (candidate) => {
     // 显式路径与裸命令保持原样（不存在时由探测阶段处理）
     if (!path.isAbsolute(candidate) || candidate === explicitPath) {
-      existing.push(candidate);
-      continue;
+      return candidate;
     }
     try {
       await fileSystem.access(candidate);
-      existing.push(candidate);
+      return candidate;
     } catch {}
-  }
-  return existing;
+    return null;
+  }));
+  return existing.filter(Boolean);
 }
 
 function javaMajorFromVersionOutput(output) {
@@ -260,8 +260,8 @@ async function findJavaExecutable(
 }
 
 // 设置页自动检测：探测所有候选并返回版本最高的（参考 PCL 自动选择最新 Java）
-async function detectJava(explicitPath, probe = javaMajorVersion, discover = discoverJavaCandidates) {
-  const candidates = await discover(explicitPath);
+async function detectJava(explicitPath, probe = javaMajorVersion, discover = discoverJavaCandidates, options) {
+  const candidates = await discover(explicitPath, options);
   const results = await Promise.all(candidates.map(async (candidate) => ({
     path: candidate,
     majorVersion: await probe(candidate)
@@ -276,6 +276,20 @@ async function detectJava(explicitPath, probe = javaMajorVersion, discover = dis
 
 function buildInstallerArguments(installerPath, gameDirectory) {
   return ['-jar', installerPath, '--installClient', gameDirectory];
+}
+
+async function installedJavaExecutable(gameDirectory, majorVersion, probe = javaMajorVersion) {
+  try {
+    const root = path.join(gameDirectory, 'runtime', 'melody', `java-${majorVersion}`);
+    const marker = JSON.parse(await fs.readFile(path.join(root, '.melody-runtime.json'), 'utf8'));
+    if (marker.schemaVersion !== 1 || marker.majorVersion !== majorVersion
+        || typeof marker.executable !== 'string') return undefined;
+    const executable = path.resolve(root, marker.executable);
+    if (!executable.startsWith(`${path.resolve(root)}${path.sep}`)) return undefined;
+    return await probe(executable) === majorVersion ? executable : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function runJavaInstaller({
@@ -346,6 +360,8 @@ async function runJavaInstaller({
 }
 
 module.exports = {
+  SUPPORTED_JAVA_MAJORS,
+  installedJavaExecutable,
   buildInstallerArguments,
   detectJava,
   discoverJavaCandidates,

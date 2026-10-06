@@ -1,14 +1,9 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { MinecraftDownloader } = require('./downloader');
-const { MinecraftLoaderManager } = require('./loader-manager');
-const { MinecraftLauncher, readVersionMetadata } = require('./launch-core');
-const { detectJava } = require('./java-runtime');
-const { SUPPORTED_JAVA_MAJORS } = require('./managed-java-runtime');
-const { ModpackManager } = require('./modpack-manager');
-const { MinecraftSourceManager } = require('./source-manager');
-const { MinecraftVersionManager } = require('./version-manager');
-const { AuthlibInjectorManager } = require('./authlib-injector');
+const { createLazyServices } = require('../lazy-services');
+const { detectJava, javaMajorVersion, installedJavaExecutable, SUPPORTED_JAVA_MAJORS } = require('./java-runtime');
+const { readVersionMetadata } = require('./version-metadata');
+const { resolveLaunchTarget } = require('./launch-target');
 
 function systemGameDirectory(app, platform = process.platform) {
   if (platform === 'win32') return path.join(app.getPath('appData'), '.minecraft');
@@ -43,18 +38,14 @@ function registerMinecraftIpc({
   shell,
   settingsStore,
   accountStore,
-  yggdrasilAuth
+  yggdrasilAuth,
+  javaProbeCache
 }) {
   const activeDownloads = new Map();
   const preparingJavaDownloads = new Map();
   let gameDirectory;
-  let sourceManager;
-  let downloader;
-  let loaderManager;
-  let versionManager;
-  let modpackManager;
-  let launcher;
-  let authlibInjector;
+  let services;
+  let serviceSettings;
 
   async function ensureMinecraftServices(settings) {
     const currentSettings = settings ?? (settingsStore
@@ -67,32 +58,56 @@ function registerMinecraftIpc({
     }
 
     gameDirectory = requestedDirectory;
-    sourceManager = new MinecraftSourceManager();
-    downloader = new MinecraftDownloader({
-      gameDirectory,
-      sourceManager,
-      concurrency: 32,
-      segmentConcurrency: 8
+    serviceSettings = { ...currentSettings };
+    const config = serviceSettings;
+    const directory = requestedDirectory;
+    const transferOptions = () => ({ gameDirectory: directory,
+      concurrency: config.downloadConcurrency ?? 32,
+      segmentConcurrency: Math.min(12, Math.max(4, Math.floor((config.downloadConcurrency ?? 32) / 2))) });
+    services = createLazyServices({
+      sourceManager: () => {
+        const { MinecraftSourceManager } = require('./source-manager');
+        const manager = new MinecraftSourceManager();
+        manager.setDownloadPreference(config.downloadSource ?? 'auto');
+        return manager;
+      },
+      downloader: (registry) => {
+        const { MinecraftDownloader } = require('./downloader');
+        return new MinecraftDownloader({ ...transferOptions(), sourceManager: registry.sourceManager });
+      },
+      loaderManager: (registry) => {
+        const { MinecraftLoaderManager } = require('./loader-manager');
+        const manager = new MinecraftLoaderManager({ ...transferOptions(),
+          sourceManager: registry.sourceManager, downloader: registry.downloader });
+        manager.javaPath = config.javaPath;
+        return manager;
+      },
+      versionManager: () => {
+        const { MinecraftVersionManager } = require('./version-manager');
+        return new MinecraftVersionManager({ gameDirectory: directory, trashItem: (target) => shell.trashItem(target) });
+      },
+      modpackManager: (registry) => {
+        const { ModpackManager } = require('./modpack-manager');
+        const manager = new ModpackManager(transferOptions());
+        Object.defineProperty(manager, 'loaderManager', { get: () => registry.loaderManager });
+        return manager;
+      },
+      javaRuntime: () => {
+        const { ManagedJavaRuntime } = require('./managed-java-runtime');
+        return new ManagedJavaRuntime({ gameDirectory: directory,
+          extractArchive: (...args) => require('./launch-core').extractArchive(...args),
+          probeJava: javaProbeCache ? (candidate) => javaProbeCache.probe(candidate) : javaMajorVersion });
+      },
+      launcher: (registry) => {
+        const { MinecraftLauncher } = require('./launch-core');
+        const launcher = new MinecraftLauncher({ gameDirectory: directory, javaRuntime: registry.javaRuntime });
+        return launcher;
+      },
+      authlibInjector: () => {
+        const { AuthlibInjectorManager } = require('./authlib-injector');
+        return new AuthlibInjectorManager({ gameDirectory: directory });
+      }
     });
-    loaderManager = new MinecraftLoaderManager({
-      gameDirectory,
-      sourceManager,
-      downloader,
-      concurrency: 32,
-      segmentConcurrency: 8
-    });
-    versionManager = new MinecraftVersionManager({
-      gameDirectory,
-      trashItem: (targetPath) => shell.trashItem(targetPath)
-    });
-    modpackManager = new ModpackManager({
-      gameDirectory,
-      loaderManager,
-      concurrency: 32,
-      segmentConcurrency: 8
-    });
-    launcher = new MinecraftLauncher({ gameDirectory });
-    authlibInjector = new AuthlibInjectorManager({ gameDirectory });
     return currentSettings;
   }
 
@@ -101,16 +116,17 @@ function registerMinecraftIpc({
       ? await settingsStore.getState()
       : { gameDirectoryMode: 'local', downloadConcurrency: 32, downloadSource: 'auto' };
     await ensureMinecraftServices(settings);
+    Object.assign(serviceSettings, settings);
+    const sourceManager = services.peek('sourceManager');
+    sourceManager?.setDownloadPreference(settings.downloadSource);
     const concurrency = settings.downloadConcurrency;
-    sourceManager.setDownloadPreference(settings.downloadSource);
     const segmentConcurrency = Math.min(12, Math.max(4, Math.floor(concurrency / 2)));
-    downloader.concurrency = concurrency;
-    downloader.segmentConcurrency = segmentConcurrency;
-    loaderManager.concurrency = concurrency;
-    loaderManager.segmentConcurrency = segmentConcurrency;
-    loaderManager.javaPath = settings.javaPath;
-    modpackManager.concurrency = concurrency;
-    modpackManager.segmentConcurrency = segmentConcurrency;
+    for (const name of ['downloader', 'loaderManager', 'modpackManager']) {
+      const manager = services.peek(name);
+      if (manager) Object.assign(manager, { concurrency, segmentConcurrency });
+    }
+    const loaderManager = services.peek('loaderManager');
+    if (loaderManager) loaderManager.javaPath = settings.javaPath;
     return settings;
   }
 
@@ -141,29 +157,35 @@ function registerMinecraftIpc({
 
   ipcMain.handle('minecraft:list-versions', async (_event, options = {}) => {
     await applyDownloadSettings();
-    return downloader.listVersions({ force: options.force === true });
+    return services.downloader.listVersions({ force: options.force === true });
   });
 
   ipcMain.handle('minecraft:list-local-versions', async () => {
     await ensureMinecraftServices();
-    return versionManager.listLocalProfiles();
+    return services.versionManager.listLocalProfiles();
   });
 
   ipcMain.handle('minecraft:get-java-requirement', async (_event, targetId) => {
     await ensureMinecraftServices();
-    const instance = await modpackManager.resolveLaunchTarget(String(targetId ?? ''));
+    const instance = await resolveLaunchTarget(gameDirectory, String(targetId ?? ''));
     const metadata = await readVersionMetadata(gameDirectory, instance?.profileId ?? targetId);
     return { majorVersion: metadata.javaVersion?.majorVersion ?? 8 };
   });
 
-  ipcMain.handle('minecraft:detect-java', async () => {
+  ipcMain.handle('minecraft:detect-java', async (_event, options = {}) => {
     const settings = await ensureMinecraftServices();
-    const system = await detectJava(settings.javaPath);
+    const system = await detectJava(settings.javaPath, javaProbeCache
+      ? (candidate) => javaProbeCache.probe(candidate, { force: options.force === true })
+      : javaMajorVersion, undefined, { launcherDirectory: launcherDirectory(app) });
     const candidates = system.available ? [system] : [];
-    for (const majorVersion of [...SUPPORTED_JAVA_MAJORS].sort((left, right) => right - left)) {
-      const javaPath = await launcher.javaRuntime.installedExecutable(majorVersion);
-      if (javaPath) candidates.push({ available: true, path: javaPath, majorVersion });
-    }
+    const managed = await Promise.all(SUPPORTED_JAVA_MAJORS.map(async (majorVersion) => {
+      const javaPath = await installedJavaExecutable(gameDirectory, majorVersion, javaProbeCache
+        ? (candidate) => javaProbeCache.probe(candidate, { force: options.force === true })
+        : javaMajorVersion);
+      if (!javaPath) return null;
+      return { available: true, path: javaPath, majorVersion };
+    }));
+    candidates.push(...managed.filter(Boolean));
     candidates.sort((left, right) => right.majorVersion - left.majorVersion);
     return candidates[0] ?? { available: false };
   });
@@ -180,7 +202,7 @@ function registerMinecraftIpc({
     try {
       const settings = await applyDownloadSettings();
       if (controller.signal.aborted || event.sender.isDestroyed()) throw new Error('下载已取消');
-      const runtime = launcher.javaRuntime;
+      const runtime = services.javaRuntime;
       runtime.segmentConcurrency = Math.min(12, Math.max(4, Math.floor(settings.downloadConcurrency / 2)));
       return await runDownloadTask(event, 'java-runtime', async (signal) => {
         const javaPath = await runtime.ensureInstalled(majorVersion, (progress) => {
@@ -206,13 +228,13 @@ function registerMinecraftIpc({
 
   ipcMain.handle('minecraft:inspect-modpack', async (_event, filePath) => {
     await ensureMinecraftServices();
-    return modpackManager.inspect(filePath);
+    return services.modpackManager.inspect(filePath);
   });
 
   ipcMain.handle('minecraft:install-modpack', async (event, filePath, options = {}) => {
     await applyDownloadSettings();
     return runDownloadTask(event, `modpack:${path.basename(String(filePath ?? ''))}`, (signal) => (
-      modpackManager.install(filePath, (progress) => {
+      services.modpackManager.install(filePath, (progress) => {
         if (!event.sender.isDestroyed()) {
           event.sender.send('minecraft:download-progress', progress);
         }
@@ -223,7 +245,7 @@ function registerMinecraftIpc({
   ipcMain.handle('minecraft:download-version', async (event, versionId) => {
     await applyDownloadSettings();
     return runDownloadTask(event, `vanilla:${versionId}`, (signal) => (
-      downloader.installVersion(versionId, (progress) => {
+      services.downloader.installVersion(versionId, (progress) => {
         if (!event.sender.isDestroyed()) {
           event.sender.send('minecraft:download-progress', progress);
         }
@@ -233,7 +255,7 @@ function registerMinecraftIpc({
 
   ipcMain.handle('minecraft:list-loaders', async (_event, request = {}) => {
     await applyDownloadSettings();
-    return loaderManager.listLoaderVersions(
+    return services.loaderManager.listLoaderVersions(
       request.gameVersion,
       request.loaderType,
       { force: request.force === true }
@@ -244,7 +266,7 @@ function registerMinecraftIpc({
     await applyDownloadSettings();
     const taskId = `${request.gameVersion}:${request.loaderType}:${request.loaderVersion ?? ''}`;
     return runDownloadTask(event, taskId, (signal) => (
-      loaderManager.installLoader(request, (progress) => {
+      services.loaderManager.installLoader(request, (progress) => {
         if (!event.sender.isDestroyed()) {
           event.sender.send('minecraft:download-progress', progress);
         }
@@ -269,7 +291,7 @@ function registerMinecraftIpc({
       throw new Error('请先等待下载完成或取消下载，再检测游戏文件');
     }
     await applyDownloadSettings();
-    return downloader.verifyVersion(versionId, (progress) => {
+    return services.downloader.verifyVersion(versionId, (progress) => {
       if (!event.sender.isDestroyed()) {
         event.sender.send('minecraft:verify-progress', progress);
       }
@@ -281,7 +303,7 @@ function registerMinecraftIpc({
       throw new Error('请先等待下载完成或取消下载，再删除游戏版本');
     }
     await ensureMinecraftServices();
-    return versionManager.deleteProfile(profileId);
+    return services.versionManager.deleteProfile(profileId);
   });
 
   ipcMain.handle('minecraft:launch-version', async (event, profileId) => {
@@ -304,16 +326,16 @@ function registerMinecraftIpc({
     };
     try {
       const requestedTargetId = String(profileId ?? '');
-      const instance = await modpackManager.resolveLaunchTarget(requestedTargetId);
+      const instance = await resolveLaunchTarget(gameDirectory, requestedTargetId);
       const authlibInjectorPath = currentAccount?.type === 'yggdrasil'
-        ? await authlibInjector.ensureInstalled((progress) => sendStatus({
+        ? await services.authlibInjector.ensureInstalled((progress) => sendStatus({
             phase: 'authlib-injector',
             profileId: instance?.profileId ?? requestedTargetId,
             targetId: requestedTargetId,
             ...progress
           }))
         : undefined;
-      return await launcher.launch({
+      return await services.launcher.launch({
         profileId: instance?.profileId ?? requestedTargetId,
         targetId: requestedTargetId,
         instanceDirectory: instance?.instanceDirectory,

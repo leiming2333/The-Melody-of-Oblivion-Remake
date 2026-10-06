@@ -66,13 +66,19 @@ The automated test suite covers accounts, authentication, downloads, Java select
 
 ## Run from source
 
+On Windows, the single-file portable EXE requires no installation. It extracts once into a content-fingerprinted directory under `启动器运行文件` beside the EXE, then reuses the completed runtime. Builds have separate directories; concurrent extraction is serialized and incomplete releases are not reused. If the adjacent directory is unwritable, the runtime falls back to `%LOCALAPPDATA%/MelodyOfOblivion/portable-runtime`. Old runtimes are retained; you may remove the runtime directory when all launcher processes are closed. ZIP builds are also available; ZIP users should choose the notify-only update policy and manually extract newer ZIP releases to retain that format. Published builds do not require Node.js.
+
 ```powershell
 npm ci
 npm run dev
 ```
 
 
-The launcher uses the operating system's Minecraft application-data directory (`%APPDATA%\.minecraft` on Windows). Modpack instances are created below `.minecraft\melody-instances`. Back up an existing installation before testing.
+System directory mode uses the operating system's Minecraft application-data directory (`%APPDATA%\.minecraft` on Windows). Local mode uses `.minecraft` beside the portable EXE, ZIP executable, or source checkout; runtime cache locations do not change it. Modpack instances are created below the selected `.minecraft/melody-instances`.
+
+Java probe results are persisted in `java-cache.json` in the launcher user-data directory and invalidated when runtime files change; manual redetection bypasses the cache. Background initialization starts after the home screen paints. Missing Java produces a nonmodal hint. `logs/startup-latest.json` records the most recent startup stages from main-process entry onwards; portable EXE extraction before Electron starts is not measured.
+
+Download, loader, modpack, Java download and game-launch services initialize on first use and are reused within the current game directory. Switching directories creates fresh services. Home-screen version scans and Java detection use lightweight readers. Extracted native libraries are cached by archive content and exclusion rules under `.minecraft/launcher-cache/native-archives`, with file verification on reuse and regeneration after changes or corruption. Each game uses separate copies; exiting a game removes its copies while preserving shared cache generations, which can be manually cleared after games close.
 
 ## Development commands
 
@@ -82,7 +88,7 @@ The launcher uses the operating system's Minecraft application-data directory (`
 | `npm run check` | Syntax-check the main, preload, and renderer JavaScript |
 | `npm test` | Run the Node.js test suite |
 | `npm run smoke` | Load the Electron window with temporary user data and exit |
-| `npm run build:win` | Build the portable Windows x64 executable |
+| `npm run build:win` | Build Windows x64 portable EXE with a persistent runtime, and ZIP packages |
 | `npm run build:linux` | Build Linux x64 AppImage and deb packages |
 | `npm run build:mac` | Build macOS x64 dmg and zip packages |
 

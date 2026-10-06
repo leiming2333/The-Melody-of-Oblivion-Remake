@@ -15,7 +15,7 @@ const DEFAULT_SLOW_THRESHOLD_BYTES_PER_SECOND = 96 * 1024;
 const DEFAULT_SLOW_CHECK_INTERVAL_MS = 1000;
 const DEFAULT_SLOW_MINIMUM_SIZE = 2 * 1024 * 1024;
 const DEFAULT_IDLE_TIMEOUT_MS = 15000;
-const INSTALLATION_MARKER_FILE = '.melody-installed.json';
+const { safePath, installationMarkerPath, hasInstallationMarker, INSTALLATION_MARKER_FILE } = require('./installation-files');
 
 function sourceDetailsFromUrl(url) {
   let sourceId = 'official';
@@ -190,19 +190,6 @@ function nativeClassifier(library) {
   return template.replace('${arch}', architecture);
 }
 
-function safePath(root, ...segments) {
-  const resolvedRoot = path.resolve(root);
-  const resolvedTarget = path.resolve(resolvedRoot, ...segments);
-  if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) {
-    throw new Error('下载目标路径不安全');
-  }
-  return resolvedTarget;
-}
-
-function installationMarkerPath(gameDirectory, profileId) {
-  return safePath(gameDirectory, 'versions', profileId, INSTALLATION_MARKER_FILE);
-}
-
 function markerEntry(gameDirectory, task) {
   const root = path.resolve(gameDirectory);
   const destination = path.resolve(task.destination);
@@ -253,19 +240,6 @@ async function hasValidInstallationMarker(gameDirectory, profileId) {
   }
 }
 
-async function hasInstallationMarker(gameDirectory, profileId) {
-  try {
-    const marker = JSON.parse(await fsPromises.readFile(
-      installationMarkerPath(gameDirectory, profileId),
-      'utf8'
-    ));
-    return marker.schemaVersion === 1
-      && marker.profileId === profileId
-      && Array.isArray(marker.files);
-  } catch {
-    return false;
-  }
-}
 
 async function fileSha1(filePath, signal) {
   const hash = crypto.createHash('sha1');
@@ -298,6 +272,7 @@ async function writeJsonAtomic(destination, value) {
   await fsPromises.rm(destination, { force: true });
   await fsPromises.rename(temporary, destination);
 }
+
 
 function createDownloadSegments(
   totalSize,
