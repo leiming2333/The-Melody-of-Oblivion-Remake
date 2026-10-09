@@ -124,6 +124,7 @@
 
           <div id="accountList" class="account-list" aria-label="已添加账户"></div>
           <p id="accountEmpty" class="account-empty">还没有账户，可选择 Microsoft、离线或 LittleSkin 外置登录。</p>
+          <p class="account-help">Microsoft 登录失效时，直接重新登录同一账户即可更新授权，无需先删除账户。</p>
 
           <div class="standard-account-methods" aria-label="Microsoft 与离线登录">
           <section class="microsoft-account-form" aria-label="Microsoft 账户">
@@ -395,6 +396,21 @@
         </form>
       </dialog>
 
+      <dialog id="problemDialog" class="problem-dialog" aria-labelledby="problemTitle" aria-describedby="problemMessage problemAdvice">
+        <form method="dialog">
+          <header class="dialog-header">
+            <div><p>遇到问题</p><h2 id="problemTitle">操作未完成</h2></div>
+            <button class="dialog-close" value="cancel" aria-label="关闭问题提示" type="submit">×</button>
+          </header>
+          <p id="problemMessage" class="problem-message"></p>
+          <p id="problemAdvice" class="problem-advice"></p>
+          <details id="problemDetails"><summary>查看错误信息</summary><pre id="problemError"></pre></details>
+          <footer class="dialog-actions">
+            <button class="secondary-dialog-button" value="cancel" type="submit">关闭</button>
+            <button id="problemAccountButton" class="primary-dialog-button" type="button" hidden>前往账户管理</button>
+          </footer>
+        </form>
+      </dialog>
       <div id="toast" class="toast" popover="manual" role="status" aria-live="polite"></div>
       <div id="modpackDropOverlay" class="modpack-drop-overlay" hidden>
         <span aria-hidden="true">＋</span>

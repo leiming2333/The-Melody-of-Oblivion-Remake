@@ -13,6 +13,36 @@ const {
 
 const CLIENT_ID = '11111111-2222-3333-4444-555555555555';
 
+test('过期授权及常见 Microsoft 服务错误提供处理指引且不覆盖已保存账户', async () => {
+  const cases = [
+    [{ error: 'invalid_grant', error_description: 'AADSTS70000: The grant is expired. The user must sign in again. Trace ID: trace-secret' }, /登录已失效.*无需先删除账户.*AADSTS70000/],
+    [{ error: 'invalid_grant' }, /登录已失效/],
+    [{ error_codes: [700082] }, /登录已失效.*AADSTS700082/],
+    [{ error: 'interaction_required', error_description: 'AADSTS50076: MFA required' }, /额外验证.*浏览器.*AADSTS50076/],
+    [{ error: 'invalid_client' }, /配置不可用.*更新启动器/],
+    [{ error: 'server_error' }, /服务暂时不可用.*稍后重试/],
+    [{ error: 'access_denied' }, /授权被拒绝.*允许授权/],
+    [{ error: 'expired_token' }, /登录代码已过期.*新代码/]
+  ];
+  for (const [payload, expected] of cases) {
+    let saved = false;
+    const manager = new MicrosoftAuthManager({
+      clientId: CLIENT_ID,
+      accountStore: { upsertMicrosoft() { saved = true; } },
+      fetchImpl: async () => jsonResponse(payload, 400)
+    });
+    await assert.rejects(manager.ensureAccount({
+      type: 'microsoft', microsoftClientId: CLIENT_ID,
+      microsoftRefreshToken: 'old-refresh', accessTokenExpiresAt: 0
+    }), (error) => {
+      assert.match(error.message, expected);
+      assert.doesNotMatch(error.message, /trace-secret/);
+      return true;
+    });
+    assert.equal(saved, false);
+  }
+});
+
 test('读取授权响应时保留超时、断网和无效 JSON 错误', async () => {
   for (const [error, expected] of [
     [new DOMException('timed out', 'TimeoutError'), /连接超时/],

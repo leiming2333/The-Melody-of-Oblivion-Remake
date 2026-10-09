@@ -4,6 +4,34 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+test('问题提示提供重新登录入口、保留错误信息并重置上次展开状态', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  let shown = 0;
+  const nodes = {
+    '#problemDialog': { open: false, showModal() { this.open = true; shown++; } },
+    '#problemTitle': {}, '#problemMessage': {}, '#problemAdvice': {},
+    '#problemError': {}, '#problemDetails': {}, '#problemAccountButton': {}
+  };
+  const context = { document: { querySelector: (selector) => nodes[selector] } };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('function readableError('), source.indexOf('function setAccountHint(')), context);
+  const expired = "Error invoking remote method 'minecraft:launch-version': Error: AADSTS70000: The grant is expired. The user must sign in again.";
+  context.showProblem({ message: expired }, '游戏启动失败');
+  assert.equal(nodes['#problemTitle'].textContent, '需要重新登录');
+  assert.match(nodes['#problemAdvice'].textContent, /无需先删除.*同步时间/);
+  assert.equal(nodes['#problemAccountButton'].hidden, false);
+  assert.equal(nodes['#problemError'].textContent, expired.replace(/^Error invoking remote method '[^']+': Error: /, ''));
+  nodes['#problemDetails'].open = true;
+  context.showProblem({ message: 'Microsoft 登录服务连接超时' });
+  assert.equal(nodes['#problemTitle'].textContent, '无法连接服务');
+  assert.equal(nodes['#problemAccountButton'].hidden, true);
+  assert.equal(nodes['#problemDetails'].open, false);
+  assert.equal(shown, 1);
+  assert.equal(context.problemGuidance('Microsoft 登录代码已过期，请重新登录').title, '登录代码已过期');
+  assert.equal(context.problemGuidance('此 Microsoft 账户未拥有 Minecraft Java 版').account, true);
+  assert.equal(context.problemGuidance('Xbox 身份验证失败').account, undefined);
+});
+
 function loaderFixture() {
   const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
   const node = () => ({ children: [], append(child) { this.children.push(child); } });

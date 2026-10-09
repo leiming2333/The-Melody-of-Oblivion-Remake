@@ -2275,6 +2275,47 @@ progress:indeterminate::-moz-progress-bar {
   margin-top: 22px;
 }
 
+.account-help {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 0 0 14px;
+}
+
+.problem-dialog {
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  padding: 24px;
+  overflow-y: auto;
+  border: 1px solid rgba(239, 155, 109, 0.4);
+  border-radius: 8px;
+  color: #eee;
+  background: #201b1b;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.problem-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.problem-message,
+.problem-advice {
+  margin: 16px 0;
+  font-size: 13px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.problem-message { color: #ffc0b9; }
+.problem-advice { color: rgba(255, 255, 255, 0.8); }
+.problem-dialog details { font-size: 11px; color: rgba(255, 255, 255, 0.6); }
+.problem-dialog summary { cursor: pointer; }
+.problem-dialog p,
+.problem-dialog pre { user-select: text; -webkit-user-select: text; }
+.problem-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 120px; overflow-y: auto; }
+.problem-dialog .dialog-actions { flex-wrap: wrap; }
+.problem-dialog button[hidden] { display: none; }
+
 .toast {
   position: fixed;
   inset: auto;

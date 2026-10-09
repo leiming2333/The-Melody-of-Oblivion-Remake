@@ -57,6 +57,29 @@ function providerError(payload, fallback) {
   if (/invalid app registration/i.test(description)) {
     return '此启动器的 Microsoft 应用尚未通过 Minecraft Services 注册审核；应用所有者需要前往 https://aka.ms/AppRegInfo 提交 Client ID，普通玩家无需处理';
   }
+  const code = description.match(/AADSTS\d+/i)?.[0]?.toUpperCase()
+    ?? (Number(payload?.error_codes?.[0]) ? `AADSTS${Number(payload.error_codes[0])}` : '');
+  const suffix = code ? `（${code}）` : '';
+  if (/AADSTS(?:700082|700084|50173)\b/i.test(code)
+      || /grant.*expired|refresh token.*expired|must sign in again/i.test(description)
+      || payload?.error === 'invalid_grant') {
+    return `Microsoft 登录已失效，请在「账户管理」中点击「Microsoft 登录」重新授权，无需先删除账户${suffix}`;
+  }
+  if (payload?.error === 'expired_token') {
+    return `Microsoft 登录代码已过期，请再次点击「Microsoft 登录」获取新代码${suffix}`;
+  }
+  if (['authorization_declined', 'access_denied'].includes(payload?.error)) {
+    return `Microsoft 授权被拒绝，请重新登录并在浏览器中允许授权${suffix}`;
+  }
+  if (/AADSTS(?:50076|50079)\b/i.test(code) || payload?.error === 'interaction_required') {
+    return `Microsoft 账户需要额外验证，请重新登录并在浏览器中完成安全验证${suffix}`;
+  }
+  if (['invalid_client', 'unauthorized_client'].includes(payload?.error)) {
+    return `启动器的 Microsoft 登录配置不可用，请更新启动器；仍失败时请联系启动器维护者${suffix}`;
+  }
+  if (['temporarily_unavailable', 'server_error'].includes(payload?.error)) {
+    return `Microsoft 登录服务暂时不可用，请稍后重试${suffix}`;
+  }
   return description || fallback;
 }
 
@@ -310,7 +333,7 @@ class MicrosoftAuthManager {
           continue;
         }
         if (result.payload?.error === 'authorization_declined') {
-          throw new Error('Microsoft 登录已被拒绝');
+          throw new Error(providerError(result.payload, 'Microsoft 授权被拒绝，请重新登录并在浏览器中允许授权'));
         }
         if (result.payload?.error === 'expired_token') {
           throw new Error('Microsoft 登录代码已过期，请重新登录');
