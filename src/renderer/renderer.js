@@ -41,6 +41,12 @@ const offlineNameInput = document.querySelector('#offlineNameInput');
 const offlineSkinModelInputs = [...document.querySelectorAll('input[name="offlineSkinModel"]')];
 const addOfflineButton = document.querySelector('#addOfflineButton');
 const accountFormHint = document.querySelector('#accountFormHint');
+const microsoftLoginButton = document.querySelector('#microsoftLoginButton');
+const microsoftDevicePanel = document.querySelector('#microsoftDevicePanel');
+const microsoftDeviceCode = document.querySelector('#microsoftDeviceCode');
+const microsoftCopyCodeButton = document.querySelector('#microsoftCopyCodeButton');
+const microsoftLoginHint = document.querySelector('#microsoftLoginHint');
+const microsoftCancelLoginButton = document.querySelector('#microsoftCancelLoginButton');
 const littleSkinUsernameInput = document.querySelector('#littleSkinUsernameInput');
 const littleSkinPasswordInput = document.querySelector('#littleSkinPasswordInput');
 const littleSkinLoginButton = document.querySelector('#littleSkinLoginButton');
@@ -153,6 +159,9 @@ let autoJavaDetection = null;
 let autoJavaDetectionPromise = null;
 let javaDownloadActive = false;
 let javaRequirementRequest = 0;
+let microsoftLoginSessionId;
+let microsoftLoginActive = false;
+let microsoftLoginRequestId = 0;
 let littleSkinLoginActive = false;
 let launcherUpdateState = { status: 'idle', progress: 0, installAction: null, message: '尚未检查更新' };
 
@@ -353,14 +362,29 @@ function readableError(error) {
 }
 
 function problemGuidance(message) {
-  if (message.includes('Microsoft 登录已移除')) {
-    return { title: '此版本不支持 Microsoft 登录', message: '已保存的 Microsoft 账户不能用于此源码版本启动游戏。', advice: '请前往「账户管理」添加或选择离线、LittleSkin 账户。旧 Microsoft 账户可以删除；已发布的 v1.5.6 仍保留 Microsoft 登录。', account: true };
+  if (/登录代码已过期|登录会话不存在或已过期/.test(message)) {
+    return { title: '登录代码已过期', message: '浏览器授权未在有效时间内完成。', advice: '再次点击「Microsoft 登录」，使用新代码完成授权，旧代码已不能使用。', account: true };
   }
-  if (/登录已过期|登录凭据不可用/.test(message)) {
-    return { title: '需要重新登录', message: '账户的登录凭据不可用，暂时无法启动游戏。', advice: '前往「账户管理」重新登录 LittleSkin，或选择离线账户后再启动游戏。', account: true };
+  if (/登录已失效|登录已过期|登录凭据不可用|grant.*expired|must sign in again|invalid_grant|AADSTS(?:700082|700084|50173)\b/i.test(message)) {
+    return { title: '需要重新登录', message: '账户的登录授权已失效，暂时无法启动游戏。', advice: '前往「账户管理」，重新登录同一账户以更新授权。Microsoft 账户无需先删除；登录成功后再启动游戏。若反复出现，请检查 Windows 日期、时间和时区并同步时间。', account: true };
   }
   if (/连接超时|连接失败|fetch failed|ENOTFOUND|ECONNRESET|ETIMEDOUT/i.test(message)) {
     return { title: '无法连接服务', message: '请求未能完成，可能是网络中断、连接超时或服务暂时不可用。', advice: '检查网络连接和系统时间后重试；如使用代理，请检查代理设置。网络正常但仍失败时，请稍后再试。' };
+  }
+  if (/未拥有 Minecraft Java 版|没有可用的 Minecraft Java 游戏档案/.test(message)) {
+    return { title: '无法使用此游戏账户', message: '此账户未拥有 Minecraft Java 版，或尚未创建 Java 版游戏档案。', advice: '确认登录的是拥有 Java 版的 Microsoft 账户，并在 Minecraft 官网完成游戏档案设置后重新登录。', account: true };
+  }
+  if (/Xbox 档案|成人验证|未成年账户|儿童账户|额外验证/.test(message)) {
+    return { title: '账户需要完成设置', message, advice: '在 Microsoft / Xbox 官方页面完成提示的账户设置或安全验证；未成年账户请由家庭组织者处理。完成后重新登录启动器。', account: true };
+  }
+  if (/授权被拒绝|登录已被拒绝/.test(message)) {
+    return { title: '未完成登录授权', message: 'Microsoft 登录授权被拒绝。', advice: '再次点击「Microsoft 登录」，在浏览器中确认账户并允许授权。', account: true };
+  }
+  if (/注册审核|登录配置不可用|Client ID|登录未配置/.test(message)) {
+    return { title: '启动器登录配置异常', message: '启动器的 Microsoft 登录配置或应用注册需要维护者处理。', advice: '先更新启动器；若仍失败，请将下方错误信息反馈给启动器维护者。' };
+  }
+  if (/服务暂时不可用/.test(message)) {
+    return { title: '登录服务暂时不可用', message, advice: '等待一段时间后重新尝试登录。' };
   }
   return { title: '操作未完成', message, advice: '请根据错误信息检查账户、网络或启动设置。若重试后仍失败，请将下方错误信息反馈给启动器维护者。' };
 }
@@ -866,6 +890,85 @@ javaDownloadCancelButton.addEventListener('click', async () => {
     showToast(readableError(error));
   }
 });
+
+function setMicrosoftLoginBusy(active) {
+  microsoftLoginActive = active;
+  microsoftLoginButton.disabled = active;
+  microsoftCancelLoginButton.disabled = !active;
+}
+
+async function copyMicrosoftDeviceCode(code = microsoftDeviceCode.textContent, notify = true) {
+  const normalizedCode = String(code ?? '').trim();
+  if (!/^[A-Z0-9-]{6,24}$/i.test(normalizedCode)) return false;
+  try {
+    await accountsApi?.copyMicrosoftCode?.(normalizedCode);
+    microsoftCopyCodeButton.textContent = '已复制';
+    window.setTimeout(() => {
+      microsoftCopyCodeButton.textContent = '复制';
+    }, 1600);
+    if (notify) showToast('登录代码已复制');
+    return true;
+  } catch (error) {
+    if (notify) showToast(readableError(error));
+    return false;
+  }
+}
+
+async function beginMicrosoftLogin() {
+  if (microsoftLoginActive) return;
+  if (!accountsApi?.beginMicrosoft || !accountsApi?.completeMicrosoft) {
+    showToast('请在 Electron 启动器中使用 Microsoft 登录');
+    return;
+  }
+
+  const requestId = ++microsoftLoginRequestId;
+  setMicrosoftLoginBusy(true);
+  microsoftDevicePanel.hidden = false;
+  microsoftDeviceCode.textContent = '正在连接…';
+  microsoftLoginHint.textContent = '正在向 Microsoft 申请登录代码';
+  try {
+    const session = await accountsApi.beginMicrosoft();
+    if (requestId !== microsoftLoginRequestId) {
+      await accountsApi.cancelMicrosoft?.(session.sessionId);
+      return;
+    }
+    microsoftLoginSessionId = session.sessionId;
+    microsoftDeviceCode.textContent = session.userCode;
+    const copied = await copyMicrosoftDeviceCode(session.userCode, false);
+    microsoftLoginHint.textContent = copied
+      ? '代码已复制；授权页面完成后会自动登录'
+      : '授权页面已打开，完成后会自动登录';
+    const completedState = await accountsApi.completeMicrosoft(session.sessionId);
+    if (requestId !== microsoftLoginRequestId) return;
+    accountState = completedState;
+    updateAccountCard();
+    renderAccountList();
+    microsoftDevicePanel.hidden = true;
+    showToast(`Microsoft 登录成功：${accountState.current?.name ?? 'Minecraft 玩家'}`);
+  } catch (error) {
+    if (requestId !== microsoftLoginRequestId) return;
+    const message = readableError(error);
+    if (!message.includes('登录已取消')) {
+      microsoftLoginHint.textContent = message;
+      showProblem(error, 'Microsoft 登录失败');
+    }
+  } finally {
+    if (requestId === microsoftLoginRequestId) {
+      microsoftLoginSessionId = undefined;
+      setMicrosoftLoginBusy(false);
+    }
+  }
+}
+
+async function cancelMicrosoftLogin() {
+  ++microsoftLoginRequestId;
+  const sessionId = microsoftLoginSessionId;
+  microsoftLoginSessionId = undefined;
+  if (sessionId) await accountsApi?.cancelMicrosoft?.(sessionId);
+  microsoftDevicePanel.hidden = true;
+  setMicrosoftLoginBusy(false);
+  showToast('Microsoft 登录已取消');
+}
 
 function setLittleSkinLoginBusy(active) {
   littleSkinLoginActive = active;
@@ -1698,7 +1801,7 @@ document.querySelector('#closeButton').addEventListener('click', () => {
 function openAccountManagement() {
   renderAccountList();
   if (!accountDialog.open) accountDialog.showModal();
-  offlineNameInput.focus();
+  microsoftLoginButton.focus();
 }
 
 accountButton.addEventListener('click', openAccountManagement);
@@ -1715,12 +1818,20 @@ offlineNameInput.addEventListener('keydown', (event) => {
   }
 });
 
+microsoftLoginButton.addEventListener('click', beginMicrosoftLogin);
+microsoftCopyCodeButton.addEventListener('click', () => copyMicrosoftDeviceCode());
+microsoftCancelLoginButton.addEventListener('click', cancelMicrosoftLogin);
 littleSkinLoginButton.addEventListener('click', beginLittleSkinLogin);
 littleSkinPasswordInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     beginLittleSkinLogin();
   }
+});
+
+accountsApi?.onMicrosoftProgress?.((progress) => {
+  if (!microsoftLoginActive || progress?.sessionId !== microsoftLoginSessionId) return;
+  if (progress.message) microsoftLoginHint.textContent = progress.message;
 });
 
 document.querySelector('#settingsButton').addEventListener('click', async () => {
