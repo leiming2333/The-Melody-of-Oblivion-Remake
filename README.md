@@ -16,7 +16,7 @@
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.5.6`，已完成 Windows x64 本地构建，尚未发布；已发布的安装包版本为 `1.5.5`，可通过[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 获取。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.5.6`，保留 Microsoft 登录。已发布的安装包可通过[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 获取，具体版本以 Release 页面为准。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 

@@ -16,7 +16,7 @@
 </div>
 
 > [!IMPORTANT]
-> The current source version is `1.5.6`. A Windows x64 build has been created locally but has not been released. Published downloads remain at `1.5.5` and are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases. Back up your Minecraft data before testing.
+> The current source version is `1.5.6` and retains Microsoft sign-in. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases; see the Release page for available versions. Back up your Minecraft data before testing.
 
 ## About this project
 
