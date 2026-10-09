@@ -15,10 +15,10 @@ test('问题提示提供重新登录入口、保留错误信息并重置上次�
   const context = { document: { querySelector: (selector) => nodes[selector] } };
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('function readableError('), source.indexOf('function setAccountHint(')), context);
-  const expired = "Error invoking remote method 'minecraft:launch-version': Error: AADSTS70000: The grant is expired. The user must sign in again.";
+  const expired = "Error invoking remote method 'minecraft:launch-version': Error: Microsoft 登录已移除，请在账户管理中选择离线或 LittleSkin 账户";
   context.showProblem({ message: expired }, '游戏启动失败');
-  assert.equal(nodes['#problemTitle'].textContent, '需要重新登录');
-  assert.match(nodes['#problemAdvice'].textContent, /无需先删除.*同步时间/);
+  assert.equal(nodes['#problemTitle'].textContent, '此版本不支持 Microsoft 登录');
+  assert.match(nodes['#problemAdvice'].textContent, /离线.*LittleSkin/);
   assert.equal(nodes['#problemAccountButton'].hidden, false);
   assert.equal(nodes['#problemError'].textContent, expired.replace(/^Error invoking remote method '[^']+': Error: /, ''));
   nodes['#problemDetails'].open = true;
@@ -27,8 +27,6 @@ test('问题提示提供重新登录入口、保留错误信息并重置上次�
   assert.equal(nodes['#problemAccountButton'].hidden, true);
   assert.equal(nodes['#problemDetails'].open, false);
   assert.equal(shown, 1);
-  assert.equal(context.problemGuidance('Microsoft 登录代码已过期，请重新登录').title, '登录代码已过期');
-  assert.equal(context.problemGuidance('此 Microsoft 账户未拥有 Minecraft Java 版').account, true);
   assert.equal(context.problemGuidance('Xbox 身份验证失败').account, undefined);
 });
 
@@ -109,38 +107,6 @@ test('offline avatar follows the selected Steve or Alex skin', () => {
   assert.equal(classes.has('is-alex'), true);
   assert.equal(classes.has('has-player-skin'), true);
   assert.notEqual(avatar.style.backgroundImage, steveImage);
-});
-
-test('canceling Microsoft login before a device code arrives discards that session', async () => {
-  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
-  let resolveBegin;
-  const calls = [];
-  const context = {
-    microsoftLoginButton: {},
-    microsoftCancelLoginButton: {},
-    microsoftDevicePanel: {},
-    microsoftDeviceCode: {},
-    microsoftLoginHint: {},
-    accountsApi: {
-      beginMicrosoft: () => new Promise((resolve) => { resolveBegin = resolve; }),
-      completeMicrosoft: () => { calls.push('complete'); },
-      cancelMicrosoft: async (id) => { calls.push(['cancel', id]); }
-    },
-    showToast: () => {}
-  };
-  vm.createContext(context);
-  vm.runInContext('let microsoftLoginSessionId; let microsoftLoginActive = false; let microsoftLoginRequestId = 0;', context);
-  vm.runInContext(source.slice(
-    source.indexOf('function setMicrosoftLoginBusy('),
-    source.indexOf('function setLittleSkinLoginBusy(')
-  ), context);
-  const pending = vm.runInContext('beginMicrosoftLogin()', context);
-  await vm.runInContext('cancelMicrosoftLogin()', context);
-  resolveBegin({ sessionId: 'stale-session', userCode: 'ABCD-EFGH' });
-  await pending;
-  assert.deepEqual(calls, [['cancel', 'stale-session']]);
-  assert.equal(context.microsoftDevicePanel.hidden, true);
-  assert.equal(context.microsoftLoginButton.disabled, false);
 });
 
 test('switching back to vanilla during a loader request restores the action button', async () => {
