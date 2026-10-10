@@ -116,17 +116,27 @@
           </header>
 
           <div id="accountList" class="account-list" aria-label="已添加账户"></div>
-          <p id="accountEmpty" class="account-empty">还没有账户，可选择离线或 LittleSkin 外置登录。</p>
-          <p class="account-help">支持离线、Microsoft Java 版及 LittleSkin 账户，可在列表中切换。</p>
+          <p id="accountEmpty" class="account-empty">还没有账户，可选择 Microsoft、离线或 LittleSkin 外置登录。</p>
+          <p class="account-help">Microsoft 登录失效时，直接重新登录同一账户即可更新授权，无需先删除账户。</p>
 
-          <section class="offline-account-form" aria-label="Microsoft 登录">
-            <strong>Microsoft 正版账户</strong>
-            <p id="microsoftLoginHint" aria-live="polite">在浏览器中授权，不在启动器中输入密码。</p>
-            <button id="microsoftLoginButton" type="button">设备代码登录</button>
-            <button id="microsoftOpenButton" type="button" hidden>打开授权网页</button>
-            <button id="microsoftCancelButton" type="button" hidden>取消登录</button>
+          <div class="standard-account-methods" aria-label="Microsoft 与离线登录">
+          <section class="microsoft-account-form" aria-label="Microsoft 账户">
+            <button id="microsoftLoginButton" class="microsoft-account-button" type="button">
+              <span class="microsoft-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              <span><strong>Microsoft 登录</strong><small>Xbox Live · Minecraft Java</small></span>
+              <b>登录</b>
+            </button>
+            <div id="microsoftDevicePanel" class="microsoft-device-panel" hidden>
+              <span>在浏览器中输入代码</span>
+              <div class="microsoft-device-code-row">
+                <strong id="microsoftDeviceCode">—</strong>
+                <button id="microsoftCopyCodeButton" type="button">复制</button>
+              </div>
+              <small id="microsoftLoginHint">等待 Microsoft 授权…</small>
+              <button id="microsoftCancelLoginButton" type="button">取消</button>
+            </div>
           </section>
-          <div class="standard-account-methods" aria-label="离线登录">
+
           <section class="offline-account-form" aria-labelledby="offlineAccountTitle">
             <div class="account-section-title">
               <strong id="offlineAccountTitle">离线账户</strong>

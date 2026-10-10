@@ -2,7 +2,7 @@ const { StartupMetrics } = require('./startup-metrics');
 const startupMetrics = new StartupMetrics();
 startupMetrics.mark('main-entry');
 const path = require('node:path');
-const { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, safeStorage, shell } = require('electron');
 const { createLazyServices } = require('./lazy-services');
 
 const isSmokeTest = process.argv.includes('--smoke-test');
@@ -185,8 +185,9 @@ const services = createLazyServices({
     return new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
   },
   microsoftAuth: () => {
-    const { MicrosoftAuth } = require('./accounts/microsoft-auth');
-    return new MicrosoftAuth({ accountStore: getAccountStore() });
+    const { MicrosoftAuthManager } = require('./accounts/microsoft-auth');
+    const { clientId } = require('./accounts/microsoft-client-id.json');
+    return new MicrosoftAuthManager({ accountStore: getAccountStore(), clientId: process.env.MELODY_MICROSOFT_CLIENT_ID || clientId });
   },
   yggdrasilAuth: () => {
     const { YggdrasilAuthManager } = require('./accounts/yggdrasil-auth');
@@ -276,7 +277,7 @@ async function initializeBackgroundServices() {
 app.whenReady().then(() => {
   startupMetrics.attach(app.getPath('userData'));
   startupMetrics.mark('electron-ready');
-  require('./accounts/ipc').registerAccountIpc({ app, ipcMain, getAccountStore, getMicrosoftAuth, getYggdrasilAuth });
+  require('./accounts/ipc').registerAccountIpc({ app, ipcMain, shell, clipboard, getAccountStore, getMicrosoftAuth, getYggdrasilAuth });
   require('./settings/ipc').registerSettingsIpc({ BrowserWindow, dialog, ipcMain, getSettingsStore, getJavaProbeCache });
   require('./minecraft/ipc').registerMinecraftIpc({
     app, ipcMain, shell, dialog, BrowserWindow, getSettingsStore, getAccountStore, getMicrosoftAuth, getYggdrasilAuth, getJavaProbeCache

@@ -19,14 +19,63 @@ function accountIpc(accountStore, yggdrasilAuth, options = {}) {
   return { handlers, invoke: (channel, sender, ...args) => handlers.get(channel)({ sender }, ...args) };
 }
 
-test('Microsoft device-code IPC is registered while old token-passing channels stay absent', () => {
-  const { handlers } = accountIpc({});
-  for (const channel of ['begin-microsoft', 'complete-microsoft', 'copy-microsoft-code']) {
-    assert.equal(handlers.has(`accounts:${channel}`), false);
-  }
-  for (const channel of ['get-state', 'add-offline', 'login-littleskin', 'login-microsoft', 'cancel-microsoft', 'select', 'remove']) {
+test('Microsoft account IPC forwards owned login sessions, progress and cancellation', async () => {
+  const calls = [];
+  const copied = [];
+  const opened = [];
+  const sent = [];
+  let destroyed = false;
+  const sender = new EventEmitter();
+  sender.id = 7;
+  sender.isDestroyed = () => destroyed;
+  sender.send = (...args) => sent.push(args);
+  const loginResult = {
+    sessionId: 'microsoft-session',
+    userCode: ' ab12-cd34 ',
+    verificationUri: 'https://microsoft.com/devicelogin'
+  };
+  const accountState = { currentId: 'microsoft:player' };
+  const cancelResult = { cancelled: true };
+  const { handlers, invoke } = accountIpc({}, undefined, {
+    microsoftAuth: {
+      begin: async (ownerId) => { calls.push(['begin', ownerId]); return loginResult; },
+      complete: async (sessionId, ownerId, onProgress) => {
+        calls.push(['complete', sessionId, ownerId]);
+        onProgress({ phase: 'waiting', message: 'Waiting for authorization' });
+        destroyed = true;
+        onProgress({ phase: 'saving', message: 'Finished after window closed' });
+        destroyed = false;
+        return accountState;
+      },
+      cancel: (sessionId, ownerId) => { calls.push(['cancel', sessionId, ownerId]); return cancelResult; },
+      cancelOwner: (ownerId) => calls.push(['cancelOwner', ownerId])
+    },
+    clipboard: { writeText: (code) => copied.push(code) },
+    shell: { openExternal: async (url) => opened.push(url) }
+  });
+  for (const channel of ['begin-microsoft', 'complete-microsoft', 'copy-microsoft-code', 'cancel-microsoft', 'get-state', 'add-offline', 'login-littleskin', 'select-littleskin-profile', 'select', 'set-skin-model', 'rename', 'refresh-skin', 'remove']) {
     assert.equal(handlers.has(`accounts:${channel}`), true);
   }
+  assert.equal(await invoke('accounts:begin-microsoft', sender), loginResult);
+  assert.deepEqual(copied, ['AB12-CD34']);
+  assert.deepEqual(opened, [loginResult.verificationUri]);
+  assert.equal(await invoke('accounts:complete-microsoft', sender, loginResult.sessionId), accountState);
+  assert.deepEqual(sent, [[
+    'accounts:microsoft-progress',
+    { sessionId: loginResult.sessionId, phase: 'waiting', message: 'Waiting for authorization' }
+  ]]);
+  assert.deepEqual(invoke('accounts:copy-microsoft-code', sender, ' xy98-zy76 '), { copied: true });
+  assert.deepEqual(copied, ['AB12-CD34', 'XY98-ZY76']);
+  assert.throws(() => invoke('accounts:copy-microsoft-code', sender, 'invalid!'), /登录代码无效/);
+  assert.equal(invoke('accounts:cancel-microsoft', sender, loginResult.sessionId), cancelResult);
+  destroyed = true;
+  sender.emit('destroyed');
+  assert.deepEqual(calls, [
+    ['begin', 7],
+    ['complete', loginResult.sessionId, 7],
+    ['cancel', loginResult.sessionId, 7],
+    ['cancelOwner', 7]
+  ]);
 });
 
 test('offline account IPC preserves encrypted historical Microsoft accounts and public redaction', async (t) => {
@@ -95,7 +144,7 @@ test('LittleSkin IPC keeps login, profile selection and sender-owned cancellatio
   ]);
 });
 
-test('preload exposes Microsoft login and removable device-code events without token-passing APIs', async () => {
+test('preload exposes callable Microsoft bridges and removes progress listeners on unsubscribe', async () => {
   let environment;
   const calls = [];
   const ipcRenderer = new EventEmitter();
@@ -111,44 +160,34 @@ test('preload exposes Microsoft login and removable device-code events without t
       };
     }
   });
-  for (const method of ['beginMicrosoft', 'completeMicrosoft', 'copyMicrosoftCode', 'onMicrosoftProgress']) {
-    assert.equal(environment.accounts[method], undefined);
+  for (const method of ['beginMicrosoft', 'completeMicrosoft', 'copyMicrosoftCode', 'cancelMicrosoft', 'onMicrosoftProgress']) {
+    assert.equal(typeof environment.accounts[method], 'function');
   }
-  environment.accounts.loginMicrosoft();
-  environment.accounts.cancelMicrosoft();
-  let received;
-  const unsubscribe = environment.accounts.onMicrosoftCode(code => { received = code; });
-  ipcRenderer.emit('accounts:microsoft-code', {}, { userCode: 'PUBLIC' });
-  assert.equal(received.userCode, 'PUBLIC');
-  unsubscribe();
-  assert.equal(ipcRenderer.listenerCount('accounts:microsoft-code'), 0);
+  environment.accounts.beginMicrosoft();
+  environment.accounts.completeMicrosoft('session');
+  environment.accounts.copyMicrosoftCode('AB12-CD34');
+  environment.accounts.cancelMicrosoft('session');
   environment.accounts.addOffline('Player_01', 'alex');
   environment.accounts.loginLittleSkin('player@example.com', 'password');
   environment.accounts.selectLittleSkinProfile('session', 'profile');
   environment.accounts.refreshSkin('microsoft:legacy');
   assert.deepEqual(calls, [
-    ['accounts:login-microsoft'],
-    ['accounts:cancel-microsoft'],
+    ['accounts:begin-microsoft'],
+    ['accounts:complete-microsoft', 'session'],
+    ['accounts:copy-microsoft-code', 'AB12-CD34'],
+    ['accounts:cancel-microsoft', 'session'],
     ['accounts:add-offline', 'Player_01', 'alex'],
     ['accounts:login-littleskin', 'player@example.com', 'password'],
     ['accounts:select-littleskin-profile', 'session', 'profile'],
     ['accounts:refresh-skin', 'microsoft:legacy']
   ]);
+  const progress = [];
+  const unsubscribe = environment.accounts.onMicrosoftProgress((event) => progress.push(event));
+  const event = { sessionId: 'session', phase: 'waiting' };
+  ipcRenderer.emit('accounts:microsoft-progress', {}, event);
+  assert.deepEqual(progress, [event]);
+  unsubscribe();
   assert.equal(ipcRenderer.listenerCount('accounts:microsoft-progress'), 0);
-});
-
-test('Microsoft login IPC binds cancellation to its sender and cleans up listeners', async () => {
-  const calls = [];
-  const sender = new EventEmitter();
-  sender.id = 9;
-  sender.isDestroyed = () => false;
-  sender.send = (...args) => calls.push(args);
-  const { invoke } = accountIpc({}, undefined, { getMicrosoftAuth: () => ({
-    login: async (owner, notify) => { assert.equal(owner, 9); notify({ userCode: 'PUBLIC' }); return { currentId: 'ms' }; },
-    cancelOwner: owner => calls.push(['cancel', owner])
-  }) });
-  assert.deepEqual(await invoke('accounts:login-microsoft', sender), { currentId: 'ms' });
-  assert.equal(sender.listenerCount('destroyed'), 0);
-  await invoke('accounts:cancel-microsoft', sender);
-  assert.deepEqual(calls, [['accounts:microsoft-code', { userCode: 'PUBLIC' }], ['cancel', 9]]);
+  ipcRenderer.emit('accounts:microsoft-progress', {}, { phase: 'saving' });
+  assert.equal(progress.length, 1);
 });

@@ -16,7 +16,7 @@
 </div>
 
 > [!IMPORTANT]
-> The current `main` source supports offline and LittleSkin accounts only; Microsoft sign-in has been removed. The published `v1.5.6` tag and binaries retain Microsoft sign-in. This source change has not been built or released. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases. Back up your Minecraft data before testing.
+> The current source version is `1.5.6` and retains Microsoft sign-in. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases; see the Release page for available versions. Back up your Minecraft data before testing.
 
 ## About this project
 
@@ -37,7 +37,7 @@ The current repository starts a new implementation; its version numbers and code
 - **Game versions** — browse Mojang's version manifest, detect local installations, download Vanilla versions, verify required files, and move removable profiles to the recycle bin.
 - **Mod loaders** — discover and install Fabric, Forge, and NeoForge through a shared workflow.
 - **Resilient downloads** — choose between Mojang-hosted endpoints and BMCLAPI, probe sources in automatic mode, use configurable task concurrency, split large files with HTTP Range requests, verify SHA-1 metadata, cancel active work, and retry alternate sources.
-- **Accounts** — create offline profiles or use LittleSkin Yggdrasil; sync skin avatars, refresh online credentials before launch, and keep tokens out of the renderer process. Historical Microsoft accounts remain available for viewing and removal, but cannot launch games.
+- **Accounts** — create offline profiles, sign in with a Microsoft device code, or use LittleSkin Yggdrasil; sync skin avatars, refresh online credentials before launch, and keep tokens out of the renderer process.
 - **Java management** — match the Java major version required by the selected game; scan system installations and managed runtimes. Download Java 8, 16, 17, 21, or 25 from the button next to the Java path setting, with progress and cancellation. Downloads prefer Azul JRE and fall back to Adoptium, use parallel transfers, and verify SHA-256. Launching without the required Java opens settings instead of starting a download.
 - **Launch core** — resolve inherited version metadata, apply platform rules, assemble arguments and classpaths, extract native libraries safely, launch the Java process, and report its status. LittleSkin accounts automatically provision a SHA-256-verified authlib-injector.
 - **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instance directories, including overrides and supported loaders.
@@ -50,6 +50,7 @@ The automated test suite covers accounts, authentication, downloads, Java select
 
 - Public multi-architecture builds are available for Windows, macOS, and Linux. Platform-specific behavior may still vary.
 - Update behavior differs per platform: Linux AppImages replace themselves and restart; Windows stages same-name updates, replaces the EXE after exit, and keeps an `.old` backup (legacy versioned EXEs still update side by side); macOS downloads a zip that must be extracted and replaced manually.
+- Microsoft sign-in depends on the launcher's Azure application registration being accepted by Minecraft Services. Provider-side policy or registration changes can make login unavailable.
 - LittleSkin Yggdrasil works only when both client and server are configured for the same authentication service. It does not replace a premium account or grant access to premium-only servers. See the [LittleSkin manual](https://manual.littlesk.in/yggdrasil/).
 - CurseForge installation depends on downloadable file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Packs containing restricted or unavailable files may fail.
 - Quilt modpacks are not supported.
@@ -71,6 +72,8 @@ The Windows single-file portable EXE requires no installation. Artifact names om
 npm ci
 npm run dev
 ```
+
+Microsoft sign-in uses a bundled public Azure application ID. To use your own application registration, set `MELODY_MICROSOFT_CLIENT_ID` before starting the launcher or building it.
 
 System directory mode uses the operating system's Minecraft application-data directory (`%APPDATA%\.minecraft` on Windows). Local mode uses `.minecraft` beside the portable EXE or source checkout; runtime cache locations do not change it. Modpack instances are created below the selected `.minecraft/melody-instances`.
 
@@ -95,7 +98,7 @@ Download, loader, modpack, Java download and game-launch services initialize on 
 ```text
 src/
 ├── main/                 Electron main process
-│   ├── accounts/         Offline and LittleSkin accounts; historical Microsoft data compatibility
+│   ├── accounts/         Offline, Microsoft, and LittleSkin accounts
 │   ├── minecraft/        Downloads, Java, loaders, launch, and modpacks
 │   └── settings/         Persistent launcher settings
 ├── preload/              Sandboxed renderer bridge
@@ -112,8 +115,9 @@ The landing page in the repository root and the Electron renderer under `src/ren
 ## Security notes
 
 - Electron runs the renderer with context isolation, sandboxing, and Node.js integration disabled.
-- LittleSkin tokens and historical Microsoft credentials are removed from renderer-facing account objects.
+- Microsoft and LittleSkin access, refresh, and client tokens are removed from renderer-facing account objects.
 - Online-account tokens are encrypted at rest with Electron's `safeStorage`. If secure storage is unavailable, the launcher refuses to save or read online credentials instead of falling back to plain text.
+- Microsoft sign-in uses a public OAuth application ID; `MELODY_MICROSOFT_CLIENT_ID` can override it when building. The repository contains no client secret, and public Electron builds cannot keep an embedded Client ID confidential.
 - Download destinations, modpack paths, archive extraction, and remote mod URLs are validated to reduce path-traversal and unsafe-URL risks.
 - SHA-1 checks detect accidental corruption when upstream metadata provides a hash; SHA-1 should not be treated as a modern authenticity guarantee.
 

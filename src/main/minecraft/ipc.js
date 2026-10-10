@@ -37,11 +37,12 @@ function registerMinecraftIpc({
   BrowserWindow,
   settingsStore,
   accountStore,
+  microsoftAuth,
   yggdrasilAuth,
   javaProbeCache,
   getSettingsStore = () => settingsStore,
   getAccountStore = () => accountStore,
-  getMicrosoftAuth = () => undefined,
+  getMicrosoftAuth = () => microsoftAuth,
   getYggdrasilAuth = () => yggdrasilAuth,
   getJavaProbeCache = () => javaProbeCache
 }) {
