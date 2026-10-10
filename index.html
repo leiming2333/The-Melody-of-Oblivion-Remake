@@ -23,6 +23,7 @@
         <a href="#launcher" data-i18n="nav.launcher">启动器</a>
         <a href="#features" data-i18n="nav.features">功能</a>
         <a href="#download" data-i18n="nav.download">下载</a>
+        <a href="#guide" data-i18n="nav.guide">使用说明</a>
       </nav>
       <div class="header-actions">
         <button type="button" class="language-button" id="language-button" aria-label="Switch language">EN</button>
@@ -70,8 +71,8 @@
         <div class="feature-list">
           <article class="feature-item"><span class="feature-index">01</span><div><h3 data-i18n="feature.download.title">下载不必盯着等</h3><p data-i18n="feature.download.body">官方源和镜像自动测速。大文件分段下载，线路变慢或失败时会尝试切换。</p></div><span class="feature-mark" aria-hidden="true">↗</span></article>
           <article class="feature-item"><span class="feature-index">02</span><div><h3 data-i18n="feature.accounts.title">常用账户，随手切换</h3><p data-i18n="feature.accounts.body">支持离线、Microsoft 和 LittleSkin 登录。皮肤头像会跟着当前账户更新。</p></div><span class="feature-mark" aria-hidden="true">↗</span></article>
-          <article class="feature-item"><span class="feature-index">03</span><div><h3 data-i18n="feature.loaders.title">模组环境一次装好</h3><p data-i18n="feature.loaders.body">Fabric、Forge、NeoForge 可以直接选版本安装，也能导入 Modrinth 和 CurseForge 整合包。</p></div><span class="feature-mark" aria-hidden="true">↗</span></article>
-          <article class="feature-item"><span class="feature-index">04</span><div><h3 data-i18n="feature.java.title">Java 版本有人管</h3><p data-i18n="feature.java.body">先检查你指定的 Java；如果版本不合适，启动器会准备经过校验的运行环境。</p></div><span class="feature-mark" aria-hidden="true">↗</span></article>
+          <article class="feature-item"><span class="feature-index">03</span><div><h3 data-i18n="feature.loaders.title">模组环境一次装好</h3><p data-i18n="feature.loaders.body">Fabric、Forge、NeoForge、Quilt 可以直接选版本安装，也能导入 Modrinth 和 CurseForge 整合包。</p></div><span class="feature-mark" aria-hidden="true">↗</span></article>
+          <article class="feature-item"><span class="feature-index">04</span><div><h3 data-i18n="feature.java.title">Java 版本有人管</h3><p data-i18n="feature.java.body">保存常用 Java 路径，启动时按游戏要求选择兼容版本。缺少对应环境时，可在设置中下载。</p></div><span class="feature-mark" aria-hidden="true">↗</span></article>
         </div>
       </div>
     </section>
@@ -111,6 +112,27 @@
             <div class="cloud-download"><a href="https://wwayi.lanzouu.com/itX2J4ao8o7i" target="_blank" rel="noopener noreferrer" data-i18n="download.lanzou">蓝奏云 ↗</a><small><span data-i18n="download.password">密码：</span><code>9i2b</code></small></div>
           </div>
           <small data-i18n="download.note">非官方项目，与 Mojang Studios 或 Microsoft 无关。</small>
+        </div>
+      </div>
+    </section>
+    <section class="guide-section" id="guide" aria-labelledby="guide-title">
+      <div class="shell">
+        <div class="section-heading">
+          <p class="section-label">PLAY GUIDE / 04</p>
+          <h2 id="guide-title" data-i18n="guide.title">第一次使用，三步开始。</h2>
+          <p data-i18n="guide.lead">下载并打开启动器后，按下面的顺序准备游戏。</p>
+        </div>
+        <ol class="guide-steps">
+          <li><span class="guide-number" aria-hidden="true">01</span><h3 data-i18n="guide.account.title">添加游戏账户</h3><p data-i18n="guide.account.body">点击左下角账户框，添加离线、Microsoft 或 LittleSkin 账户。Microsoft 登录按提示在浏览器中授权。</p></li>
+          <li><span class="guide-number" aria-hidden="true">02</span><h3 data-i18n="guide.version.title">安装要玩的版本</h3><p data-i18n="guide.version.body">打开“切换版本”，选择 Minecraft 版本，需要模组时再选择对应加载器。等待下载完成，游戏就会出现在首页列表中。</p></li>
+          <li><span class="guide-number" aria-hidden="true">03</span><h3 data-i18n="guide.play.title">选好版本，启动游戏</h3><p data-i18n="guide.play.body">在首页游戏列表选择已安装的游戏，再点击“启动游戏”。如提示缺少 Java，在“启动设置”中下载对应版本后重试。</p></li>
+        </ol>
+        <div class="guide-faq">
+          <h3 data-i18n="guide.faq.title">常见问题</h3>
+          <details><summary data-i18n="guide.java.question">多个 Java 版本怎么切换？</summary><p data-i18n="guide.java.answer">在“启动设置”中添加 Java 可执行文件路径，点击保存后可从列表切换。支持下载 Java 8、16、17、21、25；启动时优先使用兼容的所选路径，不兼容时会尝试其他已保存、系统或已下载的 Java。</p></details>
+          <details><summary data-i18n="guide.import.question">如何导入 Mod 和整合包？</summary><p data-i18n="guide.import.answer">先选好游戏，再把 .jar 文件拖进启动器窗口，可一次导入多个 Mod。整合包请单独拖入一个 .zip 或 .mrpack，确认识别结果后安装。Mod 需要与游戏版本及加载器兼容；部分 CurseForge 文件可能无法直接下载。</p></details>
+          <details><summary data-i18n="guide.data.question">游戏文件存在哪里？</summary><p data-i18n="guide.data.answer">默认使用启动器旁的 .minecraft 目录；在首页选中游戏，点击“打开目录”可访问该游戏的数据。默认启用实例隔离，Mod、存档和配置按游戏分开。移动启动器或更换目录前，请备份原游戏目录。</p></details>
+          <details><summary data-i18n="guide.scene.question">背景场景和下载线路在哪里设置？</summary><p data-i18n="guide.scene.answer">背景在“启动设置”的“背景场景”中选择并保存，不会自动轮播。游戏下载源也可在设置中选择；启动器文件下载失败时，切换本站下载区域的线路后重试。</p></details>
         </div>
       </div>
     </section>
