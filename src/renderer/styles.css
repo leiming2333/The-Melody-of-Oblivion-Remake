@@ -44,6 +44,7 @@ textarea {
 
 .launcher-app {
   --launcher-dialog-scene: url("assets/backgrounds/wp15225187.jpg");
+  --launcher-corner-radius: 12px;
   position: relative;
   width: 100vw;
   height: 100vh;
@@ -51,7 +52,10 @@ textarea {
   min-height: 417px;
   overflow: hidden;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--launcher-corner-radius);
+  /* Clip composited backgrounds and blurred surfaces to the same smooth outline. */
+  clip-path: inset(0 round var(--launcher-corner-radius));
+  isolation: isolate;
   background: #171012;
 }
 
