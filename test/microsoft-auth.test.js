@@ -37,10 +37,22 @@ test('过期授权及常见 Microsoft 服务错误提供处理指引且不覆盖
     }), (error) => {
       assert.match(error.message, expected);
       assert.doesNotMatch(error.message, /trace-secret/);
+      if (payload.error === 'invalid_grant') assert.equal(error.code, 'MICROSOFT_AUTH_EXPIRED');
       return true;
     });
     assert.equal(saved, false);
   }
+});
+
+test('transient Microsoft refresh failures do not mark the account as signed out', async () => {
+  const manager = new MicrosoftAuthManager({
+    clientId: CLIENT_ID,
+    fetchImpl: async () => jsonResponse({ error: 'server_error' }, 503)
+  });
+  await assert.rejects(manager.ensureAccount({
+    type: 'microsoft', microsoftClientId: CLIENT_ID,
+    microsoftRefreshToken: 'refresh', accessTokenExpiresAt: 0
+  }), (error) => error.code !== 'MICROSOFT_AUTH_EXPIRED');
 });
 
 test('读取授权响应时保留超时、断网和无效 JSON 错误', async () => {

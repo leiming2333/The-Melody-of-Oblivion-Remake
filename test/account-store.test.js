@@ -33,6 +33,23 @@ test('离线用户名校验限制为 3–16 位合法字符', () => {
   assert.throws(() => validateOfflineName('ab'), /3–16/);
 });
 
+test('signing out of Microsoft clears the active selection and retains the saved account', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-microsoft-signout-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new AccountStore(path.join(root, 'accounts.json'));
+  const before = await store.upsertMicrosoft({
+    uuid: '01234567-89ab-cdef-0123-456789abcdef',
+    name: 'Player_01', accessToken: 'access', microsoftRefreshToken: 'refresh'
+  });
+
+  const signedOut = await store.signOut(before.current.id);
+  assert.equal(signedOut.current, null);
+  assert.equal(signedOut.currentId, null);
+  assert.equal(signedOut.accounts.length, 1);
+  assert.equal((await store.getState()).current, null);
+  assert.equal((await store.getAccount(before.current.id)).microsoftRefreshToken, 'refresh');
+});
+
 test('Microsoft 档案可解析正版皮肤地址并拒绝非官方纹理域名', () => {
   const textureUrl = 'https://textures.minecraft.net/texture/012345abcdef';
   const profile = {

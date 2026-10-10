@@ -83,6 +83,25 @@ test('lazy service load callback runs once after successful instantiation', () =
   assert.deepEqual(loaded, ['store']);
 });
 
+test('an expired Microsoft refresh signs out the active account before launch', async () => {
+  const handlers = new Map();
+  const calls = [];
+  const account = { id: 'microsoft:expired', type: 'microsoft' };
+  registerMinecraftIpc({
+    app: {}, ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
+    getAccountStore: () => ({
+      getCurrentAccount: async () => account,
+      signOut: async (id) => calls.push(['signOut', id])
+    }),
+    getMicrosoftAuth: () => ({
+      ensureAccount: async () => { throw Object.assign(new Error('expired'), { code: 'MICROSOFT_AUTH_EXPIRED' }); }
+    })
+  });
+  const sender = { isDestroyed: () => false, send() {} };
+  await assert.rejects(handlers.get('minecraft:launch-version')({ sender }, '1.21.1'), /已自动退出/);
+  assert.deepEqual(calls, [['signOut', account.id]]);
+});
+
 test('settings and update IPC resolve services on demand and preserve current update policy', async () => {
   const handlers = new Map();
   const calls = [];

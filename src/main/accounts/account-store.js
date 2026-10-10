@@ -126,9 +126,11 @@ function normalizeState(value) {
             : undefined
       }))
     : [];
-  const currentId = accounts.some((account) => account.id === value?.currentId)
-    ? value.currentId
-    : accounts[0]?.id ?? null;
+  const currentId = value?.currentId === null
+    ? null
+    : accounts.some((account) => account.id === value?.currentId)
+      ? value.currentId
+      : accounts[0]?.id ?? null;
   return { version: 4, currentId, accounts };
 }
 
@@ -336,6 +338,17 @@ class AccountStore {
         throw new Error('账户不存在');
       }
       state.currentId = accountId;
+      await this.write(state);
+      return this.publicState(state);
+    });
+  }
+
+  async signOut(accountId) {
+    return this.runExclusive(async () => {
+      const state = await this.read();
+      const account = state.accounts.find((item) => item.id === accountId);
+      if (!account || account.type !== 'microsoft') throw new Error('Microsoft 账户不存在');
+      if (state.currentId === accountId) state.currentId = null;
       await this.write(state);
       return this.publicState(state);
     });

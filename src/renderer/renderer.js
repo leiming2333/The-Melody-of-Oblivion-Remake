@@ -917,6 +917,19 @@ async function beginMicrosoftLogin() {
   }
 }
 
+async function reauthenticateExpiredMicrosoft() {
+  try {
+    accountState = await accountsApi.getState();
+    updateAccountCard();
+    renderAccountList();
+    openAccountManagement();
+    microsoftLoginHint.textContent = '登录已过期，正在申请新的 Microsoft 登录代码';
+    void beginMicrosoftLogin();
+  } catch (error) {
+    showProblem(error, 'Microsoft 重新登录失败');
+  }
+}
+
 async function cancelMicrosoftLogin() {
   ++microsoftLoginRequestId;
   const sessionId = microsoftLoginSessionId;
@@ -2131,7 +2144,9 @@ launchButton.addEventListener('click', async () => {
     gameStatus.textContent = '游戏启动失败';
     statusBadge.textContent = 'ERROR';
     const requiredJava = message.match(/需要 Java (\d+)/);
-    if (requiredJava) {
+    if (/Microsoft 登录已过期，已自动退出/.test(message)) {
+      await reauthenticateExpiredMicrosoft();
+    } else if (requiredJava) {
       showToast(message, true);
       void openJavaSettings(Number(requiredJava[1]));
     } else {

@@ -334,7 +334,13 @@ function registerMinecraftIpc({
     if (currentAccount?.type === 'microsoft') {
       const auth = getMicrosoftAuth();
       if (!auth) throw new Error('Microsoft 登录服务不可用，请重新登录');
-      currentAccount = await auth.ensureAccount(currentAccount);
+      try {
+        currentAccount = await auth.ensureAccount(currentAccount);
+      } catch (error) {
+        if (error.code !== 'MICROSOFT_AUTH_EXPIRED') throw error;
+        await accountStore.signOut(currentAccount.id);
+        throw new Error('Microsoft 登录已过期，已自动退出，请重新登录');
+      }
     }
     if (currentAccount?.type === 'yggdrasil') {
       const yggdrasilAuth = getYggdrasilAuth();

@@ -83,6 +83,12 @@ function providerError(payload, fallback) {
   return description || fallback;
 }
 
+function microsoftLoginExpiredError(message) {
+  const error = new Error(message);
+  error.code = 'MICROSOFT_AUTH_EXPIRED';
+  return error;
+}
+
 function reportLoginProgress(onProgress, phase, message) {
   if (typeof onProgress !== 'function') return;
   try {
@@ -367,7 +373,7 @@ class MicrosoftAuthManager {
     }
     const clientId = validateClientId(account.microsoftClientId ?? account.clientId);
     if (!account.microsoftRefreshToken) {
-      throw new Error('Microsoft 登录已过期，请在账户管理中重新登录');
+      throw microsoftLoginExpiredError('Microsoft 登录已过期，请重新登录');
     }
     const tokenResult = await postForm(this.fetchImpl, TOKEN_ENDPOINT, {
       grant_type: 'refresh_token',
@@ -376,7 +382,12 @@ class MicrosoftAuthManager {
       scope: MICROSOFT_SCOPE
     });
     if (!tokenResult.response.ok || !tokenResult.payload?.access_token) {
-      throw new Error(providerError(tokenResult.payload, 'Microsoft 登录已过期，请重新登录'));
+      const message = providerError(tokenResult.payload, 'Microsoft 登录已过期，请重新登录');
+      if (tokenResult.payload?.error === 'invalid_grant'
+          || /AADSTS(?:700082|700084|50173)\b|grant.*expired|refresh token.*expired|must sign in again/i.test(message)) {
+        throw microsoftLoginExpiredError(message);
+      }
+      throw new Error(message);
     }
     const refreshed = await exchangeMicrosoftForMinecraft({
       accessToken: tokenResult.payload.access_token,
