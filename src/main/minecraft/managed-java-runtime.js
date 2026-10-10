@@ -38,8 +38,10 @@ function selectRuntimePackage(assets, requiredMajorVersion, platform = process.p
   if (!packageName.toLowerCase().endsWith(ext)) {
     throw new Error('Java 运行时压缩包格式不受支持');
   }
+  const checksum = String(asset.binary.package.checksum ?? '').toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(checksum)) throw new Error('Java 运行时 SHA-256 校验信息不完整');
   return {
-    checksum: String(asset.binary.package.checksum ?? '').toLowerCase(),
+    checksum,
     link: link.toString(),
     name: packageName,
     releaseName: String(asset.release_name ?? `Java ${requiredMajorVersion}`),
@@ -211,8 +213,9 @@ class ManagedJavaRuntime {
       const executable = await this.findSystemJava(explicitPath, requiredMajorVersion);
       throwIfAborted(signal);
       return executable;
-    } catch {
+    } catch (error) {
       throwIfAborted(signal);
+      if (explicitPath) throw new Error(`手动指定的 Java 不可用或版本不兼容：${error.message}。请在设置中重新指定或切换自动检测`);
     }
     const installed = await this.installedExecutable(requiredMajorVersion);
     throwIfAborted(signal);
