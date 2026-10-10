@@ -4,7 +4,8 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('launcherEnvironment', {
   diagnostics: Object.freeze({
     markStartup: (stage) => ipcRenderer.send('startup:stage', stage),
-    whenWindowShown: () => ipcRenderer.invoke('startup:when-window-shown')
+    whenWindowShown: () => ipcRenderer.invoke('startup:when-window-shown'),
+    reportError: (message) => ipcRenderer.send('diagnostics:error', String(message))
   }),
   windowControls: Object.freeze({
     minimize: () => ipcRenderer.send('window:minimize'),

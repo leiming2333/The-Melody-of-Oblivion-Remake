@@ -40,6 +40,10 @@ ipcMain.handle('startup:when-window-shown', (event) => {
   return windowReadiness.get(BrowserWindow.fromWebContents(event.sender)) ?? Promise.resolve();
 });
 
+ipcMain.on('diagnostics:error', (_event, message) => {
+  if (typeof message === 'string') void services.errorLog.record(message);
+});
+
 ipcMain.handle('shell:open-external', async (_event, url) => {
   const target = String(url ?? '');
   if (/^https?:\/\//i.test(target)) {
@@ -147,6 +151,10 @@ function createSecretCodec() {
 }
 
 const services = createLazyServices({
+  errorLog: () => {
+    const { ErrorLog } = require('./error-log');
+    return new ErrorLog(app.getPath('userData'));
+  },
   accountStore: () => {
     const { AccountStore } = require('./accounts/account-store');
     return new AccountStore(path.join(app.getPath('userData'), 'accounts.json'), { secretCodec: createSecretCodec() });

@@ -228,7 +228,7 @@ async function handleLauncherUpdate() {
       renderLauncherUpdate(await updaterApi.check());
     }
   } catch (error) {
-    showToast(readableError(error));
+    showProblem(error);
   }
 }
 
@@ -349,10 +349,27 @@ function delay(milliseconds) {
 
 function readableError(error) {
   const message = error?.message ?? String(error);
+  globalThis.window?.launcherEnvironment?.diagnostics?.reportError?.(message);
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '');
 }
 
 function problemGuidance(message) {
+  if (/需要 Java|未找到可用的 Java|未检测到.*Java|无法启动 Java|不是可用的 Java/.test(message)) {
+    return { title: 'Java 环境不可用', message: '当前 Java 环境不符合游戏要求，或所选程序无法运行。',
+      advice: '打开「启动设置」，重新检测 Java 或下载游戏要求的版本，也可以手动选择 Java 安装目录中的可执行文件。', settings: true };
+  }
+  if (/SHA-?\d+|校验失败|校验.*不符|文件.*损坏|清单已损坏|文件缺失|不完整/i.test(message)) {
+    return { title: '游戏文件不完整', message: '文件缺失、损坏或校验不匹配，当前操作无法完成。',
+      advice: '在版本管理中重新验证或下载该版本；整合包请重新获取可信来源的文件。保留存档和 mods，不要直接删除整个游戏目录。' };
+  }
+  if (/用户名或密码错误|登录被拒绝|invalid credentials|access_denied/i.test(message)) {
+    return { title: '登录未完成', message: '登录信息不正确，或账户服务拒绝了本次请求。',
+      advice: '前往「账户管理」确认登录方式并重新登录；检查账户是否可正常访问对应服务。', account: true };
+  }
+  if (/EACCES|EPERM|权限不足|拒绝访问/i.test(message)) {
+    return { title: '无法访问文件', message: '启动器没有访问所需文件或目录的权限，或文件正在被其他程序使用。',
+      advice: '关闭占用文件的游戏或程序，并选择可写目录后重试。不要通过关闭系统安全防护来解决。', settings: true };
+  }
   if (message.includes('Microsoft 登录已移除')) {
     return { title: '此版本不支持 Microsoft 登录', message: '已保存的 Microsoft 账户不能用于此源码版本启动游戏。', advice: '请前往「账户管理」添加或选择离线、LittleSkin 账户。旧 Microsoft 账户可以删除；已发布的 v1.5.6 仍保留 Microsoft 登录。', account: true };
   }
@@ -375,6 +392,8 @@ function showProblem(error, title = '操作未完成') {
   document.querySelector('#problemError').textContent = message;
   document.querySelector('#problemDetails').open = false;
   document.querySelector('#problemAccountButton').hidden = !guidance.account;
+  const settingsButton = document.querySelector('#problemSettingsButton');
+  if (settingsButton) settingsButton.hidden = !guidance.settings;
   if (!dialog.open) dialog.showModal();
 }
 
@@ -421,7 +440,7 @@ async function refreshCurrentOnlineSkin() {
     updateAccountCard();
     renderAccountList();
   } catch (error) {
-    showToast(readableError(error));
+    showProblem(error);
   }
 }
 
@@ -438,7 +457,7 @@ async function selectAccount(accountId) {
     void refreshCurrentOnlineSkin();
     showToast(`已切换账户：${accountState.current?.name ?? '未选择'}`);
   } catch (error) {
-    showToast(readableError(error));
+    showProblem(error);
   }
 }
 
@@ -455,7 +474,7 @@ async function removeAccount(accountId) {
     renderAccountList();
     void refreshCurrentOnlineSkin();
   } catch (error) {
-    showToast(readableError(error));
+    showProblem(error);
   }
 }
 
@@ -474,7 +493,7 @@ async function setAccountSkinModel(accountId, skinModel) {
     renderAccountList();
     showToast(`默认皮肤已切换为${skinModelNames[skinModel]}`);
   } catch (error) {
-    showToast(readableError(error));
+    showProblem(error);
   }
 }
 
@@ -606,7 +625,7 @@ async function chooseJavaPath() {
     showToast(`已选择 Java ${selection.majorVersion}`);
     return true;
   } catch (error) {
-    showToast(readableError(error));
+    showProblem(error);
     return false;
   } finally {
     javaBrowseButton.disabled = false;
@@ -784,7 +803,7 @@ javaDownloadCancelButton.addEventListener('click', async () => {
     if (javaDownloadActive) javaDownloadHint.textContent = '正在取消下载';
   } catch (error) {
     javaDownloadCancelButton.disabled = false;
-    showToast(readableError(error));
+    showProblem(error);
   }
 });
 
@@ -1636,6 +1655,11 @@ document.querySelector('#problemAccountButton').addEventListener('click', () => 
   openAccountManagement();
 });
 
+document.querySelector('#problemSettingsButton').addEventListener('click', () => {
+  document.querySelector('#problemDialog').close();
+  void openJavaSettings();
+});
+
 addOfflineButton.addEventListener('click', addOfflineAccount);
 offlineNameInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
@@ -1763,7 +1787,7 @@ javaRedetectButton.addEventListener('click', async () => {
       showToast('未检测到 Java，可手动选择路径或安装后重新检测');
     }
   } catch (error) {
-    showToast(readableError(error));
+    showProblem(error);
   } finally {
     javaRedetectButton.disabled = false;
   }
@@ -1812,7 +1836,7 @@ cancelDownloadButton.addEventListener('click', async () => {
   } catch (error) {
     downloadCancelRequested = false;
     cancelDownloadButton.disabled = false;
-    showToast(readableError(error));
+    showProblem(error);
   }
 });
 
@@ -2007,7 +2031,7 @@ document.querySelector('#manageButton').addEventListener('click', async () => {
       showToast('Electron 中将打开 .minecraft 游戏目录');
     }
   } catch (error) {
-    showToast(readableError(error));
+    showProblem(error);
   }
 });
 
