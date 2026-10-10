@@ -7,6 +7,7 @@ const SKIN_MODELS = Object.freeze(['steve', 'alex']);
 const MICROSOFT_SECRET_FIELDS = Object.freeze(['accessToken', 'microsoftRefreshToken']);
 const YGGDRASIL_SECRET_FIELDS = Object.freeze(['accessToken', 'clientToken']);
 const ONLINE_ACCOUNT_TYPES = Object.freeze(['microsoft', 'yggdrasil']);
+const USABLE_ACCOUNT_TYPES = Object.freeze(['offline', 'yggdrasil']);
 const UNREADABLE_SECRETS = Symbol('unreadableSecrets');
 const CREDENTIALS_UNAVAILABLE_MESSAGE = '登录凭据不可用，请重新登录或删除该账户';
 
@@ -126,11 +127,9 @@ function normalizeState(value) {
             : undefined
       }))
     : [];
-  const currentId = value?.currentId === null
-    ? null
-    : accounts.some((account) => account.id === value?.currentId)
-      ? value.currentId
-      : accounts[0]?.id ?? null;
+  const currentId = USABLE_ACCOUNT_TYPES.some((type) => accounts.some((account) => account.id === value?.currentId && account.type === type))
+    ? value.currentId
+    : accounts.find((account) => USABLE_ACCOUNT_TYPES.includes(account.type))?.id ?? null;
   return { version: 4, currentId, accounts };
 }
 
@@ -192,6 +191,7 @@ class AccountStore {
         [UNREADABLE_SECRETS]: unreadableSecrets,
         ...visible
       } = account;
+      if (visible.type === 'microsoft') visible.loginError = '此版本不再支持 Microsoft 登录，可删除此历史账户';
       if (unreadableSecrets) visible.loginError = CREDENTIALS_UNAVAILABLE_MESSAGE;
       return visible;
     };
@@ -261,7 +261,7 @@ class AccountStore {
     });
   }
 
-  async upsertMicrosoft(credentials, { select = true } = {}) {
+  async upsertMicrosoft(credentials, { select = false } = {}) {
     const uuid = String(credentials?.uuid ?? '').toLowerCase();
     const name = String(credentials?.name ?? '');
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(uuid)) {
@@ -334,7 +334,8 @@ class AccountStore {
   async select(accountId) {
     return this.runExclusive(async () => {
       const state = await this.read();
-      if (!state.accounts.some((account) => account.id === accountId)) {
+      const account = state.accounts.find((item) => item.id === accountId);
+      if (!account || !USABLE_ACCOUNT_TYPES.includes(account.type)) {
         throw new Error('账户不存在');
       }
       state.currentId = accountId;
@@ -431,7 +432,7 @@ class AccountStore {
       const state = await this.read();
       state.accounts = state.accounts.filter((account) => account.id !== accountId);
       if (state.currentId === accountId) {
-        state.currentId = state.accounts[0]?.id ?? null;
+        state.currentId = state.accounts.find((account) => USABLE_ACCOUNT_TYPES.includes(account.type))?.id ?? null;
       }
       await this.write(state);
       return this.publicState(state);

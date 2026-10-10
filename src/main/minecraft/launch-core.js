@@ -370,7 +370,7 @@ function normalizeAccount(account) {
     uuid,
     skinModel: account.skinModel === 'alex' ? 'alex' : 'steve',
     accessToken: account.accessToken || '0',
-    userType: account.type === 'microsoft' ? 'msa' : 'legacy',
+    userType: 'legacy',
     xuid: account.xuid || '',
     clientId: account.clientId || ''
   };
