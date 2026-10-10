@@ -82,6 +82,7 @@ const javaDownloadHint = document.querySelector('#javaDownloadHint');
 const javaDownloadProgress = document.querySelector('#javaDownloadProgress');
 const javaDownloadPercent = document.querySelector('#javaDownloadPercent');
 const gameDirectoryModeSelect = document.querySelector('#gameDirectoryModeSelect');
+const isolateProfilesCheck = document.querySelector('#isolateProfilesCheck');
 const gameDirectoryHint = document.querySelector('#gameDirectoryHint');
 const memoryRange = document.querySelector('#memoryRange');
 const memoryValue = document.querySelector('#memoryValue');
@@ -537,6 +538,7 @@ function applySettingsToForm() {
   selectedJavaPath = launcherSettings.javaPath ?? '';
   selectedJavaMajorVersion = undefined;
   renderJavaPathSetting();
+  isolateProfilesCheck.checked = launcherSettings.isolateProfiles !== false;
   gameDirectoryModeSelect.value = launcherSettings.gameDirectoryMode ?? 'local';
   gameDirectoryHint.textContent = gameDirectoryModeSelect.value === 'local'
     ? localGameDirectoryHint
@@ -1718,6 +1720,7 @@ settingsDialog.addEventListener('close', async () => {
       const patch = {
         javaPath: selectedJavaPath,
         gameDirectoryMode: gameDirectoryModeSelect.value,
+        isolateProfiles: isolateProfilesCheck.checked,
         downloadSource: downloadSourceSelect.value,
         downloadConcurrency: Number(downloadConcurrencySelect.value),
         memoryMb: Number(memoryRange.value),

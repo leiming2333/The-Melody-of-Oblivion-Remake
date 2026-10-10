@@ -7,6 +7,7 @@ const LAUNCHER_UPDATE_POLICY_OPTIONS = Object.freeze(['auto', 'notify', 'off']);
 const DEFAULT_SETTINGS = Object.freeze({
   version: 3,
   javaPath: '',
+  isolateProfiles: true,
   gameDirectoryMode: 'local',
   downloadSource: 'auto',
   downloadConcurrency: 32,
@@ -33,6 +34,7 @@ function normalizeSettings(value = {}) {
     javaPath: requestedJavaPath && path.isAbsolute(requestedJavaPath)
       ? path.normalize(requestedJavaPath)
       : DEFAULT_SETTINGS.javaPath,
+    isolateProfiles: value.isolateProfiles !== false,
     gameDirectoryMode: value.gameDirectoryMode === 'system' ? 'system' : 'local',
     downloadSource: DOWNLOAD_SOURCE_OPTIONS.includes(value.downloadSource)
       ? value.downloadSource

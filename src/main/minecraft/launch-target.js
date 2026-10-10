@@ -31,4 +31,12 @@ async function resolveLaunchTarget(gameDirectory, targetId) {
       targetId: value
     };
   }
-module.exports = { resolveLaunchTarget };
+// Hash IDs so case-insensitive filesystems also keep distinct profiles apart.
+function profileGameDirectory(gameDirectory, profileId) {
+  if (typeof profileId !== 'string' || !profileId || /[\\/\0]/.test(profileId) || profileId === '.' || profileId === '..') {
+    throw new Error('游戏版本 ID 无效');
+  }
+  const id = require('node:crypto').createHash('sha256').update(profileId).digest('hex');
+  return safePath(gameDirectory, 'melody-profiles', id);
+}
+module.exports = { resolveLaunchTarget, profileGameDirectory };

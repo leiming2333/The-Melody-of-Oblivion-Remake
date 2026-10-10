@@ -340,7 +340,7 @@ function registerMinecraftIpc({
       if (!event.sender.isDestroyed()) event.sender.send('minecraft:launch-status', status);
     };
     try {
-      const { resolveLaunchTarget } = require('./launch-target');
+      const { resolveLaunchTarget, profileGameDirectory } = require('./launch-target');
       const requestedTargetId = String(profileId ?? '');
       const instance = await resolveLaunchTarget(gameDirectory, requestedTargetId);
       const authlibInjectorPath = currentAccount?.type === 'yggdrasil'
@@ -354,7 +354,8 @@ function registerMinecraftIpc({
       return await services.launcher.launch({
         profileId: instance?.profileId ?? requestedTargetId,
         targetId: requestedTargetId,
-        instanceDirectory: instance?.instanceDirectory,
+        instanceDirectory: instance?.instanceDirectory ?? (settings.isolateProfiles !== false
+          ? profileGameDirectory(gameDirectory, requestedTargetId) : undefined),
         account: currentAccount,
         memoryMb: settings.memoryMb,
         javaPath: settings.javaPath,

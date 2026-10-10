@@ -64,6 +64,7 @@ test('启动设置可以持久化并自动规范内存值', async (t) => {
   });
   assert.deepEqual(saved, {
     version: 3,
+    isolateProfiles: true,
     javaPath: path.resolve(temporaryRoot, 'runtime', 'bin', 'java.exe'),
     gameDirectoryMode: 'local',
     downloadSource: 'official',
