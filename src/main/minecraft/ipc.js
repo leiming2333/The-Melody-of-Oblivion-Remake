@@ -39,6 +39,7 @@ function registerMinecraftIpc({
   javaProbeCache,
   getSettingsStore = () => settingsStore,
   getAccountStore = () => accountStore,
+  getMicrosoftAuth = () => undefined,
   getYggdrasilAuth = () => yggdrasilAuth,
   getJavaProbeCache = () => javaProbeCache
 }) {
@@ -326,7 +327,9 @@ function registerMinecraftIpc({
     const settingsStore = getSettingsStore();
     let currentAccount = accountStore ? await accountStore.getCurrentAccount() : undefined;
     if (currentAccount?.type === 'microsoft') {
-      throw new Error('Microsoft 登录已移除，请在账户管理中选择离线或 LittleSkin 账户');
+      const auth = getMicrosoftAuth();
+      if (!auth) throw new Error('Microsoft 登录服务不可用，请重新登录');
+      currentAccount = await auth.ensureAccount(currentAccount);
     }
     if (currentAccount?.type === 'yggdrasil') {
       const yggdrasilAuth = getYggdrasilAuth();

@@ -81,6 +81,13 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     }
   }),
   accounts: Object.freeze({
+    loginMicrosoft: () => ipcRenderer.invoke('accounts:login-microsoft'),
+    cancelMicrosoft: () => ipcRenderer.invoke('accounts:cancel-microsoft'),
+    onMicrosoftCode: callback => {
+      const listener = (_event, code) => callback(code);
+      ipcRenderer.on('accounts:microsoft-code', listener);
+      return () => ipcRenderer.removeListener('accounts:microsoft-code', listener);
+    },
     getState: () => ipcRenderer.invoke('accounts:get-state'),
     addOffline: (playerName, skinModel = 'steve') => (
       ipcRenderer.invoke('accounts:add-offline', playerName, skinModel)

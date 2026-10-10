@@ -371,8 +371,8 @@ function problemGuidance(message) {
     return { title: '无法访问文件', message: '启动器没有访问所需文件或目录的权限，或文件正在被其他程序使用。',
       advice: '关闭占用文件的游戏或程序，并选择可写目录后重试。不要通过关闭系统安全防护来解决。', settings: true };
   }
-  if (message.includes('Microsoft 登录已移除')) {
-    return { title: '此版本不支持 Microsoft 登录', message: '已保存的 Microsoft 账户不能用于此源码版本启动游戏。', advice: '请前往「账户管理」添加或选择离线、LittleSkin 账户。旧 Microsoft 账户可以删除；已发布的 v1.5.6 仍保留 Microsoft 登录。', account: true };
+  if (/Microsoft 登录已过期|登录凭据不可用|invalid_grant|Xbox.*账户/.test(message)) {
+    return { title: '账户需要重新授权', message: '登录凭据已过期或账户设置尚未完成。', advice: '请前往账户管理重新登录；Xbox 账户请先完成网页上的账户或家庭设置。', account: true };
   }
   if (/登录已过期|登录凭据不可用/.test(message)) {
     return { title: '需要重新登录', message: '账户的登录凭据不可用，暂时无法启动游戏。', advice: '前往「账户管理」重新登录 LittleSkin，或选择离线账户后再启动游戏。', account: true };
@@ -1671,6 +1671,42 @@ offlineNameInput.addEventListener('keydown', (event) => {
 });
 
 littleSkinLoginButton.addEventListener('click', beginLittleSkinLogin);
+const microsoftLoginButton = document.querySelector('#microsoftLoginButton');
+const microsoftLoginHint = document.querySelector('#microsoftLoginHint');
+const microsoftOpenButton = document.querySelector('#microsoftOpenButton');
+const microsoftCancelButton = document.querySelector('#microsoftCancelButton');
+let microsoftLoginActive = false;
+accountsApi?.onMicrosoftCode?.(code => {
+  microsoftLoginHint.textContent = `请打开授权网页并输入代码：${code.userCode}（${Math.ceil(code.expiresIn / 60)} 分钟内有效）`;
+  microsoftOpenButton.hidden = false;
+});
+microsoftOpenButton.addEventListener('click', () => environment?.shell?.openExternal('https://www.microsoft.com/link'));
+microsoftCancelButton.addEventListener('click', () => accountsApi?.cancelMicrosoft?.().catch(showProblem));
+accountDialog.addEventListener('close', () => {
+  if (microsoftLoginActive) accountsApi?.cancelMicrosoft?.().catch(showProblem);
+});
+microsoftLoginButton.addEventListener('click', async () => {
+  if (microsoftLoginActive) return;
+  if (!accountsApi?.loginMicrosoft) { showToast('Microsoft 登录服务不可用'); return; }
+  microsoftLoginActive = true;
+  microsoftLoginButton.disabled = true;
+  microsoftCancelButton.hidden = false;
+  microsoftLoginHint.textContent = '正在获取设备代码…';
+  try {
+    accountState = await accountsApi.loginMicrosoft();
+    updateAccountCard();
+    await renderAccountList();
+    microsoftLoginHint.textContent = '登录成功，已设为当前账户。';
+  } catch (error) {
+    microsoftLoginHint.textContent = readableError(error);
+    if (!microsoftLoginHint.textContent.includes('已取消')) showProblem(error);
+  } finally {
+    microsoftLoginActive = false;
+    microsoftLoginButton.disabled = false;
+    microsoftCancelButton.hidden = true;
+    microsoftOpenButton.hidden = true;
+  }
+});
 littleSkinPasswordInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();

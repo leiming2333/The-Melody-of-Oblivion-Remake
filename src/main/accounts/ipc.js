@@ -12,8 +12,21 @@ function registerAccountIpc({
     }
     return accountStore;
   },
+  getMicrosoftAuth = () => undefined,
   getYggdrasilAuth = () => yggdrasilAuth
 }) {
+  ipcMain.handle('accounts:login-microsoft', async (event) => {
+    const auth = getMicrosoftAuth();
+    if (!auth) throw new Error('Microsoft 登录服务不可用');
+    const cancel = () => auth.cancelOwner(event.sender.id);
+    event.sender.once('destroyed', cancel);
+    try {
+      return await auth.login(event.sender.id, code => {
+        if (!event.sender.isDestroyed()) event.sender.send('accounts:microsoft-code', code);
+      });
+    } finally { event.sender.removeListener('destroyed', cancel); }
+  });
+  ipcMain.handle('accounts:cancel-microsoft', event => { getMicrosoftAuth()?.cancelOwner(event.sender.id); });
   ipcMain.handle('accounts:get-state', () => getAccountStore().getState());
   ipcMain.handle('accounts:add-offline', (_event, playerName, skinModel) => (
     getAccountStore().addOffline(playerName, skinModel)

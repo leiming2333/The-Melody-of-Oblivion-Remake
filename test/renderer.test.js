@@ -15,10 +15,10 @@ test('问题提示提供重新登录入口、保留错误信息并重置上次�
   const context = { document: { querySelector: (selector) => nodes[selector] } };
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('function readableError('), source.indexOf('function setAccountHint(')), context);
-  const expired = "Error invoking remote method 'minecraft:launch-version': Error: Microsoft 登录已移除，请在账户管理中选择离线或 LittleSkin 账户";
+  const expired = "Error invoking remote method 'minecraft:launch-version': Error: Microsoft 登录已过期，请重新登录";
   context.showProblem({ message: expired }, '游戏启动失败');
-  assert.equal(nodes['#problemTitle'].textContent, '此版本不支持 Microsoft 登录');
-  assert.match(nodes['#problemAdvice'].textContent, /离线.*LittleSkin/);
+  assert.equal(nodes['#problemTitle'].textContent, '账户需要重新授权');
+  assert.match(nodes['#problemAdvice'].textContent, /重新登录/);
   assert.equal(nodes['#problemAccountButton'].hidden, false);
   assert.equal(nodes['#problemError'].textContent, expired.replace(/^Error invoking remote method '[^']+': Error: /, ''));
   nodes['#problemDetails'].open = true;

@@ -259,7 +259,7 @@ class AccountStore {
     });
   }
 
-  async upsertMicrosoft(credentials) {
+  async upsertMicrosoft(credentials, { select = true } = {}) {
     const uuid = String(credentials?.uuid ?? '').toLowerCase();
     const name = String(credentials?.name ?? '');
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(uuid)) {
@@ -286,7 +286,7 @@ class AccountStore {
       delete account[UNREADABLE_SECRETS];
       if (existingIndex >= 0) state.accounts[existingIndex] = account;
       else state.accounts.push(account);
-      state.currentId = id;
+      if (select) state.currentId = id;
       await this.write(state);
       return this.publicState(state);
     });
