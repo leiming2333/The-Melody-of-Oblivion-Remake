@@ -26,6 +26,15 @@ class StartupMetrics {
   attach(directory) {
     this.filePath = path.join(directory, 'logs', 'startup-latest.json');
   }
+
+  print(logger = console) {
+    let previous = 0;
+    logger.table(this.stages.map(({ stage, elapsedMs }) => {
+      const sincePreviousMs = elapsedMs - previous;
+      previous = elapsedMs;
+      return { stage, elapsedMs, sincePreviousMs };
+    }));
+  }
 }
 
 module.exports = { StartupMetrics };

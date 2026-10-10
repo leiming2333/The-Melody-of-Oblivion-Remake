@@ -29,8 +29,10 @@ ipcMain.on('window:close', (event) => {
 });
 
 ipcMain.on('startup:stage', (_event, stage) => {
-  if (['renderer-painted', 'settings-loaded', 'accounts-loaded', 'profiles-loaded', 'java-detected'].includes(stage)) {
+  if (['renderer-painted', 'settings-loaded', 'accounts-loaded', 'profiles-loaded', 'java-detected', 'core-ready'].includes(stage)) {
+    const alreadyRecorded = startupMetrics.stages.some((entry) => entry.stage === stage);
     startupMetrics.mark(stage);
+    if (stage === 'core-ready' && !alreadyRecorded && !app.isPackaged && !isSmokeTest) startupMetrics.print();
   }
 });
 
@@ -98,6 +100,7 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
   mainWindow.once('ready-to-show', () => {
+    startupMetrics.mark('ready-to-show');
     startupMetrics.mark('window-ready');
     if (process.platform !== 'darwin') {
       mainWindow.setIcon(appIconPath);
@@ -245,6 +248,7 @@ app.whenReady().then(() => {
     app, ipcMain, shell, getSettingsStore, getAccountStore, getYggdrasilAuth, getJavaProbeCache
   });
   require('./updater/ipc').registerUpdateIpc({ ipcMain, getUpdateManager });
+  startupMetrics.mark('services-registered');
   createWindow();
   startupMetrics.mark('window-created');
 

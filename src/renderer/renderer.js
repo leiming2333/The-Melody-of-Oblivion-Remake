@@ -2067,6 +2067,7 @@ requestAnimationFrame(() => requestAnimationFrame(async () => {
       for (const result of results) {
         if (result.status === 'rejected') showToast(`后台初始化失败：${readableError(result.reason)}`, true);
       }
+      environment?.diagnostics?.markStartup('core-ready');
     });
   }, 150);
 }));

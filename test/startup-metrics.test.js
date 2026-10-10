@@ -24,3 +24,15 @@ test('startup report retains early stages and writes only the latest run', async
   await next.queue;
   assert.equal(JSON.parse(await fs.readFile(reportPath, 'utf8')).stages.length, 1);
 });
+
+test('development table reports elapsed and previous-stage intervals without recording new stages', () => {
+  const metrics = new StartupMetrics();
+  metrics.stages = [{ stage: 'main-entry', elapsedMs: 0 }, { stage: 'window-shown', elapsedMs: 100 }];
+  let rows;
+  metrics.print({ table: (value) => { rows = value; } });
+  assert.deepEqual(rows, [
+    { stage: 'main-entry', elapsedMs: 0, sincePreviousMs: 0 },
+    { stage: 'window-shown', elapsedMs: 100, sincePreviousMs: 100 }
+  ]);
+  assert.equal(metrics.stages.length, 2);
+});
