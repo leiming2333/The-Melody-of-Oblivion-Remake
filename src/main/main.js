@@ -126,14 +126,13 @@ function createWindow() {
       try {
         const valid = await mainWindow.webContents.executeJavaScript(`Boolean(
           document.querySelector('#launchButton') && document.querySelector('#accountDialog') &&
-          document.querySelector('#modsDialog') && window.launcherEnvironment?.accounts?.getState &&
-          window.launcherEnvironment?.minecraft?.listMods
+          !document.querySelector('#modsButton') && window.launcherEnvironment?.accounts?.getState &&
+          window.launcherEnvironment?.minecraft?.importModFile
         )`);
         if (!valid) throw new Error('Smoke test: renderer or preload API missing');
         await mainWindow.webContents.executeJavaScript(`Promise.all([
           import('./modules/account-ui.mjs').then(m => typeof m.renderAccountList === 'function'),
-          import('./modules/modpack-ui.mjs').then(m => typeof m.installDroppedModpack === 'function'),
-          import('./modules/mod-ui.mjs').then(m => typeof m.showMods === 'function')
+          import('./modules/modpack-ui.mjs').then(m => typeof m.installDroppedModpack === 'function')
         ]).then(values => { if (!values.every(Boolean)) throw new Error('Missing renderer module'); })`);
         if (process.env.MELODY_SMOKE_RESULT) {
           await require('node:fs/promises').writeFile(process.env.MELODY_SMOKE_RESULT, JSON.stringify({

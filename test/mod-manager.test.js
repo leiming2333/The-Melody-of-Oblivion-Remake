@@ -63,5 +63,12 @@ test('Mod IPC imports into the selected profile and opens the same isolated dire
   assert.equal(result.mods[0].name, 'sample.jar');
   await handlers.get('minecraft:open-directory')({}, '1.21');
   assert.equal(opened, profileGameDirectory(game, '1.21'));
+  const dragged = path.join(root, 'dragged.jar');
+  await fs.writeFile(dragged, 'dragged fixture');
+  const mods = await handlers.get('minecraft:import-mod-file')({}, '1.21', dragged);
+  assert.equal(mods.some(mod => mod.name === 'dragged.jar'), true);
+  assert.equal(await fs.readFile(path.join(opened, 'mods', 'dragged.jar'), 'utf8'), 'dragged fixture');
+  await assert.rejects(handlers.get('minecraft:import-mod-file')({}, '1.21', 'relative.jar'), /有效的/);
+  await assert.rejects(handlers.get('minecraft:import-mod-file')({}, '1.21', dragged), /未覆盖/);
   await assert.rejects(handlers.get('minecraft:list-mods')({}, '../escape'), /格式无效/);
 });

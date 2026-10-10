@@ -1986,17 +1986,42 @@ document.addEventListener('dragleave', (event) => {
   if (modpackDragDepth === 0) modpackDropOverlay.hidden = true;
 });
 
-document.addEventListener('drop', (event) => {
+let modImportActive = false;
+document.addEventListener('drop', async (event) => {
   event.preventDefault();
   modpackDragDepth = 0;
   modpackDropOverlay.hidden = true;
-  const file = event.dataTransfer?.files?.[0];
-  const filePath = file && filesApi?.getPath ? filesApi.getPath(file) : undefined;
-  if (!filePath || !/\.(mrpack|zip)$/i.test(filePath)) {
-    showToast('请拖入 Modrinth .mrpack 或 CurseForge .zip 整合包');
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  const paths = files.map(file => filesApi?.getPath?.(file));
+  if (!paths.length || paths.some(filePath => !filePath || !/\.(jar|mrpack|zip)$/i.test(filePath))) {
+    showToast('请拖入 Mod .jar，或 Modrinth .mrpack / CurseForge .zip 整合包');
     return;
   }
-  installDroppedModpack(filePath);
+  if (modImportActive || versionDownloadActive || modpackInstallActive || launchRequestActive) {
+    showToast('请先等待当前任务完成后再导入');
+    return;
+  }
+  if (paths.some(filePath => /\.(mrpack|zip)$/i.test(filePath))) {
+    if (paths.length !== 1) { showToast('整合包请一次拖入一个；多个 Mod 可以一起拖入'); return; }
+    await installDroppedModpack(paths[0]);
+    return;
+  }
+  const targetId = versionSelect.value;
+  if (!targetId) { showToast('请先在游戏列表中选择已安装的游戏，再拖入 Mod'); return; }
+  if (!minecraft?.importModFile) { showToast('Mod 导入需在启动器应用中使用'); return; }
+  modImportActive = true;
+  let imported = 0;
+  const failures = [];
+  try {
+    showToast(`正在导入 ${paths.length} 个 Mod…`);
+    for (const filePath of paths) {
+      try { await minecraft.importModFile(targetId, filePath); imported++; }
+      catch (error) { failures.push(readableError(error)); }
+    }
+    showToast(failures.length
+      ? `已导入 ${imported} 个 Mod，${failures.length} 个失败：${failures[0]}`
+      : `已将 ${imported} 个 Mod 导入当前游戏，启动游戏后生效`, failures.length > 0);
+  } finally { modImportActive = false; }
 });
 
 launchButton.addEventListener('click', async () => {
@@ -2064,19 +2089,6 @@ versionSelect.addEventListener('change', () => {
   updateVersionAction();
 });
 
-let modUiModule;
-document.querySelector('#modsButton').addEventListener('click', async () => {
-  if (!versionSelect.value) { showToast('请先选择已安装的游戏版本'); return; }
-  if (!minecraft?.listMods) { showToast('Mod 管理需在应用中使用'); return; }
-  try {
-    modUiModule ??= import('./modules/mod-ui.mjs').catch(error => { modUiModule = undefined; throw error; });
-    const { showMods } = await modUiModule;
-    await showMods({ minecraft, showProblem,
-      dialog: document.querySelector('#modsDialog'), list: document.querySelector('#modsList'),
-      importButton: document.querySelector('#importModButton'), hint: document.querySelector('#modsHint')
-    }, versionSelect.value);
-  } catch (error) { showProblem(error); }
-});
 document.querySelector('#manageButton').addEventListener('click', async () => {
   try {
     if (minecraft) {

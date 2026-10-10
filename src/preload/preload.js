@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     launchVersion: (profileId) => ipcRenderer.invoke('minecraft:launch-version', profileId),
     listMods: targetId => ipcRenderer.invoke('minecraft:list-mods', targetId),
     setModEnabled: (targetId, name, enabled) => ipcRenderer.invoke('minecraft:set-mod-enabled', targetId, name, enabled),
+    importModFile: (targetId, filePath) => ipcRenderer.invoke('minecraft:import-mod-file', targetId, filePath),
     importMod: targetId => ipcRenderer.invoke('minecraft:import-mod', targetId),
     openDirectory: (targetId) => ipcRenderer.invoke('minecraft:open-directory', targetId),
     onDownloadProgress: (callback) => {

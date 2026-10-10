@@ -406,6 +406,12 @@ function registerMinecraftIpc({
   ipcMain.handle('minecraft:set-mod-enabled', async (_event, targetId, name, enabled) => (
     getModManager().setEnabled(await targetDirectory(targetId, true), name, enabled)
   ));
+  ipcMain.handle('minecraft:import-mod-file', async (_event, targetId, filePath) => {
+    if (typeof filePath !== 'string' || !path.isAbsolute(filePath) || !/\.jar$/i.test(filePath)) {
+      throw new Error('请拖入有效的 .jar Mod 文件');
+    }
+    return getModManager().importFile(await targetDirectory(targetId, true), filePath);
+  });
   ipcMain.handle('minecraft:import-mod', async (event, targetId) => {
     if (!dialog) throw new Error('文件选择服务不可用');
     const selection = await dialog.showOpenDialog(BrowserWindow?.fromWebContents(event.sender), {
