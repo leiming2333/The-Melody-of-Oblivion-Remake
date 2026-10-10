@@ -2367,3 +2367,21 @@ progress:indeterminate::-moz-progress-bar {
   color: rgba(255, 255, 255, 0.45);
   font-size: 11px;
 }
+
+/* Reuse the final control geometry so asynchronous data does not shift the layout. */
+.startup-placeholder {
+  color: transparent !important;
+  border-radius: 4px;
+  background-image: linear-gradient(100deg, rgba(255, 255, 255, 0.07) 20%, rgba(255, 255, 255, 0.18) 50%, rgba(255, 255, 255, 0.07) 80%) !important;
+  background-size: 200% 100%;
+  animation: startup-placeholder-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes startup-placeholder-pulse {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-placeholder { animation: none; }
+}

@@ -37,7 +37,7 @@
             <span id="playerAvatar" class="avatar" aria-hidden="true"><i></i></span>
             <span class="account-copy">
               <small id="accountType">游戏账户</small>
-              <strong id="accountName">未添加账户</strong>
+              <strong id="accountName" class="startup-placeholder" aria-busy="true">未添加账户</strong>
             </span>
             <span class="account-action">管理</span>
           </button>
@@ -62,7 +62,7 @@
             <div class="utility-actions">
               <button id="versionButton" class="utility-button" type="button">
                 <span class="utility-symbol" aria-hidden="true">⇄</span>
-                <span><strong>切换版本</strong><small id="sourceHint">32 路并发下载</small></span>
+                <span><strong>切换版本</strong><small id="sourceHint" class="startup-placeholder" aria-busy="true">32 路并发下载</small></span>
               </button>
               <button id="settingsButton" class="utility-button" type="button">
                 <span class="utility-symbol" aria-hidden="true">⚙</span>
@@ -74,7 +74,7 @@
           <div class="instance-row">
             <label for="versionSelect">游戏列表</label>
             <div class="select-wrap">
-              <select id="versionSelect" aria-label="选择游戏版本">
+              <select id="versionSelect" class="startup-placeholder" aria-busy="true" aria-label="选择游戏版本">
                 <option value="">尚未选择已安装版本</option>
               </select>
             </div>

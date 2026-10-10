@@ -508,6 +508,9 @@ async function loadAccountState() {
     void refreshCurrentOnlineSkin();
   } catch (error) {
     showToast(`账户读取失败：${readableError(error)}`);
+  } finally {
+    accountName.classList.remove('startup-placeholder');
+    accountName.setAttribute('aria-busy', 'false');
   }
 }
 
@@ -618,6 +621,9 @@ async function loadLauncherSettings() {
     void refreshAutoJavaDetection();
   } catch (error) {
     showToast(`设置读取失败：${readableError(error)}`);
+  } finally {
+    sourceHint.classList.remove('startup-placeholder');
+    sourceHint.setAttribute('aria-busy', 'false');
   }
 }
 
@@ -1062,6 +1068,8 @@ async function loadLocalProfiles(force = false) {
     return await localProfilesLoadingPromise;
   } finally {
     localProfilesLoadingPromise = undefined;
+    versionSelect.classList.remove('startup-placeholder');
+    versionSelect.setAttribute('aria-busy', 'false');
   }
 }
 
