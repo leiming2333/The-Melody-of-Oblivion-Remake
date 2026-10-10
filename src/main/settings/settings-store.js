@@ -7,6 +7,7 @@ const LAUNCHER_UPDATE_POLICY_OPTIONS = Object.freeze(['auto', 'notify', 'off']);
 const DEFAULT_SETTINGS = Object.freeze({
   version: 3,
   javaPath: '',
+  javaRuntimes: Object.freeze([]),
   wallpaperIndex: 0,
   isolateProfiles: true,
   gameDirectoryMode: 'local',
@@ -37,6 +38,7 @@ function normalizeSettings(value = {}) {
     javaPath: requestedJavaPath && path.isAbsolute(requestedJavaPath)
       ? path.normalize(requestedJavaPath)
       : DEFAULT_SETTINGS.javaPath,
+    javaRuntimes: normalizeJavaRuntimes(value.javaRuntimes, requestedJavaPath),
     isolateProfiles: value.isolateProfiles !== false,
     gameDirectoryMode: value.gameDirectoryMode === 'system' ? 'system' : 'local',
     downloadSource: DOWNLOAD_SOURCE_OPTIONS.includes(value.downloadSource)
@@ -53,6 +55,21 @@ function normalizeSettings(value = {}) {
       : DEFAULT_SETTINGS.autoUpdate,
     launcherUpdatePolicy: normalizeLauncherUpdatePolicy(value.launcherUpdatePolicy, value.launcherAutoUpdate)
   };
+}
+
+function normalizeJavaRuntimes(value, selectedPath = '') {
+  const entries = Array.isArray(value) ? value.slice(0, 64) : [];
+  const runtimes = new Map();
+  for (const entry of [{ path: selectedPath }, ...entries]) {
+    const candidate = typeof entry?.path === 'string' ? entry.path.trim() : '';
+    if (!candidate || !path.isAbsolute(candidate)) continue;
+    const normalized = path.normalize(candidate);
+    const key = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+    const majorVersion = Number.isInteger(entry.majorVersion) && entry.majorVersion > 0
+      ? entry.majorVersion : runtimes.get(key)?.majorVersion;
+    runtimes.set(key, { path: normalized, ...(majorVersion ? { majorVersion } : {}) });
+  }
+  return [...runtimes.values()].slice(0, 64);
 }
 
 class SettingsStore {

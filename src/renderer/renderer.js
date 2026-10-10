@@ -69,8 +69,6 @@ const downloadEta = document.querySelector('#downloadEta');
 const settingsDialog = document.querySelector('#settingsDialog');
 const launcherApp = document.querySelector('.launcher-app');
 const javaSelect = document.querySelector('#javaSelect');
-const javaAutoOption = javaSelect?.querySelector('option[value="auto"]');
-const javaCustomOption = javaSelect?.querySelector('option[value="custom"]');
 const javaBrowseButton = document.querySelector('#javaBrowseButton');
 const javaRedetectButton = document.querySelector('#javaRedetectButton');
 const javaDownloadButton = document.querySelector('#javaDownloadButton');
@@ -148,6 +146,7 @@ let launcherSettings = {
 let launcherSettingsLoaded = false;
 let selectedJavaPath = '';
 let selectedJavaMajorVersion;
+let savedJavaRuntimes = [];
 let autoJavaDetection = null;
 let autoJavaDetectionPromise = null;
 let javaDownloadActive = false;
@@ -537,7 +536,10 @@ function applySettingsToForm() {
   wallpaperSelect.value = String(launcherSettings.wallpaperIndex ?? 0);
   selectWallpaper(Number(wallpaperSelect.value));
   selectedJavaPath = launcherSettings.javaPath ?? '';
-  selectedJavaMajorVersion = undefined;
+  savedJavaRuntimes = (launcherSettings.javaRuntimes ?? []).map((entry) => ({ ...entry }));
+  selectedJavaMajorVersion = savedJavaRuntimes.find((entry) => entry.path === selectedJavaPath)?.majorVersion;
+  if (selectedJavaPath) rememberJavaPath(selectedJavaPath, selectedJavaMajorVersion);
+  if (autoJavaDetection?.path) rememberJavaPath(autoJavaDetection.path, autoJavaDetection.majorVersion);
   renderJavaPathSetting();
   isolateProfilesCheck.checked = launcherSettings.isolateProfiles !== false;
   gameDirectoryModeSelect.value = launcherSettings.gameDirectoryMode ?? 'local';
@@ -563,23 +565,26 @@ function javaOptionLabel(majorVersion, javaPath, suffix = '') {
 
 function renderJavaPathSetting() {
   const hasCustomPath = Boolean(selectedJavaPath);
-  javaSelect.value = hasCustomPath ? 'custom' : 'auto';
   javaBrowseButton.textContent = hasCustomPath ? '更换' : '选择';
-
-  // 下拉框选项直接显示实际 Java 路径
-  if (javaAutoOption) {
-    javaAutoOption.textContent = autoJavaDetection?.path
-      ? javaOptionLabel(autoJavaDetection.majorVersion, autoJavaDetection.path, '（自动）')
-      : '自动查找系统 Java';
+  javaSelect.replaceChildren(new Option('按游戏版本自动选择 Java', 'auto'));
+  for (const entry of savedJavaRuntimes) {
+    javaSelect.add(new Option(javaOptionLabel(entry.majorVersion, entry.path), entry.path));
   }
-  if (javaCustomOption) {
-    javaCustomOption.textContent = hasCustomPath
-      ? javaOptionLabel(selectedJavaMajorVersion, selectedJavaPath)
-      : '手动选择路径';
-  }
+  javaSelect.add(new Option('添加 Java 路径…', 'custom'));
+  javaSelect.value = hasCustomPath ? selectedJavaPath : 'auto';
   javaSelect.title = hasCustomPath
     ? selectedJavaPath
     : autoJavaDetection?.path ?? '';
+}
+
+function rememberJavaPath(javaPath, majorVersion) {
+  if (!javaPath) return;
+  const entry = savedJavaRuntimes.find((runtime) => runtime.path === javaPath);
+  if (entry) {
+    if (Number.isInteger(majorVersion)) entry.majorVersion = majorVersion;
+  } else {
+    savedJavaRuntimes.push({ path: javaPath, ...(Number.isInteger(majorVersion) ? { majorVersion } : {}) });
+  }
 }
 
 function applyAutoJavaDetection(result) {
@@ -588,6 +593,7 @@ function applyAutoJavaDetection(result) {
     return false;
   }
   autoJavaDetection = { path: result.path, majorVersion: result.majorVersion };
+  rememberJavaPath(result.path, result.majorVersion);
   renderJavaPathSetting();
   return true;
 }
@@ -624,6 +630,7 @@ async function chooseJavaPath() {
     if (selection.canceled) return false;
     selectedJavaPath = selection.javaPath;
     selectedJavaMajorVersion = selection.majorVersion;
+    rememberJavaPath(selectedJavaPath, selectedJavaMajorVersion);
     renderJavaPathSetting();
     showToast(`已选择 Java ${selection.majorVersion}`);
     return true;
@@ -780,6 +787,8 @@ javaDownloadStartButton.addEventListener('click', async () => {
   try {
     const result = await minecraft.downloadJava(majorVersion);
     autoJavaDetectionPromise = null;
+    rememberJavaPath(result.javaPath, majorVersion);
+    renderJavaPathSetting();
     if (!selectedJavaPath) applyAutoJavaDetection({ available: true, path: result.javaPath, majorVersion });
     javaDownloadProgress.value = 100;
     javaDownloadPercent.textContent = '100%';
@@ -1733,6 +1742,7 @@ settingsDialog.addEventListener('close', async () => {
       const patch = {
         wallpaperIndex: Number(wallpaperSelect.value),
         javaPath: selectedJavaPath,
+        javaRuntimes: savedJavaRuntimes,
         gameDirectoryMode: gameDirectoryModeSelect.value,
         isolateProfiles: isolateProfilesCheck.checked,
         downloadSource: downloadSourceSelect.value,
@@ -1780,7 +1790,13 @@ javaSelect.addEventListener('change', async () => {
     renderJavaPathSetting();
     return;
   }
-  if (!selectedJavaPath && !await chooseJavaPath()) renderJavaPathSetting();
+  if (javaSelect.value === 'custom') {
+    if (!await chooseJavaPath()) renderJavaPathSetting();
+    return;
+  }
+  selectedJavaPath = javaSelect.value;
+  selectedJavaMajorVersion = savedJavaRuntimes.find((entry) => entry.path === selectedJavaPath)?.majorVersion;
+  renderJavaPathSetting();
 });
 
 javaBrowseButton.addEventListener('click', () => {

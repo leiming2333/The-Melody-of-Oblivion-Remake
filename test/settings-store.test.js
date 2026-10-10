@@ -40,6 +40,23 @@ test('Java 设置仅保留绝对路径', () => {
   assert.equal(normalizeSettings().javaPath, DEFAULT_SETTINGS.javaPath);
 });
 
+test('Java 路径列表保留旧路径、去重并在切换后持久化', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'java-history-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const java8 = path.join(root, 'java8', 'bin', 'java.exe');
+  const java21 = path.join(root, 'java21', 'bin', 'java.exe');
+  const store = new SettingsStore(path.join(root, 'settings.json'));
+  await store.update({ javaPath: java8 });
+  const state = await store.update({ javaPath: java21, javaRuntimes: [
+    { path: java8, majorVersion: 8 }, { path: java21, majorVersion: 21 },
+    { path: java8, majorVersion: 8 }, { path: 'relative/java', majorVersion: 17 }
+  ] });
+  assert.equal(state.javaRuntimes.length, 2);
+  assert.equal(state.javaRuntimes.find((entry) => entry.path === java8).majorVersion, 8);
+  await store.update({ javaPath: '' });
+  assert.deepEqual((await store.getState()).javaRuntimes, state.javaRuntimes);
+});
+
 test('游戏目录默认使用启动器本地目录且只接受受支持的模式', () => {
   assert.equal(normalizeSettings().gameDirectoryMode, 'local');
   assert.equal(normalizeSettings({ gameDirectoryMode: 'system' }).gameDirectoryMode, 'system');
@@ -79,6 +96,7 @@ test('启动设置可以持久化并自动规范内存值', async (t) => {
     isolateProfiles: true,
     javaPath: path.resolve(temporaryRoot, 'runtime', 'bin', 'java.exe'),
     gameDirectoryMode: 'local',
+    javaRuntimes: [{ path: path.resolve(temporaryRoot, 'runtime', 'bin', 'java.exe') }],
     downloadSource: 'official',
     downloadConcurrency: 12,
     memoryMb: 5120,
