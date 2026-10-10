@@ -12,12 +12,16 @@ test('startup report retains early stages and writes only the latest run', async
   metrics.mark('main-entry');
   metrics.attach(root);
   metrics.mark('window-shown');
+  metrics.recordEvent('lazy-service-loaded', { service: 'settingsStore' });
   metrics.mark('window-shown');
   await metrics.queue;
   const reportPath = path.join(root, 'logs', 'startup-latest.json');
   const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
   assert.deepEqual(report.stages.map((entry) => entry.stage), ['main-entry', 'window-shown']);
   assert.ok(report.stages.every((entry) => entry.elapsedMs >= 0 && entry.processUptimeMs >= 0));
+  assert.equal(report.events[0].event, 'lazy-service-loaded');
+  assert.equal(report.events[0].service, 'settingsStore');
+  assert.ok(report.events[0].elapsedMs >= 0);
   const next = new StartupMetrics();
   next.attach(root);
   next.mark('main-entry');

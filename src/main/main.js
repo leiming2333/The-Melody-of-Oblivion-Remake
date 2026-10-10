@@ -255,6 +255,14 @@ const services = createLazyServices({
       }
     });
   }
+}, {
+  onLoaded: (service) => {
+    startupMetrics.recordEvent('lazy-service-loaded', { service });
+    if (!app.isPackaged && !isSmokeTest) {
+      console.table([{ event: 'lazy-service-loaded', service,
+        elapsedMs: Math.round(require('node:perf_hooks').performance.now() - startupMetrics.start) }]);
+    }
+  }
 });
 function getAccountStore() { return services.accountStore; }
 function getSettingsStore() { return services.settingsStore; }

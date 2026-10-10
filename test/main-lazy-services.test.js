@@ -70,6 +70,19 @@ test('account requests share a lazy store, retry failures, and resolve auth only
   assert.deepEqual(created, ['store', 'store', 'auth', 7]);
 });
 
+test('lazy service load callback runs once after successful instantiation', () => {
+  const loaded = [];
+  let calls = 0;
+  const registry = createLazyServices({ store: () => ({ id: ++calls }) }, {
+    onLoaded: (name) => loaded.push(name)
+  });
+  assert.deepEqual(loaded, []);
+  const instance = registry.store;
+  assert.equal(registry.store, instance);
+  assert.equal(calls, 1);
+  assert.deepEqual(loaded, ['store']);
+});
+
 test('settings and update IPC resolve services on demand and preserve current update policy', async () => {
   const handlers = new Map();
   const calls = [];

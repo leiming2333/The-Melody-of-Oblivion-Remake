@@ -7,6 +7,7 @@ class StartupMetrics {
     this.startedAt = new Date().toISOString();
     this.start = performance.now();
     this.stages = [];
+    this.events = [];
     this.filePath = null;
     this.queue = Promise.resolve();
   }
@@ -15,8 +16,18 @@ class StartupMetrics {
     if (this.stages.some((entry) => entry.stage === stage)) return;
     this.stages.push({ stage, elapsedMs: Math.round(performance.now() - this.start),
       processUptimeMs: Math.round(process.uptime() * 1000) });
+    this.persist();
+  }
+
+  recordEvent(event, details = {}) {
+    this.events.push({ event, ...details, elapsedMs: Math.round(performance.now() - this.start),
+      processUptimeMs: Math.round(process.uptime() * 1000) });
+    this.persist();
+  }
+
+  persist() {
     if (!this.filePath) return;
-    const report = JSON.stringify({ startedAt: this.startedAt, stages: this.stages }, null, 2);
+    const report = JSON.stringify({ startedAt: this.startedAt, stages: this.stages, events: this.events }, null, 2);
     this.queue = this.queue.then(async () => {
       await fs.mkdir(path.dirname(this.filePath), { recursive: true });
       await fs.writeFile(this.filePath, report);
