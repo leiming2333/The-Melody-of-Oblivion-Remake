@@ -28,6 +28,7 @@ function detectLoaderType(metadata, profileId) {
     metadata?.mainClass,
     ...(metadata?.libraries ?? []).map((library) => library?.name)
   ].filter(Boolean).join(' ').toLowerCase();
+  if (description.includes('quilt')) return 'quilt';
   if (description.includes('fabric')) return 'fabric';
   if (description.includes('neoforge')) return 'neoforge';
   if (description.includes('forge')) return 'forge';

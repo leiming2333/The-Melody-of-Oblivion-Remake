@@ -251,6 +251,7 @@ async function handleLauncherUpdateFromBadge() {
 const loaderNames = Object.freeze({
   vanilla: '原版',
   fabric: 'Fabric',
+  quilt: 'Quilt',
   forge: 'Forge',
   neoforge: 'NeoForge',
   custom: '自定义'
@@ -922,6 +923,7 @@ function fallbackLocalVersionResult() {
 function fallbackLoaderResult(gameVersion, loaderType) {
   const examples = {
     fabric: ['0.16.10', '0.16.9'],
+    quilt: ['0.26.4'],
     forge: gameVersion === '1.20.1' ? ['47.3.22', '47.3.12'] : ['52.0.28'],
     neoforge: gameVersion === '1.20.1' ? [] : ['21.1.93', '21.1.90']
   };

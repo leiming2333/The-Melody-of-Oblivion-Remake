@@ -27,11 +27,12 @@ const FABRIC_META_BASES = Object.freeze({
   bmclapi: `${BMCLAPI_BASE}/fabric-meta/v2`,
   official: 'https://meta.fabricmc.net/v2'
 });
+const QUILT_META_BASE = 'https://meta.quiltmc.org/v3';
 const FORGE_MAVEN_BASE = 'https://maven.minecraftforge.net';
 const NEOFORGE_MAVEN_BASE = 'https://maven.neoforged.net/releases';
 const FORGE_METADATA_PATH = 'net/minecraftforge/forge/maven-metadata.xml';
 const NEOFORGE_METADATA_PATH = 'net/neoforged/neoforge/maven-metadata.xml';
-const LOADER_TYPES = Object.freeze(['vanilla', 'fabric', 'forge', 'neoforge']);
+const LOADER_TYPES = Object.freeze(['vanilla', 'fabric', 'forge', 'neoforge', 'quilt']);
 const VERSION_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 const LOADER_METADATA_TIMEOUT_MS = 10000;
 
@@ -108,6 +109,7 @@ function forgeLoaderVersionsFromBmclapi(gameVersion, records) {
 
 function loaderProfileCandidates(loaderType, gameVersion, loaderVersion) {
   if (loaderType === 'vanilla') return [gameVersion];
+  if (loaderType === 'quilt') return [`quilt-loader-${loaderVersion}-${gameVersion}`];
   if (loaderType === 'fabric') return [`fabric-loader-${loaderVersion}-${gameVersion}`];
   if (loaderType === 'forge') return [`${gameVersion}-forge-${loaderVersion}`];
   return [`${gameVersion}-neoforge-${loaderVersion}`, `neoforge-${loaderVersion}`];
@@ -314,12 +316,9 @@ class MinecraftLoaderManager {
     let fetched;
     let versions;
 
-    if (loaderType === 'fabric') {
+    if (loaderType === 'fabric' || loaderType === 'quilt') {
       fetched = await this.fetchMetadata(
-        this.sourceCandidates(
-          (sourceId) => `${FABRIC_META_BASES[sourceId]}/versions/loader/${encodeURIComponent(gameVersion)}`,
-          preferred.id
-        ),
+        this.metaCandidates(loaderType, `/versions/loader/${encodeURIComponent(gameVersion)}`, preferred.id),
         (response) => response.json(),
         signal
       );
@@ -401,20 +400,24 @@ class MinecraftLoaderManager {
     return { entry, source: list.source };
   }
 
-  async installFabric(gameVersion, loaderVersion, preferredSourceId, onProgress, signal) {
+  metaCandidates(loaderType, suffix, preferredSourceId) {
+    return loaderType === 'quilt'
+      ? [{ url: QUILT_META_BASE + suffix, source: { id: 'official', label: 'Quilt 官方' } }]
+      : this.sourceCandidates(sourceId => FABRIC_META_BASES[sourceId] + suffix, preferredSourceId);
+  }
+
+  async installFabric(gameVersion, loaderVersion, preferredSourceId, onProgress, signal, loaderType = 'fabric') {
+    const name = loaderType === 'quilt' ? 'Quilt' : 'Fabric';
     throwIfAborted(signal);
-    onProgress({ phase: 'preparing', message: '正在获取 Fabric 启动配置…', versionId: gameVersion });
+    onProgress({ phase: 'preparing', message: `正在获取 ${name} 启动配置…`, versionId: gameVersion });
     const fetched = await this.fetchMetadata(
-      this.sourceCandidates(
-        (sourceId) => `${FABRIC_META_BASES[sourceId]}/versions/loader/${encodeURIComponent(gameVersion)}/${encodeURIComponent(loaderVersion)}/profile/json`,
-        preferredSourceId
-      ),
+      this.metaCandidates(loaderType, `/versions/loader/${encodeURIComponent(gameVersion)}/${encodeURIComponent(loaderVersion)}/profile/json`, preferredSourceId),
       (response) => response.json(),
       signal
     );
     const profile = fetched.data;
     if (!/^[0-9A-Za-z._+-]{1,120}$/.test(profile.id) || profile.inheritsFrom !== gameVersion) {
-      throw new Error('Fabric 返回了无效的启动配置');
+      throw new Error(`${name} 返回了无效的启动配置`);
     }
 
     const profileRoot = safePath(this.gameDirectory, 'versions', profile.id);
@@ -427,10 +430,10 @@ class MinecraftLoaderManager {
       tasks,
       onProgress,
       phase: 'downloading-loader',
-      baseProgress: { versionId: profile.id, loaderType: 'fabric' },
+      baseProgress: { versionId: profile.id, loaderType },
       initialSourceId: preferredSourceId
     });
-    progressTracker.start(`准备下载 ${tasks.length} 个 Fabric 文件（${this.concurrency} 路并发）`);
+    progressTracker.start(`准备下载 ${tasks.length} 个 ${name} 文件（${this.concurrency} 路并发）`);
     await runPool(tasks, this.concurrency, async (task, _index, poolSignal) => {
       const downloaded = await downloadFile({
         ...task,
@@ -448,7 +451,7 @@ class MinecraftLoaderManager {
     }, signal);
 
     await writeInstallationMarker(this.gameDirectory, profile.id, [
-      { label: 'Fabric 启动配置', destination: safePath(profileRoot, `${profile.id}.json`) },
+      { label: `${name} 启动配置`, destination: safePath(profileRoot, `${profile.id}.json`) },
       ...tasks
     ]);
 
@@ -589,13 +592,14 @@ class MinecraftLoaderManager {
     }), { signal });
     const preferredDownloadSourceId = baseInstall.source ?? source.id;
 
-    const result = loaderType === 'fabric'
+    const result = ['fabric', 'quilt'].includes(loaderType)
       ? await this.installFabric(
         gameVersion,
         loaderVersion,
         preferredDownloadSourceId,
         onProgress,
-        signal
+        signal,
+        loaderType
       )
       : await this.installWithInstaller(
         gameVersion,
@@ -619,7 +623,7 @@ class MinecraftLoaderManager {
     };
     onProgress({
       phase: 'complete',
-      message: `${loaderType === 'fabric' ? 'Fabric' : loaderType === 'forge' ? 'Forge' : 'NeoForge'} ${loaderVersion} 安装完成`,
+      message: `${loaderType === 'fabric' ? 'Fabric' : loaderType === 'quilt' ? 'Quilt' : loaderType === 'forge' ? 'Forge' : 'NeoForge'} ${loaderVersion} 安装完成`,
       completedFiles: result.totalFiles,
       totalFiles: result.totalFiles,
       ...complete

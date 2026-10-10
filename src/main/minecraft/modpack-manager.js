@@ -68,7 +68,7 @@ function loaderFromModrinthDependencies(dependencies = {}) {
     return { loaderType: 'neoforge', loaderVersion: requireVersion(dependencies.neoforge, 'NeoForge') };
   }
   if (dependencies['quilt-loader']) {
-    throw new Error('当前版本暂不支持 Quilt 整合包');
+    return { loaderType: 'quilt', loaderVersion: requireVersion(dependencies['quilt-loader'], 'Quilt') };
   }
   return { loaderType: 'vanilla', loaderVersion: requireVersion(dependencies.minecraft) };
 }
@@ -112,7 +112,7 @@ function parseCurseForgeManifest(manifest) {
   let loaderType = 'vanilla';
   let loaderVersion = gameVersion;
   if (selected?.id) {
-    const match = String(selected.id).match(/^(fabric|forge|neoforge)-(.+)$/i);
+    const match = String(selected.id).match(/^(fabric|forge|neoforge|quilt)-(.+)$/i);
     if (!match) throw new Error(`暂不支持整合包加载器：${selected.id}`);
     loaderType = match[1].toLowerCase();
     loaderVersion = requireVersion(match[2], loaderType);
