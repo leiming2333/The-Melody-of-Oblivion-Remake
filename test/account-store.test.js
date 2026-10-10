@@ -42,13 +42,12 @@ test('signing out of Microsoft clears the active selection and retains the saved
     name: 'Player_01', accessToken: 'access', microsoftRefreshToken: 'refresh'
   });
 
-  const microsoftId = before.accounts[0].id;
-  const signedOut = await store.signOut(microsoftId);
+  const signedOut = await store.signOut(before.current.id);
   assert.equal(signedOut.current, null);
   assert.equal(signedOut.currentId, null);
   assert.equal(signedOut.accounts.length, 1);
   assert.equal((await store.getState()).current, null);
-  assert.equal((await store.getAccount(microsoftId)).microsoftRefreshToken, 'refresh');
+  assert.equal((await store.getAccount(before.current.id)).microsoftRefreshToken, 'refresh');
 });
 
 test('Microsoft 档案可解析正版皮肤地址并拒绝非官方纹理域名', () => {
@@ -129,10 +128,12 @@ test('Microsoft 登录令牌只提供给启动核心，不会暴露给页面', a
 
   const store = new AccountStore(filePath);
   const publicState = await store.getState();
-  assert.equal(publicState.current, null);
+  assert.equal(publicState.current.accessToken, undefined);
+  assert.equal(publicState.current.clientId, undefined);
+  assert.equal(publicState.current.xuid, undefined);
   assert.equal(publicState.accounts[0].accessToken, undefined);
 
-  const launchAccount = await store.getAccount('microsoft:test');
+  const launchAccount = await store.getCurrentAccount();
   assert.equal(launchAccount.accessToken, 'secret-access-token');
   assert.equal(launchAccount.clientId, 'secret-client-id');
   assert.equal(launchAccount.xuid, 'secret-xuid');
@@ -159,14 +160,16 @@ test('Microsoft 访问令牌与刷新令牌会通过系统凭据编码器落盘'
     clientId: '11111111-2222-3333-4444-555555555555',
     xuid: '123456789'
   });
-  assert.equal(publicState.current, null);
+  assert.equal(publicState.current.accessToken, undefined);
+  assert.equal(publicState.current.microsoftRefreshToken, undefined);
+  assert.equal(publicState.current.accessTokenExpiresAt, undefined);
 
   const persisted = await fs.readFile(filePath, 'utf8');
   assert.equal(persisted.includes('minecraft-access-token'), false);
   assert.equal(persisted.includes('microsoft-refresh-token'), false);
   assert.match(persisted, /encoded:/);
 
-  const privateAccount = await store.getAccount('microsoft:01234567-89ab-cdef-0123-456789abcdef');
+  const privateAccount = await store.getCurrentAccount();
   assert.equal(privateAccount.accessToken, 'minecraft-access-token');
   assert.equal(privateAccount.microsoftRefreshToken, 'microsoft-refresh-token');
 });
@@ -195,7 +198,7 @@ test('账户可以持久化、切换和删除', async (context) => {
   assert.equal(finalState.current.name, 'Alex');
 });
 
-for (const type of ['yggdrasil']) {
+for (const type of ['microsoft', 'yggdrasil']) {
   const secondSecret = type === 'microsoft' ? 'microsoftRefreshToken' : 'clientToken';
   const uuid = '01234567-89ab-cdef-0123-456789abcdef';
   const id = `${type === 'microsoft' ? 'microsoft' : 'littleskin'}:${uuid}`;

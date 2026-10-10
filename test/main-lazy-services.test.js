@@ -18,7 +18,7 @@ test('IPC registration leaves every business implementation unloaded', () => {
     const ipcMain = { handle: (name, fn) => { assert.ok(!handlers.has(name)); handlers.set(name, fn); } };
     const unexpected = () => { throw new Error('service requested during registration'); };
     const options = { ipcMain, getAccountStore: unexpected, getSettingsStore: unexpected,
-      getYggdrasilAuth: unexpected, getJavaProbeCache: unexpected, getUpdateManager: unexpected };
+      getMicrosoftAuth: unexpected, getYggdrasilAuth: unexpected, getJavaProbeCache: unexpected, getUpdateManager: unexpected };
     require('./src/main/accounts/ipc').registerAccountIpc(options);
     require('./src/main/settings/ipc').registerSettingsIpc(options);
     require('./src/main/minecraft/ipc').registerMinecraftIpc(options);
@@ -27,7 +27,7 @@ test('IPC registration leaves every business implementation unloaded', () => {
     const count = handlers.size;
     registerUpdateIpc(options);
     assert.equal(handlers.size, count);
-    for (const name of ['accounts/account-store', 'accounts/yggdrasil-auth', 'settings/settings-store',
+    for (const name of ['accounts/microsoft-auth', 'accounts/account-store', 'accounts/yggdrasil-auth', 'settings/settings-store',
       'updater/update-manager', 'minecraft/java-probe-cache', 'minecraft/java-runtime',
       'minecraft/version-metadata', 'minecraft/launch-target', 'minecraft/version-manager',
       'minecraft/downloader', 'minecraft/modpack-manager', 'minecraft/loader-manager',
@@ -83,7 +83,7 @@ test('lazy service load callback runs once after successful instantiation', () =
   assert.deepEqual(loaded, ['store']);
 });
 
-test('legacy Microsoft accounts are rejected before starting the game', async () => {
+test('an expired Microsoft refresh signs out the active account before launch', async () => {
   const handlers = new Map();
   const calls = [];
   const account = { id: 'microsoft:expired', type: 'microsoft' };
@@ -91,11 +91,15 @@ test('legacy Microsoft accounts are rejected before starting the game', async ()
     app: {}, ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
     getAccountStore: () => ({
       getCurrentAccount: async () => account,
+      signOut: async (id) => calls.push(['signOut', id])
+    }),
+    getMicrosoftAuth: () => ({
+      ensureAccount: async () => { throw Object.assign(new Error('expired'), { code: 'MICROSOFT_AUTH_EXPIRED' }); }
     })
   });
   const sender = { isDestroyed: () => false, send() {} };
-  await assert.rejects(handlers.get('minecraft:launch-version')({ sender }, '1.21.1'), /不再支持 Microsoft 登录/);
-  assert.deepEqual(calls, []);
+  await assert.rejects(handlers.get('minecraft:launch-version')({ sender }, '1.21.1'), /已自动退出/);
+  assert.deepEqual(calls, [['signOut', account.id]]);
 });
 
 test('settings and update IPC resolve services on demand and preserve current update policy', async () => {

@@ -85,16 +85,32 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     }
   }),
   accounts: Object.freeze({
+    loginMicrosoft: () => ipcRenderer.invoke('accounts:login-microsoft'),
+    cancelMicrosoft: () => ipcRenderer.invoke('accounts:cancel-microsoft'),
+    onMicrosoftCode: callback => {
+      const listener = (_event, code) => callback(code);
+      ipcRenderer.on('accounts:microsoft-code', listener);
+      return () => ipcRenderer.removeListener('accounts:microsoft-code', listener);
+    },
     getState: () => ipcRenderer.invoke('accounts:get-state'),
     addOffline: (playerName, skinModel = 'steve') => (
       ipcRenderer.invoke('accounts:add-offline', playerName, skinModel)
     ),
+    beginMicrosoft: () => ipcRenderer.invoke('accounts:begin-microsoft'),
+    completeMicrosoft: (sessionId) => ipcRenderer.invoke('accounts:complete-microsoft', sessionId),
+    copyMicrosoftCode: (code) => ipcRenderer.invoke('accounts:copy-microsoft-code', code),
+    cancelMicrosoft: (sessionId) => ipcRenderer.invoke('accounts:cancel-microsoft', sessionId),
     loginLittleSkin: (username, password) => (
       ipcRenderer.invoke('accounts:login-littleskin', username, password)
     ),
     selectLittleSkinProfile: (sessionId, profileId) => (
       ipcRenderer.invoke('accounts:select-littleskin-profile', sessionId, profileId)
     ),
+    onMicrosoftProgress: (callback) => {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on('accounts:microsoft-progress', listener);
+      return () => ipcRenderer.removeListener('accounts:microsoft-progress', listener);
+    },
     select: (accountId) => ipcRenderer.invoke('accounts:select', accountId),
     setSkinModel: (accountId, skinModel) => (
       ipcRenderer.invoke('accounts:set-skin-model', accountId, skinModel)
