@@ -116,6 +116,7 @@ function createWindow() {
     resolveShown();
     setImmediate(() => {
       if (!isSmokeTest) {
+        require('./portable-runtime').cleanupPortableRuntime().catch(() => {});
         void initializeBackgroundServices().catch((error) => console.error('后台初始化失败', error));
       }
     });

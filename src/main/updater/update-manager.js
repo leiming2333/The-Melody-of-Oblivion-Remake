@@ -458,7 +458,13 @@ class UpdateManager {
     if (this.state.status !== 'available') throw new Error('当前没有可下载的启动器更新');
     const asset = pickAsset(this.release?.assets, this.platform, this.arch);
     if (!asset) throw new Error('Release 中未找到适合当前系统的更新文件');
-    const directory = this.getUpdateDirectory();
+    let directory = this.getUpdateDirectory();
+    const portableFile = this.env.PORTABLE_EXECUTABLE_FILE;
+    const replacesPortable = this.platform === 'win32' && portableFile
+      && path.resolve(directory, asset.name).toLowerCase() === path.resolve(portableFile).toLowerCase();
+    if (replacesPortable) {
+      directory = path.join(directory, 'Melody', 'updates', normalizeVersion(this.state.availableVersion).join('.'));
+    }
     const targetPath = path.join(directory, asset.name);
     const temporaryPath = `${targetPath}.part`;
     this.setState({ status: 'downloading', progress: 0, message: '正在后台下载更新 0%' });
@@ -477,6 +483,7 @@ class UpdateManager {
       await this.verifyDownloadedFile(asset, temporaryPath);
       await this.fileSystem.rename(temporaryPath, targetPath);
       this.updateFilePath = await this.finalizeDownload(targetPath);
+      this.portableReplacement = replacesPortable ? portableFile : null;
       this.setState({
         status: 'downloaded',
         progress: 100,
@@ -538,7 +545,13 @@ class UpdateManager {
       return { installing: true };
     }
     if (this.platform === 'win32') {
-      const child = this.spawnProcess(this.updateFilePath, [], { detached: true, stdio: 'ignore' });
+      const script = this.portableReplacement
+        ? require('./windows-replacement').replacementScript(this.updateFilePath, this.portableReplacement)
+        : null;
+      const child = script
+        ? this.spawnProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+          Buffer.from(script, 'utf16le').toString('base64')], { detached: true, stdio: 'ignore', windowsHide: true })
+        : this.spawnProcess(this.updateFilePath, [], { detached: true, stdio: 'ignore' });
       child?.unref?.();
     } else {
       this.app.relaunch?.();

@@ -242,7 +242,7 @@ test('portable runtime fingerprints change when files change without a version b
   assert.notEqual(target.melodyCacheKeys.get(1), first);
   const script = await target.computeFinalScript('PORTABLE_EXECUTABLE_DIR', true, new Map([[1, root]]));
   assert.ok(script.includes(`64-${target.melodyCacheKeys.get(1)}`));
-  assert.ok(script.includes('$EXEDIR\\启动器运行文件'));
+  assert.ok(script.includes('$EXEDIR\\Melody\\runtime'));
   assert.ok(!script.includes('RMDir /r'));
   await assert.rejects(target.computeFinalScript('unexpected template', true, new Map([[1, root]])), /Unexpected/);
 });

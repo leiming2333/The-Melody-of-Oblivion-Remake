@@ -41,25 +41,25 @@
     ],
     "win": {
       "icon": "src/renderer/assets/app-icon.ico",
-      "artifactName": "The-Melody-of-Oblivion-Remake-v${version}-Windows-${arch}.${ext}",
+      "artifactName": "The-Melody-of-Oblivion-Remake-Windows-${arch}.${ext}",
       "target": [
         "portable"
       ]
     },
     "portable": {
-      "artifactName": "The-Melody-of-Oblivion-Remake-v${version}-Windows-${arch}.${ext}",
+      "artifactName": "The-Melody-of-Oblivion-Remake-Windows-${arch}.${ext}",
       "useZip": false
     },
     "linux": {
       "icon": "src/renderer/assets/app-icon.png",
-      "artifactName": "The-Melody-of-Oblivion-Remake-v${version}-Linux-${arch}.${ext}",
+      "artifactName": "The-Melody-of-Oblivion-Remake-Linux-${arch}.${ext}",
       "target": [
         "AppImage"
       ]
     },
     "mac": {
       "icon": "src/renderer/assets/app-icon.icns",
-      "artifactName": "The-Melody-of-Oblivion-Remake-v${version}-macOS-${arch}.${ext}",
+      "artifactName": "The-Melody-of-Oblivion-Remake-macOS-${arch}.${ext}",
       "target": [
         "zip"
       ]

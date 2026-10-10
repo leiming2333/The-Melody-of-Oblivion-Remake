@@ -1,8 +1,8 @@
-﻿param([string]$Executable = 'release/The-Melody-of-Oblivion-Remake-v1.5.5-Windows-x64.exe')
+﻿param([string]$Executable = 'release/The-Melody-of-Oblivion-Remake-Windows-x64.exe')
 $ErrorActionPreference = 'Stop'
 $exePath = (Resolve-Path -LiteralPath $Executable).Path
 $parent = Split-Path -Parent $exePath
-$runtimeRoot = Join-Path $parent '启动器运行文件'
+$runtimeRoot = Join-Path $parent 'Melody/runtime'
 
 function Start-Smoke([string]$PathToExe) {
   Start-Process -FilePath $PathToExe -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
@@ -53,11 +53,11 @@ $fallbackTest = Join-Path $parent 'portable-fallback-smoke'
 New-Item -ItemType Directory -Path $fallbackTest -Force | Out-Null
 $fallbackExe = Join-Path $fallbackTest 'launcher.exe'
 Copy-Item -LiteralPath $exePath -Destination $fallbackExe -Force
-$blockedRoot = Join-Path $fallbackTest '启动器运行文件'
+$blockedRoot = Join-Path $fallbackTest 'Melody'
 if (Test-Path -LiteralPath $blockedRoot -PathType Container) { throw 'Fallback fixture already contains a runtime directory' }
 Set-Content -LiteralPath $blockedRoot -Value 'Blocked directory for smoke test'
 Wait-Smoke (Start-Smoke $fallbackExe)
-$fallbackMarker = Join-Path $env:LOCALAPPDATA ('MelodyOfOblivion/portable-runtime/' + $cache.Name + '/.complete')
+$fallbackMarker = Join-Path $env:LOCALAPPDATA ('MelodyOfOblivion/runtime/' + $cache.Name + '/.complete')
 if (-not (Test-Path -LiteralPath $fallbackMarker)) { throw 'User-cache fallback failed' }
 $fallbackTime = (Get-Item -LiteralPath $fallbackMarker).LastWriteTimeUtc
 Wait-Smoke (Start-Smoke $fallbackExe)

@@ -75,9 +75,8 @@ jobs:
         if: matrix.script == 'build:linux' && matrix.arch == 'x64'
         shell: bash
         run: |
-          version=$(node -p "require('./package.json').version")
-          mv "release/The-Melody-of-Oblivion-Remake-v${version}-Linux-x86_64.AppImage" \
-             "release/The-Melody-of-Oblivion-Remake-v${version}-Linux-x64.AppImage"
+          mv "release/The-Melody-of-Oblivion-Remake-Linux-x86_64.AppImage" \
+             "release/The-Melody-of-Oblivion-Remake-Linux-x64.AppImage"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

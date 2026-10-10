@@ -14,6 +14,8 @@ Var CacheMutex
 Var CacheReady
 Var ProbeFile
 Var ProcessId
+Var RuntimeGate
+Var RuntimeLease
 Var /GLOBAL packageArch
 
 Function .onInit
@@ -55,7 +57,19 @@ Section
   ${endif}
   StrCmp $CacheKey "" failed
 
-  StrCpy $CacheRoot "$EXEDIR\启动器运行文件"
+  ; All builds coordinate extraction, launch leases, and cleanup through this gate.
+  System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\MelodyPortableRuntimeGate") p.r0'
+  StrCpy $RuntimeGate $0
+  StrCmp $RuntimeGate 0 failed
+  System::Call 'kernel32::WaitForSingleObject(p $RuntimeGate, i 60000) i.r0'
+  ${if} $0 != 0
+  ${andIf} $0 != 128
+    System::Call 'kernel32::CloseHandle(p $RuntimeGate)'
+    StrCpy $RuntimeGate 0
+    Goto failed
+  ${endif}
+
+  StrCpy $CacheRoot "$EXEDIR\Melody\runtime"
   StrCpy $CacheFinal "$CacheRoot\$CacheKey"
   Call CheckCache
   StrCmp $CacheReady 1 launch
@@ -68,7 +82,7 @@ Section
   Delete "$ProbeFile"
   Goto acquire
   fallback:
-    StrCpy $CacheRoot "$LOCALAPPDATA\MelodyOfOblivion\portable-runtime"
+    StrCpy $CacheRoot "$LOCALAPPDATA\MelodyOfOblivion\runtime"
     StrCpy $CacheFinal "$CacheRoot\$CacheKey"
     Call CheckCache
     StrCmp $CacheReady 1 launch
@@ -140,6 +154,14 @@ Section
     System::Call 'kernel32::CloseHandle(p $CacheMutex)'
 
   launch:
+    ; Keep a named object alive while the child uses this runtime. Multiple
+    ; launchers may share it; cleanup skips any object that already exists.
+    System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\MelodyPortableLive-$CacheKey") p.r0'
+    StrCpy $RuntimeLease $0
+    StrCmp $RuntimeLease 0 failed
+    System::Call 'kernel32::ReleaseMutex(p $RuntimeGate)'
+    System::Call 'kernel32::CloseHandle(p $RuntimeGate)'
+    StrCpy $RuntimeGate 0
     StrCpy $INSTDIR "$CacheFinal"
     SetOutPath "$EXEDIR"
     System::Call 'kernel32::SetEnvironmentVariableW(w "PORTABLE_EXECUTABLE_DIR", w "$EXEDIR")'
@@ -148,6 +170,7 @@ Section
     ${StdUtils.GetAllParameters} $R0 0
     ClearErrors
     ExecWait '$\"$INSTDIR\${APP_EXECUTABLE_FILENAME}$\" $R0' $0
+    System::Call 'kernel32::CloseHandle(p $RuntimeLease)'
     IfErrors failed 0
     SetErrorLevel $0
     Goto done
@@ -157,6 +180,9 @@ Section
     System::Call 'kernel32::ReleaseMutex(p $CacheMutex)'
     System::Call 'kernel32::CloseHandle(p $CacheMutex)'
   failed:
+    StrCmp $RuntimeGate 0 +3
+    System::Call 'kernel32::ReleaseMutex(p $RuntimeGate)'
+    System::Call 'kernel32::CloseHandle(p $RuntimeGate)'
     MessageBox MB_OK|MB_ICONEXCLAMATION "无法准备启动器运行文件。请检查文件夹权限、磁盘空间，或关闭启动器后重试。"
     SetErrorLevel 1
   done:

@@ -49,7 +49,7 @@ The automated test suite covers accounts, authentication, downloads, Java select
 ## Current limitations
 
 - Public multi-architecture builds are available for Windows, macOS, and Linux. Platform-specific behavior may still vary.
-- Update behavior differs per platform: Linux AppImages replace themselves and restart; the Windows portable build places the new executable next to the old one and launches it (the old file is kept); macOS downloads a zip that must be extracted and replaced manually.
+- Update behavior differs per platform: Linux AppImages replace themselves and restart; Windows stages same-name updates, replaces the EXE after exit, and keeps an `.old` backup (legacy versioned EXEs still update side by side); macOS downloads a zip that must be extracted and replaced manually.
 - LittleSkin Yggdrasil works only when both client and server are configured for the same authentication service. It does not replace a premium account or grant access to premium-only servers. See the [LittleSkin manual](https://manual.littlesk.in/yggdrasil/).
 - CurseForge installation depends on downloadable file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Packs containing restricted or unavailable files may fail.
 - Quilt modpacks are not supported.
@@ -65,7 +65,7 @@ The automated test suite covers accounts, authentication, downloads, Java select
 
 ## Run from source
 
-On Windows, the single-file portable EXE requires no installation. It extracts once into a content-fingerprinted directory under `启动器运行文件` beside the EXE, then reuses the completed runtime. Builds have separate directories; concurrent extraction is serialized and incomplete releases are not reused. If the adjacent directory is unwritable, the runtime falls back to `%LOCALAPPDATA%/MelodyOfOblivion/portable-runtime`. Old runtimes are retained; you may remove the runtime directory when all launcher processes are closed. Published builds do not require Node.js.
+The Windows single-file portable EXE requires no installation. Artifact names omit the version; application metadata and release tags retain it. The first run extracts into a content-fingerprinted directory under `Melody/runtime/` beside the EXE and subsequent runs reuse it. A shared mutex coordinates extraction, launch leases and cleanup. After the window is ready, background cleanup keeps the current runtime, one recent previous runtime, and any active runtimes; it removes other unused builds and extraction residue older than one day. Unwritable adjacent directories fall back to `%LOCALAPPDATA%/MelodyOfOblivion/runtime`. Accounts and settings remain in the existing user data location. Legacy `启动器运行文件` directories are not migrated or deleted automatically; remove them manually after all older launchers are closed. Published builds do not require Node.js.
 
 ```powershell
 npm ci

@@ -5,6 +5,8 @@ const fs = require('node:fs/promises');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const { execFile, spawn } = require('node:child_process');
+const { promisify } = require('node:util');
 const {
   GITHUB_MIRRORS,
   UpdateManager,
@@ -16,6 +18,52 @@ const {
 } = require('../src/main/updater/update-manager');
 
 const fixtureHash = 'a'.repeat(64);
+
+test('Windows replacement waits for a locked EXE and preserves the old bytes', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "melody-update-quote'-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const destination = path.join(directory, 'launcher.exe');
+  const source = path.join(directory, 'verified.exe');
+  await fs.writeFile(destination, 'previous build');
+  await fs.writeFile(source, 'new verified build');
+  const quote = (value) => `'${value.replaceAll("'", "''")}'`;
+  const holderScript = `$f = [IO.File]::Open(${quote(destination)}, 'Open', 'Read', 'Read'); [Console]::WriteLine('ready'); [Console]::ReadLine() | Out-Null; $f.Dispose()`;
+  const holder = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(holderScript, 'utf16le').toString('base64')], { windowsHide: true });
+  t.after(() => holder.kill());
+  await new Promise((resolve, reject) => {
+    holder.stdout.once('data', resolve);
+    holder.once('error', reject);
+  });
+  const { replacementScript } = require('../src/main/updater/windows-replacement');
+  // Exercise real file operations without launching a fixture as an application.
+  const script = replacementScript(source, destination).replaceAll(
+    'Start-Process -FilePath $destination -WindowStyle Hidden', "[Console]::WriteLine('relaunched')");
+  const replacement = promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.equal(await fs.readFile(destination, 'utf8'), 'previous build');
+  assert.equal(await fs.readFile(source, 'utf8'), 'new verified build');
+  holder.stdin.end('\n');
+  await replacement;
+  assert.equal(await fs.readFile(destination, 'utf8'), 'new verified build');
+  assert.equal(await fs.readFile(`${destination}.old`, 'utf8'), 'previous build');
+});
+
+test('same-name portable updates stage the download and replace only after quitting', async () => {
+  const name = 'The-Melody-of-Oblivion-Remake-Windows-x64.exe';
+  const { manager, calls } = fixture({ assets: [{ ...releaseAssets[0], name }] });
+  const directory = path.resolve('portable-update-fixture');
+  manager.env = { PORTABLE_EXECUTABLE_DIR: directory, PORTABLE_EXECUTABLE_FILE: path.join(directory, name) };
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(manager.updateFilePath, path.join(directory, 'Melody', 'updates', '9.9.9', name));
+  await manager.install();
+  assert.equal(calls.spawn[0].command, 'powershell.exe');
+  assert.equal(calls.spawn[0].options.windowsHide, true);
+  const script = Buffer.from(calls.spawn[0].args.at(-1), 'base64').toString('utf16le');
+  assert.ok(script.includes(manager.env.PORTABLE_EXECUTABLE_FILE));
+  assert.ok(script.includes(manager.updateFilePath));
+});
 
 test('failed Linux replacement restores the original executable', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-update-rollback-'));
