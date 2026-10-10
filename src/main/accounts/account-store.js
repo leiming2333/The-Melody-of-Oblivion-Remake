@@ -368,25 +368,6 @@ class AccountStore {
     });
   }
 
-  async refreshMicrosoftSkin(accountId, fetchImpl = fetch) {
-    return this.runExclusive(async () => {
-      const state = await this.read();
-      const account = state.accounts.find((item) => item.id === accountId);
-      if (!account || account.type !== 'microsoft') throw new Error('Microsoft 账户不存在');
-      const profileUuid = String(account.uuid).replaceAll('-', '');
-      const response = await fetchImpl(
-        `https://sessionserver.mojang.com/session/minecraft/profile/${profileUuid}?unsigned=false`,
-        { signal: AbortSignal.timeout(8000) }
-      );
-      if (!response.ok) throw new Error(`正版皮肤同步失败：HTTP ${response.status}`);
-      const skinUrl = skinUrlFromProfile(await response.json(), ['textures.minecraft.net']);
-      if (!skinUrl) throw new Error('正版档案没有可用皮肤');
-      account.skinUrl = skinUrl;
-      await this.write(state);
-      return this.publicState(state);
-    });
-  }
-
   async refreshYggdrasilSkin(accountId, fetchImpl = fetch) {
     return this.runExclusive(async () => {
       const state = await this.read();
@@ -408,7 +389,7 @@ class AccountStore {
 
   async refreshSkin(accountId, fetchImpl = fetch) {
     const account = await this.getAccount(accountId);
-    if (account?.type === 'microsoft') return this.refreshMicrosoftSkin(accountId, fetchImpl);
+    if (account?.type === 'microsoft') throw new Error('Microsoft 登录接入已移除，请选择离线或 LittleSkin 账户');
     if (account?.type === 'yggdrasil') return this.refreshYggdrasilSkin(accountId, fetchImpl);
     throw new Error('当前账户不支持在线皮肤同步');
   }

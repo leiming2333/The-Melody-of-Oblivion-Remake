@@ -18,7 +18,7 @@ test('IPC registration leaves every business implementation unloaded', () => {
     const ipcMain = { handle: (name, fn) => { assert.ok(!handlers.has(name)); handlers.set(name, fn); } };
     const unexpected = () => { throw new Error('service requested during registration'); };
     const options = { ipcMain, getAccountStore: unexpected, getSettingsStore: unexpected,
-      getMicrosoftAuth: unexpected, getYggdrasilAuth: unexpected, getJavaProbeCache: unexpected, getUpdateManager: unexpected };
+      getYggdrasilAuth: unexpected, getJavaProbeCache: unexpected, getUpdateManager: unexpected };
     require('./src/main/accounts/ipc').registerAccountIpc(options);
     require('./src/main/settings/ipc').registerSettingsIpc(options);
     require('./src/main/minecraft/ipc').registerMinecraftIpc(options);
@@ -27,7 +27,7 @@ test('IPC registration leaves every business implementation unloaded', () => {
     const count = handlers.size;
     registerUpdateIpc(options);
     assert.equal(handlers.size, count);
-    for (const name of ['accounts/microsoft-auth', 'accounts/account-store', 'accounts/yggdrasil-auth', 'settings/settings-store',
+    for (const name of ['accounts/account-store', 'accounts/yggdrasil-auth', 'settings/settings-store',
       'updater/update-manager', 'minecraft/java-probe-cache', 'minecraft/java-runtime',
       'minecraft/version-metadata', 'minecraft/launch-target', 'minecraft/version-manager',
       'minecraft/downloader', 'minecraft/modpack-manager', 'minecraft/loader-manager',

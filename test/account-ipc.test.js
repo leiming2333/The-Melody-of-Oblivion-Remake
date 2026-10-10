@@ -19,63 +19,19 @@ function accountIpc(accountStore, yggdrasilAuth, options = {}) {
   return { handlers, invoke: (channel, sender, ...args) => handlers.get(channel)({ sender }, ...args) };
 }
 
-test('Microsoft account IPC forwards owned login sessions, progress and cancellation', async () => {
-  const calls = [];
-  const copied = [];
-  const opened = [];
-  const sent = [];
-  let destroyed = false;
-  const sender = new EventEmitter();
-  sender.id = 7;
-  sender.isDestroyed = () => destroyed;
-  sender.send = (...args) => sent.push(args);
-  const loginResult = {
-    sessionId: 'microsoft-session',
-    userCode: ' ab12-cd34 ',
-    verificationUri: 'https://microsoft.com/devicelogin'
-  };
-  const accountState = { currentId: 'microsoft:player' };
-  const cancelResult = { cancelled: true };
-  const { handlers, invoke } = accountIpc({}, undefined, {
-    microsoftAuth: {
-      begin: async (ownerId) => { calls.push(['begin', ownerId]); return loginResult; },
-      complete: async (sessionId, ownerId, onProgress) => {
-        calls.push(['complete', sessionId, ownerId]);
-        onProgress({ phase: 'waiting', message: 'Waiting for authorization' });
-        destroyed = true;
-        onProgress({ phase: 'saving', message: 'Finished after window closed' });
-        destroyed = false;
-        return accountState;
-      },
-      cancel: (sessionId, ownerId) => { calls.push(['cancel', sessionId, ownerId]); return cancelResult; },
-      cancelOwner: (ownerId) => calls.push(['cancelOwner', ownerId])
-    },
-    clipboard: { writeText: (code) => copied.push(code) },
-    shell: { openExternal: async (url) => opened.push(url) }
+test('account IPC registers supported channels lazily without Microsoft login', () => {
+  let constructed = 0;
+  const { handlers } = accountIpc(undefined, undefined, {
+    getAccountStore: () => { constructed++; return {}; },
+    getYggdrasilAuth: () => { constructed++; return {}; }
   });
-  for (const channel of ['begin-microsoft', 'complete-microsoft', 'copy-microsoft-code', 'cancel-microsoft', 'get-state', 'add-offline', 'login-littleskin', 'select-littleskin-profile', 'select', 'set-skin-model', 'rename', 'refresh-skin', 'remove']) {
-    assert.equal(handlers.has(`accounts:${channel}`), true);
+  assert.equal(constructed, 0);
+  for (const channel of ['begin-microsoft', 'complete-microsoft', 'copy-microsoft-code', 'login-microsoft', 'cancel-microsoft']) {
+    assert.equal(handlers.has('accounts:' + channel), false);
   }
-  assert.equal(await invoke('accounts:begin-microsoft', sender), loginResult);
-  assert.deepEqual(copied, ['AB12-CD34']);
-  assert.deepEqual(opened, [loginResult.verificationUri]);
-  assert.equal(await invoke('accounts:complete-microsoft', sender, loginResult.sessionId), accountState);
-  assert.deepEqual(sent, [[
-    'accounts:microsoft-progress',
-    { sessionId: loginResult.sessionId, phase: 'waiting', message: 'Waiting for authorization' }
-  ]]);
-  assert.deepEqual(invoke('accounts:copy-microsoft-code', sender, ' xy98-zy76 '), { copied: true });
-  assert.deepEqual(copied, ['AB12-CD34', 'XY98-ZY76']);
-  assert.throws(() => invoke('accounts:copy-microsoft-code', sender, 'invalid!'), /登录代码无效/);
-  assert.equal(invoke('accounts:cancel-microsoft', sender, loginResult.sessionId), cancelResult);
-  destroyed = true;
-  sender.emit('destroyed');
-  assert.deepEqual(calls, [
-    ['begin', 7],
-    ['complete', loginResult.sessionId, 7],
-    ['cancel', loginResult.sessionId, 7],
-    ['cancelOwner', 7]
-  ]);
+  for (const channel of ['get-state', 'add-offline', 'login-littleskin', 'select-littleskin-profile', 'select', 'remove']) {
+    assert.equal(handlers.has('accounts:' + channel), true);
+  }
 });
 
 test('offline account IPC preserves encrypted historical Microsoft accounts and public redaction', async (t) => {
@@ -105,7 +61,9 @@ test('offline account IPC preserves encrypted historical Microsoft accounts and 
   assert.equal(created.current.skinModel, 'alex');
   assert.equal(created.accounts.length, 2);
   const offlineId = created.currentId;
-  const selected = await invoke('accounts:select', {}, microsoftId);
+  await assert.rejects(invoke('accounts:select', {}, microsoftId), /登录接入已移除/);
+  const selected = await invoke('accounts:get-state', {});
+  await assert.rejects(store.refreshSkin(microsoftId, () => { throw new Error('Unexpected network request'); }), /登录接入已移除/);
   for (const field of ['accessToken', 'microsoftRefreshToken', 'microsoftClientId', 'clientId', 'accessTokenExpiresAt', 'xuid']) {
     assert.equal(selected.current[field], undefined);
     assert.equal(selected.accounts.find((account) => account.id === microsoftId)[field], undefined);
@@ -144,50 +102,36 @@ test('LittleSkin IPC keeps login, profile selection and sender-owned cancellatio
   ]);
 });
 
-test('preload exposes callable Microsoft bridges and removes progress listeners on unsubscribe', async () => {
+test('preload exposes offline and LittleSkin bridges without Microsoft APIs', async () => {
   let environment;
   const calls = [];
   const ipcRenderer = new EventEmitter();
   ipcRenderer.invoke = (...args) => calls.push(args);
   const source = await fs.readFile(path.join(__dirname, '../src/preload/preload.js'), 'utf8');
-  vm.runInNewContext(source, {
-    require: (name) => {
-      assert.equal(name, 'electron');
-      return {
-        contextBridge: { exposeInMainWorld: (_name, value) => { environment = value; } },
-        ipcRenderer,
-        webUtils: {}
-      };
-    }
-  });
-  for (const method of ['beginMicrosoft', 'completeMicrosoft', 'copyMicrosoftCode', 'cancelMicrosoft', 'onMicrosoftProgress']) {
-    assert.equal(typeof environment.accounts[method], 'function');
+  vm.runInNewContext(source, { require: () => ({
+    contextBridge: { exposeInMainWorld: (_name, value) => { environment = value; } },
+    ipcRenderer, webUtils: {}
+  }) });
+  for (const method of ['loginMicrosoft', 'onMicrosoftCode', 'beginMicrosoft', 'completeMicrosoft', 'copyMicrosoftCode', 'cancelMicrosoft', 'onMicrosoftProgress']) {
+    assert.equal(environment.accounts[method], undefined);
   }
-  environment.accounts.beginMicrosoft();
-  environment.accounts.completeMicrosoft('session');
-  environment.accounts.copyMicrosoftCode('AB12-CD34');
-  environment.accounts.cancelMicrosoft('session');
   environment.accounts.addOffline('Player_01', 'alex');
   environment.accounts.loginLittleSkin('player@example.com', 'password');
   environment.accounts.selectLittleSkinProfile('session', 'profile');
-  environment.accounts.refreshSkin('microsoft:legacy');
   assert.deepEqual(calls, [
-    ['accounts:begin-microsoft'],
-    ['accounts:complete-microsoft', 'session'],
-    ['accounts:copy-microsoft-code', 'AB12-CD34'],
-    ['accounts:cancel-microsoft', 'session'],
     ['accounts:add-offline', 'Player_01', 'alex'],
     ['accounts:login-littleskin', 'player@example.com', 'password'],
-    ['accounts:select-littleskin-profile', 'session', 'profile'],
-    ['accounts:refresh-skin', 'microsoft:legacy']
+    ['accounts:select-littleskin-profile', 'session', 'profile']
   ]);
-  const progress = [];
-  const unsubscribe = environment.accounts.onMicrosoftProgress((event) => progress.push(event));
-  const event = { sessionId: 'session', phase: 'waiting' };
-  ipcRenderer.emit('accounts:microsoft-progress', {}, event);
-  assert.deepEqual(progress, [event]);
-  unsubscribe();
-  assert.equal(ipcRenderer.listenerCount('accounts:microsoft-progress'), 0);
-  ipcRenderer.emit('accounts:microsoft-progress', {}, { phase: 'saving' });
-  assert.equal(progress.length, 1);
+});
+
+test('launch rejects historical Microsoft accounts before loading game services', async () => {
+  const { registerMinecraftIpc } = require('../src/main/minecraft/ipc');
+  const handlers = new Map();
+  registerMinecraftIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    accountStore: { getCurrentAccount: async () => ({ type: 'microsoft' }) },
+    settingsStore: { getState: () => { throw new Error('Unexpected settings read'); } }
+  });
+  await assert.rejects(handlers.get('minecraft:launch-version')({ sender: {} }, '1.21'), /登录接入已移除/);
 });
