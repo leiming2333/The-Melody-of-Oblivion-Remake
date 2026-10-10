@@ -1,0 +1,70 @@
+name: Native package smoke
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/verify-packaged.cjs'
+      - 'package*.json'
+      - '.github/workflows/package-smoke.yml'
+permissions:
+  contents: read
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: build:win
+            arch: x64
+          - os: ubuntu-latest
+            script: build:linux
+            arch: x64
+          - os: macos-15-intel
+            script: build:mac
+            arch: x64
+          - os: macos-15
+            script: build:mac
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run ${{ matrix.script }} -- --${{ matrix.arch }}
+      - name: Windows portable smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $artifact = Get-ChildItem -LiteralPath release -Filter *.exe | Select-Object -First 1
+          if (-not $artifact) { throw 'Missing portable EXE' }
+          node scripts/verify-packaged.cjs $artifact.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Linux AppImage smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact=$(find release -maxdepth 1 -name '*.AppImage' -print -quit)
+          test -n "$artifact"
+          chmod +x "$artifact"
+          # Extract the actual AppImage to avoid a FUSE requirement on CI.
+          "$artifact" --appimage-extract >/dev/null
+          xvfb-run -a node scripts/verify-packaged.cjs squashfs-root/AppRun --no-sandbox
+      - name: macOS ZIP smoke
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact=$(find release -maxdepth 1 -name '*.zip' -print -quit)
+          test -n "$artifact"
+          unzip -q "$artifact" -d package-smoke
+          binary=$(find package-smoke -path '*/Contents/MacOS/*' -type f -print -quit)
+          test -n "$binary"
+          node scripts/verify-packaged.cjs "$binary"
