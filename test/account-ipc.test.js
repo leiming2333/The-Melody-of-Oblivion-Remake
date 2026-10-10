@@ -19,12 +19,12 @@ function accountIpc(accountStore, yggdrasilAuth, options = {}) {
   return { handlers, invoke: (channel, sender, ...args) => handlers.get(channel)({ sender }, ...args) };
 }
 
-test('Microsoft login IPC is absent while account management remains available', () => {
+test('Microsoft device-code IPC is registered while old token-passing channels stay absent', () => {
   const { handlers } = accountIpc({});
-  for (const channel of ['begin-microsoft', 'complete-microsoft', 'copy-microsoft-code', 'cancel-microsoft']) {
+  for (const channel of ['begin-microsoft', 'complete-microsoft', 'copy-microsoft-code']) {
     assert.equal(handlers.has(`accounts:${channel}`), false);
   }
-  for (const channel of ['get-state', 'add-offline', 'login-littleskin', 'select', 'remove']) {
+  for (const channel of ['get-state', 'add-offline', 'login-littleskin', 'login-microsoft', 'cancel-microsoft', 'select', 'remove']) {
     assert.equal(handlers.has(`accounts:${channel}`), true);
   }
 });
@@ -95,7 +95,7 @@ test('LittleSkin IPC keeps login, profile selection and sender-owned cancellatio
   ]);
 });
 
-test('preload exposes offline and LittleSkin bridges without Microsoft login', async () => {
+test('preload exposes Microsoft login and removable device-code events without token-passing APIs', async () => {
   let environment;
   const calls = [];
   const ipcRenderer = new EventEmitter();
@@ -111,18 +111,44 @@ test('preload exposes offline and LittleSkin bridges without Microsoft login', a
       };
     }
   });
-  for (const method of ['beginMicrosoft', 'completeMicrosoft', 'copyMicrosoftCode', 'cancelMicrosoft', 'onMicrosoftProgress']) {
+  for (const method of ['beginMicrosoft', 'completeMicrosoft', 'copyMicrosoftCode', 'onMicrosoftProgress']) {
     assert.equal(environment.accounts[method], undefined);
   }
+  environment.accounts.loginMicrosoft();
+  environment.accounts.cancelMicrosoft();
+  let received;
+  const unsubscribe = environment.accounts.onMicrosoftCode(code => { received = code; });
+  ipcRenderer.emit('accounts:microsoft-code', {}, { userCode: 'PUBLIC' });
+  assert.equal(received.userCode, 'PUBLIC');
+  unsubscribe();
+  assert.equal(ipcRenderer.listenerCount('accounts:microsoft-code'), 0);
   environment.accounts.addOffline('Player_01', 'alex');
   environment.accounts.loginLittleSkin('player@example.com', 'password');
   environment.accounts.selectLittleSkinProfile('session', 'profile');
   environment.accounts.refreshSkin('microsoft:legacy');
   assert.deepEqual(calls, [
+    ['accounts:login-microsoft'],
+    ['accounts:cancel-microsoft'],
     ['accounts:add-offline', 'Player_01', 'alex'],
     ['accounts:login-littleskin', 'player@example.com', 'password'],
     ['accounts:select-littleskin-profile', 'session', 'profile'],
     ['accounts:refresh-skin', 'microsoft:legacy']
   ]);
   assert.equal(ipcRenderer.listenerCount('accounts:microsoft-progress'), 0);
+});
+
+test('Microsoft login IPC binds cancellation to its sender and cleans up listeners', async () => {
+  const calls = [];
+  const sender = new EventEmitter();
+  sender.id = 9;
+  sender.isDestroyed = () => false;
+  sender.send = (...args) => calls.push(args);
+  const { invoke } = accountIpc({}, undefined, { getMicrosoftAuth: () => ({
+    login: async (owner, notify) => { assert.equal(owner, 9); notify({ userCode: 'PUBLIC' }); return { currentId: 'ms' }; },
+    cancelOwner: owner => calls.push(['cancel', owner])
+  }) });
+  assert.deepEqual(await invoke('accounts:login-microsoft', sender), { currentId: 'ms' });
+  assert.equal(sender.listenerCount('destroyed'), 0);
+  await invoke('accounts:cancel-microsoft', sender);
+  assert.deepEqual(calls, [['accounts:microsoft-code', { userCode: 'PUBLIC' }], ['cancel', 9]]);
 });
