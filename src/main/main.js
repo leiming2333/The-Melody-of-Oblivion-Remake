@@ -40,10 +40,6 @@ ipcMain.handle('startup:when-window-shown', (event) => {
   return windowReadiness.get(BrowserWindow.fromWebContents(event.sender)) ?? Promise.resolve();
 });
 
-ipcMain.on('diagnostics:error', (_event, message) => {
-  if (typeof message === 'string') void services.errorLog.record(message);
-});
-
 ipcMain.handle('shell:open-external', async (_event, url) => {
   const target = String(url ?? '');
   if (/^https?:\/\//i.test(target)) {
@@ -264,6 +260,11 @@ const services = createLazyServices({
     }
   }
 });
+
+ipcMain.on('diagnostics:error', (_event, message) => {
+  if (typeof message === 'string') void services.errorLog.record(message);
+});
+
 function getAccountStore() { return services.accountStore; }
 function getSettingsStore() { return services.settingsStore; }
 function getMicrosoftAuth() { return services.microsoftAuth; }
