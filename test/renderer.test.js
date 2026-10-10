@@ -139,10 +139,14 @@ test('startup paints before background initialization and missing Java stays non
   const frames = [];
   const timers = [];
   const events = [];
+  let showWindow;
   const context = {
     requestAnimationFrame: (callback) => frames.push(callback),
     setTimeout: (callback) => timers.push(callback),
-    environment: { diagnostics: { markStartup: (stage) => events.push(stage) } },
+    environment: { diagnostics: {
+      markStartup: (stage) => events.push(stage),
+      whenWindowShown: () => new Promise((resolve) => { showWindow = resolve; })
+    } },
     loadAccountState: async () => events.push('accounts-start'),
     loadLocalProfiles: async () => events.push('profiles-start'),
     loadLauncherSettings: async () => events.push('settings-start'),
@@ -151,17 +155,21 @@ test('startup paints before background initialization and missing Java stays non
     window: { localStorage: { getItem: () => null } },
     JAVA_CHECK_SKIP_KEY: 'java-skip',
     javaCheckDialog: { showModal: () => { throw new Error('Startup must not open a modal'); } },
-    showToast: (text) => events.push(text)
+    showToast: (text) => events.push(text),
+    updaterApi: undefined
   };
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('async function performJavaCheck()'),
     source.indexOf("javaCheckSkipButton.addEventListener")), context);
-  vm.runInContext(source.slice(source.indexOf('requestAnimationFrame(() => requestAnimationFrame(() =>')), context);
+  vm.runInContext(source.slice(source.indexOf('requestAnimationFrame(() => requestAnimationFrame(async () =>')), context);
   assert.deepEqual(events, []);
   frames.shift()();
   assert.deepEqual(events, []);
-  frames.shift()();
+  const painted = frames.shift()();
   assert.deepEqual(events, ['renderer-painted']);
+  assert.equal(timers.length, 0);
+  showWindow();
+  await painted;
   timers.shift()();
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(events.indexOf('renderer-painted') < events.indexOf('java-start'));

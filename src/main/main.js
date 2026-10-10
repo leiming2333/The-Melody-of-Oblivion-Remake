@@ -10,6 +10,8 @@ const iconFile = process.platform === 'win32' ? 'app-icon.ico'
   : process.platform === 'darwin' ? 'app-icon.icns'
   : 'app-icon.png';
 const appIconPath = path.join(__dirname, '../renderer/assets', iconFile);
+const windowReadiness = new WeakMap();
+let backgroundInitialized = false;
 if (isSmokeTest) {
   app.disableHardwareAcceleration();
   app.setPath('userData', path.join(app.getPath('temp'), 'melody-of-oblivion-smoke'));
@@ -30,6 +32,10 @@ ipcMain.on('startup:stage', (_event, stage) => {
   if (['renderer-painted', 'settings-loaded', 'accounts-loaded', 'profiles-loaded', 'java-detected'].includes(stage)) {
     startupMetrics.mark(stage);
   }
+});
+
+ipcMain.handle('startup:when-window-shown', (event) => {
+  return windowReadiness.get(BrowserWindow.fromWebContents(event.sender)) ?? Promise.resolve();
 });
 
 ipcMain.handle('shell:open-external', async (_event, url) => {
@@ -87,6 +93,8 @@ function createWindow() {
     }
   });
 
+  let resolveShown;
+  windowReadiness.set(mainWindow, new Promise((resolve) => { resolveShown = resolve; }));
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
   mainWindow.once('ready-to-show', () => {
@@ -98,6 +106,12 @@ function createWindow() {
       mainWindow.show();
       startupMetrics.mark('window-shown');
     }
+    resolveShown();
+    setImmediate(() => {
+      if (!isSmokeTest) {
+        void initializeBackgroundServices().catch((error) => console.error('后台初始化失败', error));
+      }
+    });
   });
 
   if (isSmokeTest) {
@@ -211,7 +225,18 @@ function getYggdrasilAuth() { return services.yggdrasilAuth; }
 function getJavaProbeCache() { return services.javaProbeCache; }
 function getUpdateManager() { return services.updateManager; }
 
-app.whenReady().then(async () => {
+async function initializeBackgroundServices() {
+  if (backgroundInitialized) return;
+  backgroundInitialized = true;
+  const settings = await getSettingsStore().getState();
+  if (settings.launcherUpdatePolicy !== 'off') {
+    setTimeout(() => {
+      void getUpdateManager().check({ autoDownload: settings.launcherUpdatePolicy === 'auto' });
+    }, 5000);
+  }
+}
+
+app.whenReady().then(() => {
   startupMetrics.attach(app.getPath('userData'));
   startupMetrics.mark('electron-ready');
   require('./accounts/ipc').registerAccountIpc({ app, ipcMain, getAccountStore, getYggdrasilAuth });
@@ -222,13 +247,6 @@ app.whenReady().then(async () => {
   require('./updater/ipc').registerUpdateIpc({ ipcMain, getUpdateManager });
   createWindow();
   startupMetrics.mark('window-created');
-
-  const settings = await getSettingsStore().getState();
-  if (settings.launcherUpdatePolicy !== 'off') {
-    setTimeout(() => {
-      void getUpdateManager().check({ autoDownload: settings.launcherUpdatePolicy === 'auto' });
-    }, 5000);
-  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

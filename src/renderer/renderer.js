@@ -1746,9 +1746,6 @@ updaterApi?.onState?.((state) => renderLauncherUpdate(state));
 updaterApi?.onRequestShowSettings?.(() => {
   void openLauncherUpdateSettings();
 });
-updaterApi?.getState?.().then(renderLauncherUpdate).catch((error) => {
-  renderLauncherUpdate({ status: 'error', message: readableError(error), progress: 0 });
-});
 
 document.querySelector('#versionButton').addEventListener('click', () => {
   versionDialog.showModal();
@@ -2188,9 +2185,13 @@ javaCheckDownloadButton.addEventListener('click', () => {
 });
 
 // Paint the home screen before starting filesystem scans and background setup.
-requestAnimationFrame(() => requestAnimationFrame(() => {
+requestAnimationFrame(() => requestAnimationFrame(async () => {
   environment?.diagnostics?.markStartup('renderer-painted');
+  await environment?.diagnostics?.whenWindowShown?.();
   setTimeout(() => {
+    updaterApi?.getState?.().then(renderLauncherUpdate).catch((error) => {
+      renderLauncherUpdate({ status: 'error', message: readableError(error), progress: 0 });
+    });
     void loadAccountState().then(() => environment?.diagnostics?.markStartup('accounts-loaded'));
     void loadLocalProfiles().then(() => environment?.diagnostics?.markStartup('profiles-loaded'))
       .catch((error) => showToast(`版本检查失败：${readableError(error)}`));
