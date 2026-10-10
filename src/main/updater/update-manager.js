@@ -275,13 +275,7 @@ class UpdateManager {
   start() {
     if (this.started) return;
     this.started = true;
-    this.ipcMain.handle('updater:get-state', () => this.publicState());
-    this.ipcMain.handle('updater:check', async () => {
-      const settings = await this.settingsStore?.getState();
-      return this.check({ autoDownload: settings ? settings.launcherUpdatePolicy === 'auto' : true });
-    });
-    this.ipcMain.handle('updater:download', () => this.download());
-    this.ipcMain.handle('updater:install', () => this.install());
+    require('./ipc').registerUpdateIpc({ ipcMain: this.ipcMain, getUpdateManager: () => this });
   }
 
   async fetchLatestRelease() {

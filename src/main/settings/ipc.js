@@ -1,11 +1,13 @@
 const path = require('node:path');
-const { detectJava, javaMajorVersion } = require('../minecraft/java-runtime');
 
-function registerSettingsIpc({ BrowserWindow, dialog, ipcMain, settingsStore, javaProbeCache }) {
-  ipcMain.handle('settings:get-state', () => settingsStore.getState());
-  ipcMain.handle('settings:update', (_event, patch = {}) => settingsStore.update(patch));
+function registerSettingsIpc({ BrowserWindow, dialog, ipcMain, settingsStore, javaProbeCache,
+  getSettingsStore = () => settingsStore, getJavaProbeCache = () => javaProbeCache }) {
+  ipcMain.handle('settings:get-state', () => getSettingsStore().getState());
+  ipcMain.handle('settings:update', (_event, patch = {}) => getSettingsStore().update(patch));
   ipcMain.handle('settings:detect-java', async (_event, options = {}) => {
-    const settings = await settingsStore.getState();
+    const { detectJava, javaMajorVersion } = require('../minecraft/java-runtime');
+    const javaProbeCache = getJavaProbeCache();
+    const settings = await getSettingsStore().getState();
     return detectJava(settings.javaPath, javaProbeCache
       ? (candidate) => javaProbeCache.probe(candidate, { force: options.force === true })
       : javaMajorVersion);
@@ -26,6 +28,7 @@ function registerSettingsIpc({ BrowserWindow, dialog, ipcMain, settingsStore, ja
     if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
 
     const javaPath = path.resolve(selection.filePaths[0]);
+    const { javaMajorVersion } = require('../minecraft/java-runtime');
     const majorVersion = await javaMajorVersion(javaPath);
     if (!Number.isInteger(majorVersion)) {
       throw new Error('所选文件不是可用的 Java，请选择 Java 安装目录 bin 文件夹中的 java.exe');

@@ -3,14 +3,7 @@ const startupMetrics = new StartupMetrics();
 startupMetrics.mark('main-entry');
 const path = require('node:path');
 const { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, shell } = require('electron');
-const { registerAccountIpc } = require('./accounts/ipc');
-const { AccountStore } = require('./accounts/account-store');
-const { YggdrasilAuthManager } = require('./accounts/yggdrasil-auth');
-const { registerMinecraftIpc } = require('./minecraft/ipc');
-const { registerSettingsIpc } = require('./settings/ipc');
-const { SettingsStore } = require('./settings/settings-store');
-const { UpdateManager } = require('./updater/update-manager');
-const { JavaProbeCache } = require('./minecraft/java-probe-cache');
+const { createLazyServices } = require('./lazy-services');
 
 const isSmokeTest = process.argv.includes('--smoke-test');
 const iconFile = process.platform === 'win32' ? 'app-icon.ico'
@@ -136,95 +129,104 @@ function createSecretCodec() {
   };
 }
 
+const services = createLazyServices({
+  accountStore: () => {
+    const { AccountStore } = require('./accounts/account-store');
+    return new AccountStore(path.join(app.getPath('userData'), 'accounts.json'), { secretCodec: createSecretCodec() });
+  },
+  settingsStore: () => {
+    const { SettingsStore } = require('./settings/settings-store');
+    return new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
+  },
+  yggdrasilAuth: () => {
+    const { YggdrasilAuthManager } = require('./accounts/yggdrasil-auth');
+    return new YggdrasilAuthManager({ accountStore: getAccountStore() });
+  },
+  javaProbeCache: () => {
+    const { JavaProbeCache } = require('./minecraft/java-probe-cache');
+    return new JavaProbeCache(path.join(app.getPath('userData'), 'java-cache.json'));
+  },
+  updateManager: () => {
+    const { UpdateManager } = require('./updater/update-manager');
+    return new UpdateManager({
+      app,
+      BrowserWindow,
+      ipcMain,
+      settingsStore: getSettingsStore(),
+      shell,
+      onUpdateAvailable: (version, releaseUrl, autoDownload) => {
+        const detail = autoDownload
+          ? `新版本 v${version} 已发布，启动器正在后台下载更新。`
+          : `新版本 v${version} 已发布，可在「启动器设置」中查看更新日志并下载。`;
+        if (showLauncherUpdateNotification('发现启动器新版本', detail)) {
+          return;
+        }
+        const parentWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
+        dialog.showMessageBox(parentWindow, {
+          type: 'info',
+          title: '启动器更新',
+          message: `发现新版本 v${version}`,
+          detail: autoDownload
+            ? '启动器已在后台下载更新，完成后可在「启动器设置」中重启安装。'
+            : '可在「启动器设置」中查看更新日志并手动下载安装。',
+          buttons: ['稍后提醒', '查看发布页'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true
+        }).then(({ response }) => {
+          if (response === 1 && releaseUrl) {
+            shell.openExternal(releaseUrl);
+          }
+        }).catch(() => {});
+      },
+      onUpdateReady: (version, installAction) => {
+        const detail = installAction === 'open-folder'
+          ? `新版本 v${version} 已下载完成，请解压压缩包并替换旧版本。`
+          : `新版本 v${version} 已下载完成，重启启动器即可完成更新。`;
+        if (showLauncherUpdateNotification('启动器更新已就绪', detail)) {
+          return;
+        }
+        const parentWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
+        dialog.showMessageBox(parentWindow, {
+          type: 'info',
+          title: '启动器更新',
+          message: '更新已就绪',
+          detail,
+          buttons: ['稍后提醒', '打开设置'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true
+        }).then(({ response }) => {
+          if (response === 1) {
+            focusLauncherUpdateSettings();
+          }
+        }).catch(() => {});
+      }
+    });
+  }
+});
+function getAccountStore() { return services.accountStore; }
+function getSettingsStore() { return services.settingsStore; }
+function getYggdrasilAuth() { return services.yggdrasilAuth; }
+function getJavaProbeCache() { return services.javaProbeCache; }
+function getUpdateManager() { return services.updateManager; }
+
 app.whenReady().then(async () => {
   startupMetrics.attach(app.getPath('userData'));
   startupMetrics.mark('electron-ready');
-  const javaProbeCache = new JavaProbeCache(path.join(app.getPath('userData'), 'java-cache.json'));
-  const settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
-  const accountStore = new AccountStore(
-    path.join(app.getPath('userData'), 'accounts.json'),
-    { secretCodec: createSecretCodec() }
-  );
-  const yggdrasilAuth = new YggdrasilAuthManager({ accountStore });
-  registerAccountIpc({
-    app,
-    ipcMain,
-    accountStore,
-    yggdrasilAuth
+  require('./accounts/ipc').registerAccountIpc({ app, ipcMain, getAccountStore, getYggdrasilAuth });
+  require('./settings/ipc').registerSettingsIpc({ BrowserWindow, dialog, ipcMain, getSettingsStore, getJavaProbeCache });
+  require('./minecraft/ipc').registerMinecraftIpc({
+    app, ipcMain, shell, getSettingsStore, getAccountStore, getYggdrasilAuth, getJavaProbeCache
   });
-  registerSettingsIpc({ BrowserWindow, dialog, ipcMain, settingsStore, javaProbeCache });
-  registerMinecraftIpc({
-    app,
-    ipcMain,
-    shell,
-    settingsStore,
-    accountStore,
-    yggdrasilAuth,
-    javaProbeCache
-  });
-  const updateManager = new UpdateManager({
-    app,
-    BrowserWindow,
-    ipcMain,
-    settingsStore,
-    shell,
-    onUpdateAvailable: (version, releaseUrl, autoDownload) => {
-      const detail = autoDownload
-        ? `新版本 v${version} 已发布，启动器正在后台下载更新。`
-        : `新版本 v${version} 已发布，可在「启动器设置」中查看更新日志并下载。`;
-      if (showLauncherUpdateNotification('发现启动器新版本', detail)) {
-        return;
-      }
-      const parentWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
-      dialog.showMessageBox(parentWindow, {
-        type: 'info',
-        title: '启动器更新',
-        message: `发现新版本 v${version}`,
-        detail: autoDownload
-          ? '启动器已在后台下载更新，完成后可在「启动器设置」中重启安装。'
-          : '可在「启动器设置」中查看更新日志并手动下载安装。',
-        buttons: ['稍后提醒', '查看发布页'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true
-      }).then(({ response }) => {
-        if (response === 1 && releaseUrl) {
-          shell.openExternal(releaseUrl);
-        }
-      }).catch(() => {});
-    },
-    onUpdateReady: (version, installAction) => {
-      const detail = installAction === 'open-folder'
-        ? `新版本 v${version} 已下载完成，请解压压缩包并替换旧版本。`
-        : `新版本 v${version} 已下载完成，重启启动器即可完成更新。`;
-      if (showLauncherUpdateNotification('启动器更新已就绪', detail)) {
-        return;
-      }
-      const parentWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
-      dialog.showMessageBox(parentWindow, {
-        type: 'info',
-        title: '启动器更新',
-        message: '更新已就绪',
-        detail,
-        buttons: ['稍后提醒', '打开设置'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true
-      }).then(({ response }) => {
-        if (response === 1) {
-          focusLauncherUpdateSettings();
-        }
-      }).catch(() => {});
-    }
-  });
-  updateManager.start();
+  require('./updater/ipc').registerUpdateIpc({ ipcMain, getUpdateManager });
   createWindow();
   startupMetrics.mark('window-created');
 
-  const settings = await settingsStore.getState();
+  const settings = await getSettingsStore().getState();
   if (settings.launcherUpdatePolicy !== 'off') {
     setTimeout(() => {
-      void updateManager.check({ autoDownload: settings.launcherUpdatePolicy === 'auto' });
+      void getUpdateManager().check({ autoDownload: settings.launcherUpdatePolicy === 'auto' });
     }, 5000);
   }
 

@@ -1,9 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createLazyServices } = require('../lazy-services');
-const { detectJava, javaMajorVersion, installedJavaExecutable, SUPPORTED_JAVA_MAJORS } = require('./java-runtime');
-const { readVersionMetadata } = require('./version-metadata');
-const { resolveLaunchTarget } = require('./launch-target');
 
 function systemGameDirectory(app, platform = process.platform) {
   if (platform === 'win32') return path.join(app.getPath('appData'), '.minecraft');
@@ -39,7 +36,11 @@ function registerMinecraftIpc({
   settingsStore,
   accountStore,
   yggdrasilAuth,
-  javaProbeCache
+  javaProbeCache,
+  getSettingsStore = () => settingsStore,
+  getAccountStore = () => accountStore,
+  getYggdrasilAuth = () => yggdrasilAuth,
+  getJavaProbeCache = () => javaProbeCache
 }) {
   const activeDownloads = new Map();
   const preparingJavaDownloads = new Map();
@@ -48,6 +49,7 @@ function registerMinecraftIpc({
   let serviceSettings;
 
   async function ensureMinecraftServices(settings) {
+    const settingsStore = getSettingsStore();
     const currentSettings = settings ?? (settingsStore
       ? await settingsStore.getState()
       : { gameDirectoryMode: 'local' });
@@ -94,6 +96,8 @@ function registerMinecraftIpc({
       },
       javaRuntime: () => {
         const { ManagedJavaRuntime } = require('./managed-java-runtime');
+        const { javaMajorVersion } = require('./java-runtime');
+        const javaProbeCache = getJavaProbeCache();
         return new ManagedJavaRuntime({ gameDirectory: directory,
           extractArchive: (...args) => require('./launch-core').extractArchive(...args),
           probeJava: javaProbeCache ? (candidate) => javaProbeCache.probe(candidate) : javaMajorVersion });
@@ -112,6 +116,7 @@ function registerMinecraftIpc({
   }
 
   async function applyDownloadSettings() {
+    const settingsStore = getSettingsStore();
     const settings = settingsStore
       ? await settingsStore.getState()
       : { gameDirectoryMode: 'local', downloadConcurrency: 32, downloadSource: 'auto' };
@@ -166,6 +171,8 @@ function registerMinecraftIpc({
   });
 
   ipcMain.handle('minecraft:get-java-requirement', async (_event, targetId) => {
+    const { resolveLaunchTarget } = require('./launch-target');
+    const { readVersionMetadata } = require('./version-metadata');
     await ensureMinecraftServices();
     const instance = await resolveLaunchTarget(gameDirectory, String(targetId ?? ''));
     const metadata = await readVersionMetadata(gameDirectory, instance?.profileId ?? targetId);
@@ -173,6 +180,8 @@ function registerMinecraftIpc({
   });
 
   ipcMain.handle('minecraft:detect-java', async (_event, options = {}) => {
+    const { detectJava, javaMajorVersion, installedJavaExecutable, SUPPORTED_JAVA_MAJORS } = require('./java-runtime');
+    const javaProbeCache = getJavaProbeCache();
     const settings = await ensureMinecraftServices();
     const system = await detectJava(settings.javaPath, javaProbeCache
       ? (candidate) => javaProbeCache.probe(candidate, { force: options.force === true })
@@ -310,12 +319,15 @@ function registerMinecraftIpc({
     if (activeDownloads.size > 0) {
       throw new Error('请先等待下载完成或取消下载，再启动游戏');
     }
+    const accountStore = getAccountStore();
+    const settingsStore = getSettingsStore();
     let currentAccount = accountStore ? await accountStore.getCurrentAccount() : undefined;
     if (currentAccount?.type === 'microsoft') {
       throw new Error('Microsoft 登录已移除，请在账户管理中选择离线或 LittleSkin 账户');
     }
-    if (currentAccount?.type === 'yggdrasil' && yggdrasilAuth) {
-      currentAccount = await yggdrasilAuth.ensureAccount(currentAccount);
+    if (currentAccount?.type === 'yggdrasil') {
+      const yggdrasilAuth = getYggdrasilAuth();
+      if (yggdrasilAuth) currentAccount = await yggdrasilAuth.ensureAccount(currentAccount);
     }
     const settings = settingsStore
       ? await settingsStore.getState()
@@ -325,6 +337,7 @@ function registerMinecraftIpc({
       if (!event.sender.isDestroyed()) event.sender.send('minecraft:launch-status', status);
     };
     try {
+      const { resolveLaunchTarget } = require('./launch-target');
       const requestedTargetId = String(profileId ?? '');
       const instance = await resolveLaunchTarget(gameDirectory, requestedTargetId);
       const authlibInjectorPath = currentAccount?.type === 'yggdrasil'
