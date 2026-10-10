@@ -12,9 +12,9 @@
     "start": "electron .",
     "dev": "electron .",
     "build": "electron-builder",
-    "build:win": "electron-builder --win --publish never",
-    "build:linux": "electron-builder --linux AppImage --publish never",
-    "build:mac": "electron-builder --mac zip --publish never",
+    "build:win": "node scripts/generate-client-id.js && electron-builder --win --publish never",
+    "build:linux": "node scripts/generate-client-id.js && electron-builder --linux AppImage --publish never",
+    "build:mac": "node scripts/generate-client-id.js && electron-builder --mac zip --publish never",
     "smoke": "electron . --smoke-test",
     "check": "node scripts/check.js",
     "test": "node --test test/*.test.js"
@@ -37,7 +37,8 @@
     },
     "files": [
       "src/**/*",
-      "package.json"
+      "package.json",
+      "src/main/accounts/microsoft-client-id.json"
     ],
     "win": {
       "icon": "src/renderer/assets/app-icon.ico",
