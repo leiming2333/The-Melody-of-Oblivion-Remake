@@ -992,6 +992,9 @@ class MinecraftDownloader {
       });
     }
     const preferredSourceId = downloadSource.id;
+    onProgress({ phase: 'preparing', message: `已选择 ${downloadSource.label ?? preferredSourceId} 下载源`,
+      versionId, sourceLabel: downloadSource.label, sourceThroughput: downloadSource.throughput,
+      sourcePreference: this.sourceManager.downloadPreference });
     const versionRoot = safePath(this.gameDirectory, 'versions', versionId);
     await writeJsonAtomic(safePath(versionRoot, `${versionId}.json`), metadata);
 

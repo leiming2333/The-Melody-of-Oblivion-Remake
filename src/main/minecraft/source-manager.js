@@ -279,6 +279,7 @@ class MinecraftSourceManager {
   }
 
   async selectDownloadSource({ versionId, originalUrl, force = false, signal } = {}) {
+    throwIfAborted(signal);
     if (this.downloadPreference !== 'auto') {
       return {
         ...SOURCES[this.downloadPreference],

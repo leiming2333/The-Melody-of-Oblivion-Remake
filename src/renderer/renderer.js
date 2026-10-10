@@ -916,6 +916,12 @@ function fallbackLoaderResult(gameVersion, loaderType) {
 }
 
 function updateDownloadProgress(progress) {
+  if (progress.sourceLabel) {
+    const measured = Number(progress.sourceThroughput);
+    const speed = Number.isFinite(measured) && measured > 0
+      ? ` · 测速 ${(measured / 1024 / 1024).toFixed(1)} MB/s` : '';
+    sourceHint.textContent = `${progress.sourceLabel}${speed} · ${launcherSettings.downloadConcurrency} 路并发`;
+  }
   lastDownloadProgress = progress;
   if (!versionDownloadActive) return;
   if (downloadCancelRequested && progress.phase !== 'complete') return;
