@@ -106,7 +106,7 @@ const sourceHint = document.querySelector('#sourceHint');
 const toast = document.querySelector('#toast');
 const modpackDropOverlay = document.querySelector('#modpackDropOverlay');
 const wallpaperSlides = [...document.querySelectorAll('.background-slide')];
-const wallpaperDots = [...document.querySelectorAll('.wallpaper-dot')];
+const wallpaperSelect = document.querySelector('#wallpaperSelect');
 const javaCheckDialog = document.querySelector('#javaCheckDialog');
 const javaCheckHint = document.querySelector('#javaCheckHint');
 const javaCheckSkipButton = document.querySelector('#javaCheckSkipButton');
@@ -114,8 +114,6 @@ const javaCheckRetryButton = document.querySelector('#javaCheckRetryButton');
 const javaCheckDownloadButton = document.querySelector('#javaCheckDownloadButton');
 
 let toastTimer;
-let wallpaperIndex = 0;
-let wallpaperTimer;
 let localProfiles = [];
 let localProfilesLoaded = false;
 let localProfilesLoadingPromise;
@@ -536,6 +534,8 @@ async function loadAccountState() {
 }
 
 function applySettingsToForm() {
+  wallpaperSelect.value = String(launcherSettings.wallpaperIndex ?? 0);
+  selectWallpaper(Number(wallpaperSelect.value));
   selectedJavaPath = launcherSettings.javaPath ?? '';
   selectedJavaMajorVersion = undefined;
   renderJavaPathSetting();
@@ -855,7 +855,6 @@ async function beginLittleSkinLogin() {
 }
 
 function selectWallpaper(index) {
-  wallpaperIndex = index;
 
   const selectedSlide = wallpaperSlides[index];
   if (selectedSlide) {
@@ -867,23 +866,6 @@ function selectWallpaper(index) {
     slide.classList.toggle('is-active', slideIndex === index);
   });
 
-  wallpaperDots.forEach((dot, dotIndex) => {
-    const isActive = dotIndex === index;
-    dot.classList.toggle('is-active', isActive);
-    dot.setAttribute('aria-pressed', String(isActive));
-  });
-}
-
-function startWallpaperRotation() {
-  window.clearInterval(wallpaperTimer);
-
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    return;
-  }
-
-  wallpaperTimer = window.setInterval(() => {
-    selectWallpaper((wallpaperIndex + 1) % wallpaperSlides.length);
-  }, 9000);
 }
 
 function fallbackVersionResult() {
@@ -1630,14 +1612,7 @@ async function deleteSelectedVersion() {
   }
 }
 
-wallpaperDots.forEach((dot) => {
-  dot.addEventListener('click', () => {
-    selectWallpaper(Number(dot.dataset.wallpaperIndex));
-    startWallpaperRotation();
-  });
-});
-
-startWallpaperRotation();
+wallpaperSelect.addEventListener('change', () => selectWallpaper(Number(wallpaperSelect.value)));
 
 document.querySelector('#minimizeButton').addEventListener('click', () => {
   windowControls?.minimize();
@@ -1756,6 +1731,7 @@ settingsDialog.addEventListener('close', async () => {
     try {
       const previousDirectoryMode = launcherSettings.gameDirectoryMode ?? 'local';
       const patch = {
+        wallpaperIndex: Number(wallpaperSelect.value),
         javaPath: selectedJavaPath,
         gameDirectoryMode: gameDirectoryModeSelect.value,
         isolateProfiles: isolateProfilesCheck.checked,
@@ -1783,8 +1759,11 @@ settingsDialog.addEventListener('close', async () => {
       const directoryLabel = launcherSettings.gameDirectoryMode === 'local' ? '本地目录' : '系统目录';
       showToast(`设置已保存：${directoryLabel} · ${sourceLabel} · ${launcherSettings.downloadConcurrency} 路线程`);
     } catch (error) {
+      applySettingsToForm();
       showToast(`设置保存失败：${readableError(error)}`);
     }
+  } else {
+    applySettingsToForm();
   }
 });
 

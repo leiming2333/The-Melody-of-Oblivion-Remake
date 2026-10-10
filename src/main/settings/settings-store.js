@@ -7,6 +7,7 @@ const LAUNCHER_UPDATE_POLICY_OPTIONS = Object.freeze(['auto', 'notify', 'off']);
 const DEFAULT_SETTINGS = Object.freeze({
   version: 3,
   javaPath: '',
+  wallpaperIndex: 0,
   isolateProfiles: true,
   gameDirectoryMode: 'local',
   downloadSource: 'auto',
@@ -31,6 +32,8 @@ function normalizeSettings(value = {}) {
     : '';
   return {
     version: 3,
+    wallpaperIndex: Number.isInteger(value.wallpaperIndex) && value.wallpaperIndex >= 0 && value.wallpaperIndex < 4
+      ? value.wallpaperIndex : DEFAULT_SETTINGS.wallpaperIndex,
     javaPath: requestedJavaPath && path.isAbsolute(requestedJavaPath)
       ? path.normalize(requestedJavaPath)
       : DEFAULT_SETTINGS.javaPath,

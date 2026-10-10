@@ -9,6 +9,17 @@ const {
   normalizeSettings
 } = require('../src/main/settings/settings-store');
 
+test('场景选择持久化并拒绝非法索引', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scene-settings-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'settings.json');
+  await new SettingsStore(file).update({ wallpaperIndex: 3 });
+  assert.equal((await new SettingsStore(file).getState()).wallpaperIndex, 3);
+  for (const wallpaperIndex of [-1, 4, 0.5, '2', null]) {
+    assert.equal(normalizeSettings({ wallpaperIndex }).wallpaperIndex, 0);
+  }
+});
+
 test('下载线程设置仅接受安全的预设范围', () => {
   assert.equal(normalizeSettings({ downloadConcurrency: 24 }).downloadConcurrency, 24);
   assert.equal(normalizeSettings({ downloadConcurrency: 999 }).downloadConcurrency, 32);
@@ -64,6 +75,7 @@ test('启动设置可以持久化并自动规范内存值', async (t) => {
   });
   assert.deepEqual(saved, {
     version: 3,
+    wallpaperIndex: 0,
     isolateProfiles: true,
     javaPath: path.resolve(temporaryRoot, 'runtime', 'bin', 'java.exe'),
     gameDirectoryMode: 'local',
