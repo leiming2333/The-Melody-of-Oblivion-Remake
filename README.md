@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
-[![Source](https://img.shields.io/badge/Source-v1.5.6-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.6.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.5.6`，保留 Microsoft 登录。已发布的安装包可通过[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 获取，具体版本以 Release 页面为准。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.6.0`，保留 Microsoft 登录。已发布的安装包可通过[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 获取，具体版本以 Release 页面为准。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -53,7 +53,7 @@
 - Microsoft 登录依赖启动器的 Azure 应用注册获得 Minecraft Services 接受。服务方策略或注册状态改变可能导致登录暂时不可用。
 - LittleSkin Yggdrasil 仅在客户端和服务端使用相同验证服务时生效；它不能代替正版账户，也不会授予进入正版验证服务器的权限。参见 [LittleSkin 用户使用手册](https://manual.littlesk.in/yggdrasil/)。
 - CurseForge 安装依赖 CurseTools 提供的可下载文件元数据，或配置 `CURSEFORGE_API_KEY`。包含受限或已下架文件的整合包可能安装失败。
-- 暂不支持 Quilt 整合包。
+- 支持 Quilt 整合包，实际兼容性取决于游戏版本与 Mod。
 - 整合包处理和面向用户的失败恢复流程仍在持续完善。
 
 ## 运行要求

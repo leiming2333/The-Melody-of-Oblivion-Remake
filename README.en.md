@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
-[![Source](https://img.shields.io/badge/Source-v1.5.6-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.6.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> The current source version is `1.5.6` and retains Microsoft sign-in. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases; see the Release page for available versions. Back up your Minecraft data before testing.
+> The current source version is `1.6.0` and retains Microsoft sign-in. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases; see the Release page for available versions. Back up your Minecraft data before testing.
 
 ## About this project
 
@@ -53,7 +53,7 @@ The automated test suite covers accounts, authentication, downloads, Java select
 - Microsoft sign-in depends on the launcher's Azure application registration being accepted by Minecraft Services. Provider-side policy or registration changes can make login unavailable.
 - LittleSkin Yggdrasil works only when both client and server are configured for the same authentication service. It does not replace a premium account or grant access to premium-only servers. See the [LittleSkin manual](https://manual.littlesk.in/yggdrasil/).
 - CurseForge installation depends on downloadable file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Packs containing restricted or unavailable files may fail.
-- Quilt modpacks are not supported.
+- Quilt modpacks are supported; compatibility depends on the game version and mods.
 - Modpack handling and user-facing failure recovery are still being refined.
 
 ## Requirements
