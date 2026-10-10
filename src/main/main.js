@@ -258,7 +258,7 @@ app.whenReady().then(() => {
   require('./accounts/ipc').registerAccountIpc({ app, ipcMain, getAccountStore, getMicrosoftAuth, getYggdrasilAuth });
   require('./settings/ipc').registerSettingsIpc({ BrowserWindow, dialog, ipcMain, getSettingsStore, getJavaProbeCache });
   require('./minecraft/ipc').registerMinecraftIpc({
-    app, ipcMain, shell, getSettingsStore, getAccountStore, getMicrosoftAuth, getYggdrasilAuth, getJavaProbeCache
+    app, ipcMain, shell, dialog, BrowserWindow, getSettingsStore, getAccountStore, getMicrosoftAuth, getYggdrasilAuth, getJavaProbeCache
   });
   require('./updater/ipc').registerUpdateIpc({ ipcMain, getUpdateManager });
   startupMetrics.mark('services-registered');

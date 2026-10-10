@@ -2385,3 +2385,12 @@ progress:indeterminate::-moz-progress-bar {
 @media (prefers-reduced-motion: reduce) {
   .startup-placeholder { animation: none; }
 }
+
+.mods-dialog {
+  padding: 20px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  -webkit-app-region: no-drag;
+}
+.mods-dialog form { padding: 0; overflow: visible; }
+.mods-dialog .account-row-copy { overflow-wrap: anywhere; }

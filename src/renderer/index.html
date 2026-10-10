@@ -78,11 +78,18 @@
                 <option value="">尚未选择已安装版本</option>
               </select>
             </div>
+            <button id="modsButton" class="text-button" type="button">Mod</button>
             <button id="manageButton" class="text-button" type="button">打开目录</button>
           </div>
         </section>
       </main>
 
+      <dialog id="modsDialog" class="account-dialog mods-dialog">
+        <form method="dialog"><header class="dialog-header"><strong>当前实例的 Mod</strong><button type="submit" class="dialog-close" aria-label="关闭 Mod 管理">×</button></header></form>
+        <p id="modsHint" aria-live="polite"></p>
+        <div id="modsList" class="account-list"></div>
+        <button id="importModButton" type="button">导入 .jar</button>
+      </dialog>
       <div class="wallpaper-switcher" role="group" aria-label="切换背景">
         <span>场景</span>
         <button class="wallpaper-dot is-active" type="button" data-wallpaper-index="0" aria-label="矿井轨道" aria-pressed="true"></button>

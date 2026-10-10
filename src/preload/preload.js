@@ -41,7 +41,10 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     verifyVersion: (versionId) => ipcRenderer.invoke('minecraft:verify-version', versionId),
     deleteVersion: (profileId) => ipcRenderer.invoke('minecraft:delete-version', profileId),
     launchVersion: (profileId) => ipcRenderer.invoke('minecraft:launch-version', profileId),
-    openDirectory: () => ipcRenderer.invoke('minecraft:open-directory'),
+    listMods: targetId => ipcRenderer.invoke('minecraft:list-mods', targetId),
+    setModEnabled: (targetId, name, enabled) => ipcRenderer.invoke('minecraft:set-mod-enabled', targetId, name, enabled),
+    importMod: targetId => ipcRenderer.invoke('minecraft:import-mod', targetId),
+    openDirectory: (targetId) => ipcRenderer.invoke('minecraft:open-directory', targetId),
     onDownloadProgress: (callback) => {
       const listener = (_event, progress) => callback(progress);
       ipcRenderer.on('minecraft:download-progress', listener);

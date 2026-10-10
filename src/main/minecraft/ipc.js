@@ -33,6 +33,8 @@ function registerMinecraftIpc({
   app,
   ipcMain,
   shell,
+  dialog,
+  BrowserWindow,
   settingsStore,
   accountStore,
   yggdrasilAuth,
@@ -377,14 +379,52 @@ function registerMinecraftIpc({
     }
   });
 
-  ipcMain.handle('minecraft:open-directory', async () => {
+  let modManager;
+  const getModManager = () => modManager ??= new (require('./mod-manager').ModManager)();
+  async function targetDirectory(targetId, mutate = false) {
+    const settings = await ensureMinecraftServices();
+    if (mutate && (activeDownloads.size || services.peek('launcher')?.activeGames?.size)) {
+      throw new Error('请先关闭游戏并等待安装完成，再修改 Mod');
+    }
+    const root = gameDirectory;
+    const { resolveLaunchTarget, profileGameDirectory } = require('./launch-target');
+    const instance = await resolveLaunchTarget(root, targetId);
+    await require('./version-metadata').readVersionMetadata(root, instance?.profileId ?? targetId);
+    const directory = instance?.instanceDirectory ?? (settings.isolateProfiles !== false
+      ? profileGameDirectory(root, targetId) : root);
+    // Reject redirected parents beneath the game root.
+    const relative = path.relative(root, directory);
+    let parent = root;
+    for (const segment of relative.split(path.sep).filter(Boolean)) {
+      parent = path.join(parent, segment);
+      try { if ((await fs.lstat(parent)).isSymbolicLink()) throw new Error('实例目录不能是链接'); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    return directory;
+  }
+  ipcMain.handle('minecraft:list-mods', async (_event, targetId) => getModManager().list(await targetDirectory(targetId)));
+  ipcMain.handle('minecraft:set-mod-enabled', async (_event, targetId, name, enabled) => (
+    getModManager().setEnabled(await targetDirectory(targetId, true), name, enabled)
+  ));
+  ipcMain.handle('minecraft:import-mod', async (event, targetId) => {
+    if (!dialog) throw new Error('文件选择服务不可用');
+    const selection = await dialog.showOpenDialog(BrowserWindow?.fromWebContents(event.sender), {
+      title: '导入当前实例的 Mod', properties: ['openFile'], filters: [{ name: 'Java Mod', extensions: ['jar'] }]
+    });
+    if (selection.canceled || !selection.filePaths.length) return { canceled: true };
+    const mods = await getModManager().importFile(await targetDirectory(targetId, true), selection.filePaths[0]);
+    return { canceled: false, mods };
+  });
+
+  ipcMain.handle('minecraft:open-directory', async (_event, targetId) => {
     await ensureMinecraftServices();
-    await fs.mkdir(gameDirectory, { recursive: true });
-    const error = await shell.openPath(gameDirectory);
+    const directory = targetId ? await targetDirectory(targetId) : gameDirectory;
+    await fs.mkdir(directory, { recursive: true });
+    const error = await shell.openPath(directory);
     if (error) {
       throw new Error(error);
     }
-    return gameDirectory;
+    return directory;
   });
 }
 

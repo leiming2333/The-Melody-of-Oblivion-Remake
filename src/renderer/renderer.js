@@ -2064,10 +2064,23 @@ versionSelect.addEventListener('change', () => {
   updateVersionAction();
 });
 
+let modUiModule;
+document.querySelector('#modsButton').addEventListener('click', async () => {
+  if (!versionSelect.value) { showToast('请先选择已安装的游戏版本'); return; }
+  if (!minecraft?.listMods) { showToast('Mod 管理需在应用中使用'); return; }
+  try {
+    modUiModule ??= import('./modules/mod-ui.mjs').catch(error => { modUiModule = undefined; throw error; });
+    const { showMods } = await modUiModule;
+    await showMods({ minecraft, showProblem,
+      dialog: document.querySelector('#modsDialog'), list: document.querySelector('#modsList'),
+      importButton: document.querySelector('#importModButton'), hint: document.querySelector('#modsHint')
+    }, versionSelect.value);
+  } catch (error) { showProblem(error); }
+});
 document.querySelector('#manageButton').addEventListener('click', async () => {
   try {
     if (minecraft) {
-      await minecraft.openDirectory();
+      await minecraft.openDirectory(versionSelect.value || undefined);
     } else {
       showToast('Electron 中将打开 .minecraft 游戏目录');
     }
