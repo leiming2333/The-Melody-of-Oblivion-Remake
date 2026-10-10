@@ -6,6 +6,9 @@ export async function installDroppedModpack(context, filePath) {
     showToast('请先等待当前安装任务完成或取消');
     return;
   }
+  state.modpackInstallActive = true;
+  state.versionDownloadActive = true;
+  updateVersionAction();
   try {
     const info = minecraft?.inspectModpack
       ? await minecraft.inspectModpack(filePath)
@@ -23,18 +26,13 @@ export async function installDroppedModpack(context, filePath) {
     const optionalLine = optionalCount > 0
       ? `\n其中必需文件 ${requiredCount} 个，可选文件 ${optionalCount} 个。`
       : '';
-    const installOptional = optionalCount > 0
-      ? window.confirm(
-          `安装整合包「${info.name}」？\n\n${formatName} · Minecraft ${info.gameVersion} · ${loaderNames[info.loaderType] ?? info.loaderType}\n需要下载 ${info.fileCount} 个整合包文件。${optionalLine}\n\n是否一并安装可选文件？取消则只安装必需文件。`
-        )
-      : window.confirm(
-          `安装整合包「${info.name}」？\n\n${formatName} · Minecraft ${info.gameVersion} · ${loaderNames[info.loaderType] ?? info.loaderType}\n需要下载 ${info.fileCount} 个整合包文件。`
-        );
-    if (optionalCount === 0 && !installOptional) return;
-    const installOptionalFiles = optionalCount > 0 ? installOptional : false;
+    if (!window.confirm(
+      `安装整合包「${info.name}」？\n\n${formatName} · Minecraft ${info.gameVersion} · ${loaderNames[info.loaderType] ?? info.loaderType}\n需要下载 ${info.fileCount} 个整合包文件。${optionalLine}`
+    )) return;
+    const installOptionalFiles = optionalCount > 0 && window.confirm(
+      '是否一并安装可选文件？取消则仅安装必需文件。'
+    );
 
-    state.modpackInstallActive = true;
-    state.versionDownloadActive = true;
     state.downloadCancelRequested = false;
     state.activeDownloadLabel = info.name;
     cancelDownloadButton.hidden = false;
