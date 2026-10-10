@@ -173,6 +173,33 @@ test('packaged macOS local game directory stays outside the application bundle',
   assert.equal(resolveGameDirectory(app, 'local', { env: {}, platform: 'darwin' }), path.resolve('Applications', '.minecraft'));
 });
 
+test('system and managed Java detection overlap and keep managed results after system failure', () => {
+  execFileSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const java = require('./src/main/minecraft/java-runtime');
+    let rejectSystem;
+    const started = [];
+    java.detectJava = () => new Promise((_resolve, reject) => { rejectSystem = reject; });
+    java.installedJavaExecutable = async (_directory, major) => {
+      started.push(major);
+      return major === 21 ? '/runtime/java21' : undefined;
+    };
+    const handlers = new Map();
+    require('./src/main/minecraft/ipc').registerMinecraftIpc({
+      app: { isPackaged: false, getAppPath: () => process.cwd() },
+      ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
+      settingsStore: { getState: async () => ({ gameDirectoryMode: 'local' }) }
+    });
+    (async () => {
+      const pending = handlers.get('minecraft:detect-java')({}, {});
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(started, java.SUPPORTED_JAVA_MAJORS);
+      rejectSystem(new Error('system scan failed'));
+      assert.deepEqual(await pending, { available: true, path: '/runtime/java21', majorVersion: 21 });
+    })().catch(error => { console.error(error); process.exitCode = 1; });
+  `], { cwd: path.resolve(__dirname, '..'), timeout: 10000 });
+});
+
 function ipcSender(id) {
   const sender = new EventEmitter();
   sender.id = id;

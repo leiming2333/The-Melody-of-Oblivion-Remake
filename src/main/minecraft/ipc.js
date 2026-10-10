@@ -183,18 +183,21 @@ function registerMinecraftIpc({
     const { detectJava, javaMajorVersion, installedJavaExecutable, SUPPORTED_JAVA_MAJORS } = require('./java-runtime');
     const javaProbeCache = getJavaProbeCache();
     const settings = await ensureMinecraftServices();
-    const system = await detectJava(settings.javaPath, javaProbeCache
+    const probe = javaProbeCache
       ? (candidate) => javaProbeCache.probe(candidate, { force: options.force === true })
-      : javaMajorVersion, undefined, { launcherDirectory: launcherDirectory(app) });
-    const candidates = system.available ? [system] : [];
-    const managed = await Promise.all(SUPPORTED_JAVA_MAJORS.map(async (majorVersion) => {
+      : javaMajorVersion;
+    const results = await Promise.allSettled([
+      detectJava(settings.javaPath, probe, undefined, { launcherDirectory: launcherDirectory(app) }),
+      ...SUPPORTED_JAVA_MAJORS.map(async (majorVersion) => {
       const javaPath = await installedJavaExecutable(gameDirectory, majorVersion, javaProbeCache
         ? (candidate) => javaProbeCache.probe(candidate, { force: options.force === true })
         : javaMajorVersion);
       if (!javaPath) return null;
       return { available: true, path: javaPath, majorVersion };
-    }));
-    candidates.push(...managed.filter(Boolean));
+      })
+    ]);
+    const candidates = results.filter((result) => result.status === 'fulfilled' && result.value?.available)
+      .map((result) => result.value);
     candidates.sort((left, right) => right.majorVersion - left.majorVersion);
     return candidates[0] ?? { available: false };
   });

@@ -262,11 +262,12 @@ async function findJavaExecutable(
 // 设置页自动检测：探测所有候选并返回版本最高的（参考 PCL 自动选择最新 Java）
 async function detectJava(explicitPath, probe = javaMajorVersion, discover = discoverJavaCandidates, options) {
   const candidates = await discover(explicitPath, options);
-  const results = await Promise.all(candidates.map(async (candidate) => ({
+  const results = await Promise.allSettled(candidates.map(async (candidate) => ({
     path: candidate,
     majorVersion: await probe(candidate)
   })));
-  const available = results.filter((result) => Number.isInteger(result.majorVersion));
+  const available = results.filter((result) => result.status === 'fulfilled')
+    .map((result) => result.value).filter((result) => Number.isInteger(result.majorVersion));
   if (available.length === 0) {
     return { available: false, majorVersion: undefined, path: undefined };
   }

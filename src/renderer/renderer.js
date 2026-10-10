@@ -2192,14 +2192,18 @@ requestAnimationFrame(() => requestAnimationFrame(async () => {
     updaterApi?.getState?.().then(renderLauncherUpdate).catch((error) => {
       renderLauncherUpdate({ status: 'error', message: readableError(error), progress: 0 });
     });
-    void loadAccountState().then(() => environment?.diagnostics?.markStartup('accounts-loaded'));
-    void loadLocalProfiles().then(() => environment?.diagnostics?.markStartup('profiles-loaded'))
-      .catch((error) => showToast(`版本检查失败：${readableError(error)}`));
-    void loadLauncherSettings().then(async () => {
-      environment?.diagnostics?.markStartup('settings-loaded');
-      await refreshAutoJavaDetection();
-      environment?.diagnostics?.markStartup('java-detected');
-      await performJavaCheck();
+    void Promise.allSettled([
+      loadAccountState().then(() => environment?.diagnostics?.markStartup('accounts-loaded')),
+      loadLocalProfiles().then(() => environment?.diagnostics?.markStartup('profiles-loaded')),
+      loadLauncherSettings().then(() => environment?.diagnostics?.markStartup('settings-loaded')),
+      refreshAutoJavaDetection().then(async () => {
+        environment?.diagnostics?.markStartup('java-detected');
+        await performJavaCheck();
+      })
+    ]).then((results) => {
+      for (const result of results) {
+        if (result.status === 'rejected') showToast(`后台初始化失败：${readableError(result.reason)}`, true);
+      }
     });
   }, 150);
 }));
