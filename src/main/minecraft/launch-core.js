@@ -554,6 +554,7 @@ class MinecraftLauncher {
     account,
     memoryMb,
     javaPath,
+    javaRuntimes = [],
     authlibInjector
   }, onStatus = () => {}) {
     const validatedId = validateProfileId(profileId);
@@ -563,7 +564,7 @@ class MinecraftLauncher {
 
     onStatus({ phase: 'preparing', profileId: validatedId, targetId: launchTargetId });
     const findJava = this.findJava ?? ((explicitPath, requiredMajorVersion) => (
-      this.javaRuntime.resolve(explicitPath, requiredMajorVersion, (progress) => {
+      this.javaRuntime.resolveForGame(explicitPath, requiredMajorVersion, javaRuntimes, (progress) => {
         onStatus({
           phase: 'java',
           profileId: validatedId,
@@ -586,6 +587,7 @@ class MinecraftLauncher {
       phase: 'launching',
       profileId: validatedId,
       targetId: launchTargetId,
+      javaPath: prepared.javaExecutable,
       requiredJavaVersion: prepared.requiredJavaVersion
     });
 

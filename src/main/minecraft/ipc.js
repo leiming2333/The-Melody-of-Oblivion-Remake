@@ -202,7 +202,9 @@ function registerMinecraftIpc({
     const candidates = results.filter((result) => result.status === 'fulfilled' && result.value?.available)
       .map((result) => result.value);
     candidates.sort((left, right) => right.majorVersion - left.majorVersion);
-    return candidates[0] ?? { available: false };
+    return candidates[0]
+      ? { ...candidates[0], runtimes: candidates.flatMap((entry) => entry.runtimes ?? [{ path: entry.path, majorVersion: entry.majorVersion }]) }
+      : { available: false };
   });
 
   ipcMain.handle('minecraft:download-java', async (event, majorVersion) => {
@@ -364,6 +366,7 @@ function registerMinecraftIpc({
         account: currentAccount,
         memoryMb: settings.memoryMb,
         javaPath: settings.javaPath,
+        javaRuntimes: settings.javaRuntimes ?? [],
         authlibInjector: authlibInjectorPath
           ? { path: authlibInjectorPath, server: 'littleskin.cn' }
           : undefined

@@ -539,6 +539,7 @@ function applySettingsToForm() {
   savedJavaRuntimes = (launcherSettings.javaRuntimes ?? []).map((entry) => ({ ...entry }));
   selectedJavaMajorVersion = savedJavaRuntimes.find((entry) => entry.path === selectedJavaPath)?.majorVersion;
   if (selectedJavaPath) rememberJavaPath(selectedJavaPath, selectedJavaMajorVersion);
+  for (const entry of autoJavaDetection?.runtimes ?? []) rememberJavaPath(entry.path, entry.majorVersion);
   if (autoJavaDetection?.path) rememberJavaPath(autoJavaDetection.path, autoJavaDetection.majorVersion);
   renderJavaPathSetting();
   isolateProfilesCheck.checked = launcherSettings.isolateProfiles !== false;
@@ -592,7 +593,8 @@ function applyAutoJavaDetection(result) {
     autoJavaDetection = null;
     return false;
   }
-  autoJavaDetection = { path: result.path, majorVersion: result.majorVersion };
+  autoJavaDetection = { path: result.path, majorVersion: result.majorVersion, runtimes: result.runtimes ?? [] };
+  for (const entry of autoJavaDetection.runtimes) rememberJavaPath(entry.path, entry.majorVersion);
   rememberJavaPath(result.path, result.majorVersion);
   renderJavaPathSetting();
   return true;
@@ -613,7 +615,7 @@ function detectSystemJava(force = false) {
 async function refreshAutoJavaDetection() {
   if (!settingsApi?.detectJava) return null;
   const result = await detectSystemJava();
-  if (!selectedJavaPath && result?.available && result.path) {
+  if (result?.available && result.path) {
     applyAutoJavaDetection(result);
   }
   return result;
@@ -1914,6 +1916,11 @@ if (minecraft?.onLaunchStatus) {
       if (versionSelect.value === launchTargetId) {
         gameStatus.textContent = `${launchTargetId} 正在运行`;
         statusBadge.textContent = 'RUNNING';
+      }
+    } else if (status.phase === 'java' || status.phase === 'launching') {
+      if (versionSelect.value === launchTargetId) {
+        gameStatus.textContent = status.message ?? `使用 Java ${status.requiredJavaVersion} 启动游戏`;
+        gameStatus.title = status.javaPath ?? '';
       }
     } else if (status.phase === 'authlib-injector') {
       if (versionSelect.value === launchTargetId) {

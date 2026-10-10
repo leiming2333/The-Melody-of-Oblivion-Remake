@@ -272,7 +272,7 @@ async function detectJava(explicitPath, probe = javaMajorVersion, discover = dis
     return { available: false, majorVersion: undefined, path: undefined };
   }
   available.sort((left, right) => right.majorVersion - left.majorVersion);
-  return { available: true, majorVersion: available[0].majorVersion, path: available[0].path };
+  return { available: true, majorVersion: available[0].majorVersion, path: available[0].path, runtimes: available };
 }
 
 function buildInstallerArguments(installerPath, gameDirectory) {

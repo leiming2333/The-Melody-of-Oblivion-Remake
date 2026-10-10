@@ -202,6 +202,30 @@ class ManagedJavaRuntime {
     return installedJavaExecutable(this.gameDirectory, majorVersion, this.probeJava);
   }
 
+  async resolveForGame(explicitPath, requiredMajorVersion, savedRuntimes = [], onProgress = () => {}, signal) {
+    throwIfAborted(signal);
+    const candidates = [explicitPath, ...savedRuntimes.map((entry) => entry?.path)];
+    const seen = new Set();
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string' || !path.isAbsolute(candidate)) continue;
+      const normalized = path.normalize(candidate);
+      const key = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      let majorVersion;
+      try { majorVersion = await this.probeJava(normalized); } catch { /* Try the next saved runtime. */ }
+      throwIfAborted(signal);
+      if (majorVersion !== requiredMajorVersion) continue;
+      onProgress({ message: `使用 Java ${requiredMajorVersion}：${normalized}`, javaPath: normalized, majorVersion });
+      return normalized;
+    }
+    // No compatible saved path: use the existing system/managed lookup, without treating
+    // the user's preferred path as a mandatory version override.
+    const executable = await this.resolve(undefined, requiredMajorVersion, onProgress, signal);
+    onProgress({ message: `使用 Java ${requiredMajorVersion}：${executable}`, javaPath: executable, majorVersion: requiredMajorVersion });
+    return executable;
+  }
+
   async resolve(explicitPath, requiredMajorVersion, onProgress = () => {}, signal) {
     throwIfAborted(signal);
     if (!Number.isInteger(requiredMajorVersion)) {

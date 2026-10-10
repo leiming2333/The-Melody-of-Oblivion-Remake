@@ -195,7 +195,8 @@ test('system and managed Java detection overlap and keep managed results after s
       await new Promise(resolve => setImmediate(resolve));
       assert.deepEqual(started, java.SUPPORTED_JAVA_MAJORS);
       rejectSystem(new Error('system scan failed'));
-      assert.deepEqual(await pending, { available: true, path: '/runtime/java21', majorVersion: 21 });
+      assert.deepEqual(await pending, { available: true, path: '/runtime/java21', majorVersion: 21,
+        runtimes: [{ path: '/runtime/java21', majorVersion: 21 }] });
     })().catch(error => { console.error(error); process.exitCode = 1; });
   `], { cwd: path.resolve(__dirname, '..'), timeout: 10000 });
 });
