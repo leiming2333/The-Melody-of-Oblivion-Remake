@@ -66,7 +66,7 @@ const translations = {
   "download.lanzou": "Lanzou Cloud ↗",
   "download.code": "Access code: ",
   "download.password": "Password: ",
-  "download.note": "Unofficial project. Not affiliated with Mojang Studios or Microsoft.",
+  "download.note": "This is an unofficial launcher and is not affiliated with Mojang Studios or Microsoft. Back up your Minecraft data before testing. Download from this site or GitHub Releases to avoid third-party modified builds.",
   "partner.tag": "Advertisement · Partner promotion",
   "partner.title": "Want a server for your friends?",
   "partner.body": "Godlike high-performance Minecraft hosting — one-click modpack deployment, free DDoS protection, and 24/7 uptime.",
