@@ -139,18 +139,24 @@ test('main creates a window with all IPC registered before loading business serv
     const app = new EventEmitter();
     Object.assign(app, { whenReady: () => Promise.resolve(), getPath: () => process.argv[1],
       getAppPath: () => process.cwd(), setAppUserModelId() {}, isPackaged: false });
+    const expectedIcon = 'app-icon.' + (process.platform === 'win32' ? 'ico' : process.platform === 'darwin' ? 'icns' : 'png');
+    const shouldReapplyIcon = process.platform !== 'darwin';
     let created = false;
+    const iconUpdates = [];
     class BrowserWindow extends EventEmitter {
-      constructor() {
+      constructor(options) {
         super();
         created = true;
+        assert.ok(options.icon.endsWith(expectedIcon));
+        this.setIcon = (icon) => iconUpdates.push(icon);
+        this.show = () => this.emit('show');
         for (const name of ['accounts:get-state', 'settings:get-state', 'minecraft:detect-java', 'updater:get-state'])
           assert.ok(handlers.has(name), name);
         for (const name of ['accounts/account-store', 'accounts/yggdrasil-auth', 'settings/settings-store',
           'updater/update-manager', 'minecraft/java-runtime', 'minecraft/java-probe-cache'])
           assert.equal(require.cache[require.resolve('./src/main/' + name)], undefined, name);
       }
-      loadFile() {}
+      loadFile() { setImmediate(() => this.emit('ready-to-show')); }
     }
     Module._load = function(name, ...args) {
       if (name === 'electron') return { app, BrowserWindow,
@@ -158,6 +164,10 @@ test('main creates a window with all IPC registered before loading business serv
       return load.call(this, name, ...args);
     };
     require('./src/main/main');
-    setImmediate(() => assert.equal(created, true));
+    setImmediate(() => setImmediate(() => {
+      assert.equal(created, true);
+      assert.equal(iconUpdates.length, shouldReapplyIcon ? 2 : 0);
+      for (const icon of iconUpdates) assert.ok(icon.endsWith(expectedIcon));
+    }));
   `, directory], { cwd: path.resolve(__dirname, '..'), timeout: 10000 });
 });

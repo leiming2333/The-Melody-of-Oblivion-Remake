@@ -97,6 +97,10 @@ function createWindow() {
 
   let resolveShown;
   windowReadiness.set(mainWindow, new Promise((resolve) => { resolveShown = resolve; }));
+  if (process.platform !== 'darwin') {
+    // Reapply after the native window appears so Windows refreshes its taskbar button.
+    mainWindow.on('show', () => mainWindow.setIcon(appIconPath));
+  }
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
   mainWindow.once('ready-to-show', () => {
