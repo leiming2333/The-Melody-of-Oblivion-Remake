@@ -52,9 +52,7 @@ const translations = {
   "download.github": "GitHub repository ↗",
   "download.license": "GNU AGPL-3.0 license",
   "download.latest": "Latest release",
-  "download.checksum": "Installer SHA-256 checksum",
-  "download.copy": "Copy",
-  "download.changelog": "Recent release notes",
+  "download.changelog": "Latest update",
   "download.changelogLoading": "Loading release notes…",
   "download.changelogAll": "View all releases ↗",
   "download.platform": "Choose system",
@@ -85,9 +83,6 @@ const downloadSource = document.querySelector("#download-source");
 const downloadButton = document.querySelector("#download-button");
 const downloadAlternative = document.querySelector("#download-alternative");
 const downloadStatus = document.querySelector("#download-status");
-const checksumValue = document.querySelector("#checksum-value");
-const checksumCopy = document.querySelector("#checksum-copy");
-const checksumStatus = document.querySelector("#checksum-status");
 const changelogDetails = document.querySelector("#changelog-details");
 const changelogList = document.querySelector("#changelog-list");
 const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
@@ -133,12 +128,6 @@ function updateDownloadLink() {
   const asset = latestRelease?.assets?.find((item) =>
     item.name.endsWith(`-${target}${extension}`) && /^(?:https:\/\/github\.com\/|https:\/\/.+\.public\.blob\.vercel-storage\.com\/)/.test(item.browser_download_url ?? "")
   );
-  // If GitHub does not publish an asset digest, the build pipeline must inject its SHA-256 here.
-  const checksum = /^sha256:[a-f\d]{64}$/i.test(asset?.digest ?? "") ? asset.digest.slice(7) : "";
-  checksumValue.textContent = checksum || (english ? "Not provided for this release" : "该版本暂未提供");
-  checksumCopy.disabled = !checksum;
-  checksumStatus.textContent = "";
-
   downloadButton.href = asset
     ? downloadSource.value === "blob"
       ? asset.browser_download_url
@@ -190,20 +179,18 @@ async function loadChangelog() {
     if (!response.ok) throw new Error(`GitHub API: ${response.status}`);
     const releases = await response.json();
     changelogList.replaceChildren();
-    for (const release of releases.slice(0, 5)) {
-      if (!release || typeof release.tag_name !== "string") continue;
-      const item = document.createElement("li");
-      const heading = document.createElement("h3");
-      heading.textContent = release.tag_name;
-      item.append(heading);
-      const notes = document.createElement("p");
-      notes.textContent = typeof release.body === "string" && release.body.trim()
-        ? release.body.trim()
-        : (document.documentElement.lang === "en" ? "No release notes." : "此版本没有填写更新说明。");
-      item.append(notes);
-      changelogList.append(item);
-    }
-    if (!changelogList.children.length) throw new Error("No releases");
+    const release = releases.find((item) => item && typeof item.tag_name === "string");
+    if (!release) throw new Error("No releases");
+    const item = document.createElement("li");
+    const heading = document.createElement("h3");
+    heading.textContent = release.tag_name;
+    item.append(heading);
+    const notes = document.createElement("p");
+    notes.textContent = typeof release.body === "string" && release.body.trim()
+      ? release.body.trim()
+      : (document.documentElement.lang === "en" ? "No release notes." : "此版本没有填写更新说明。");
+    item.append(notes);
+    changelogList.replaceChildren(item);
   } catch {
     changelogList.replaceChildren();
     const item = document.createElement("li");
@@ -250,15 +237,10 @@ changelogDetails.addEventListener("toggle", () => {
     loadChangelog();
   }
 });
-checksumCopy.addEventListener("click", async () => {
-  if (!checksumValue.textContent.match(/^[a-f\d]{64}$/i)) return;
-  try {
-    await navigator.clipboard.writeText(checksumValue.textContent);
-    checksumStatus.textContent = document.documentElement.lang === "en" ? "Copied" : "已复制";
-  } catch {
-    checksumStatus.textContent = document.documentElement.lang === "en" ? "Copy failed" : "复制失败，请手动选择校验值";
-  }
-});
+if (changelogDetails.open) {
+  changelogDetails.dataset.loaded = "true";
+  loadChangelog();
+}
 let savedLanguage;
 try { savedLanguage = localStorage.getItem("melody-site-language"); } catch {}
 setLanguage(savedLanguage || (navigator.language?.toLowerCase().startsWith("zh") ? "zh" : "en"));
