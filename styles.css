@@ -98,6 +98,14 @@ h2{font-size:clamp(32px,3.3vw,48px);line-height:1.3;font-weight:800;margin-botto
 .download-action select:focus-visible{outline:2px solid #648a51;outline-offset:2px}
 .download-action .button{width:100%}
 .download-action small{color:#647365;font-size:11px;line-height:1.5}
+.checksum-details{border-bottom:1px solid #9bac9a;padding:0 0 11px}
+.checksum-details summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-size:12px;font-weight:700;color:#476348}
+.checksum-details summary:focus-visible,.copy-button:focus-visible{outline:2px solid #648a51;outline-offset:3px}
+.checksum-content{display:flex;align-items:center;gap:10px;min-width:0}
+.checksum-content code{min-width:0;overflow-wrap:anywhere;font-size:11px;color:#263629}
+.copy-button{flex:none;min-height:44px;padding:0 12px;border:1px solid #9bac9a;border-radius:2px;background:#f5f7f0;color:#263629;font-size:12px;font-weight:700}
+.copy-button:disabled{cursor:not-allowed;opacity:.55}
+.checksum-details #checksum-status{display:block;min-height:0;margin-top:5px}
 #download-status{min-height:17px}
 .cloud-downloads{display:flex;flex-direction:column;gap:12px;padding:16px 0;border-top:1px solid #9bac9a;border-bottom:1px solid #9bac9a}
 .cloud-downloads>span{font-size:12px;font-weight:700;color:#476348}

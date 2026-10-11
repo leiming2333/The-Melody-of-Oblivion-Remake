@@ -52,6 +52,8 @@ const translations = {
   "download.github": "GitHub repository ↗",
   "download.license": "GNU AGPL-3.0 license",
   "download.latest": "Latest release",
+  "download.checksum": "Installer SHA-256 checksum",
+  "download.copy": "Copy",
   "download.platform": "Choose system",
   "download.source": "Download source (switch if a download fails)",
   "download.official": "GitHub official",
@@ -77,6 +79,9 @@ const downloadPlatform = document.querySelector("#download-platform");
 const downloadSource = document.querySelector("#download-source");
 const downloadButton = document.querySelector("#download-button");
 const downloadStatus = document.querySelector("#download-status");
+const checksumValue = document.querySelector("#checksum-value");
+const checksumCopy = document.querySelector("#checksum-copy");
+const checksumStatus = document.querySelector("#checksum-status");
 const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
 const releaseApiUrl = "/api/latest-release";
 let latestRelease = null;
@@ -120,6 +125,11 @@ function updateDownloadLink() {
   const asset = latestRelease?.assets?.find((item) =>
     item.name.endsWith(`-${target}${extension}`) && item.browser_download_url?.startsWith("https://github.com/")
   );
+  // If GitHub does not publish an asset digest, the build pipeline must inject its SHA-256 here.
+  const checksum = /^sha256:[a-f\d]{64}$/i.test(asset?.digest ?? "") ? asset.digest.slice(7) : "";
+  checksumValue.textContent = checksum || (english ? "Not provided for this release" : "该版本暂未提供");
+  checksumCopy.disabled = !checksum;
+  checksumStatus.textContent = "";
 
   downloadButton.href = asset
     ? `/api/download?tag=${encodeURIComponent(latestRelease.tag_name)}&asset=${encodeURIComponent(asset.name)}&source=${encodeURIComponent(downloadSource.value)}`
@@ -177,6 +187,15 @@ document.querySelector("#current-year").textContent = String(new Date().getFullY
 downloadPlatform.value = detectPlatform();
 downloadPlatform.addEventListener("change", updateDownloadLink);
 downloadSource.addEventListener("change", updateDownloadLink);
+checksumCopy.addEventListener("click", async () => {
+  if (!checksumValue.textContent.match(/^[a-f\d]{64}$/i)) return;
+  try {
+    await navigator.clipboard.writeText(checksumValue.textContent);
+    checksumStatus.textContent = document.documentElement.lang === "en" ? "Copied" : "已复制";
+  } catch {
+    checksumStatus.textContent = document.documentElement.lang === "en" ? "Copy failed" : "复制失败，请手动选择校验值";
+  }
+});
 let savedLanguage;
 try { savedLanguage = localStorage.getItem("melody-site-language"); } catch {}
 setLanguage(savedLanguage || (navigator.language?.toLowerCase().startsWith("zh") ? "zh" : "en"));
