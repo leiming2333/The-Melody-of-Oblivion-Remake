@@ -1,0 +1,48 @@
+name: Sync an existing release to Vercel Blob
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub Release tag to copy (for example v1.6.1)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install upload dependency
+        run: npm ci --omit=dev
+
+      - name: Download GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          mkdir -p release-published
+          gh release download "$RELEASE_TAG" --repo "$GH_REPO" --dir release-published \
+            --pattern '*.exe' --pattern '*.zip' --pattern '*.AppImage'
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO" \
+            --json tagName,name,url,body,publishedAt > release-published/release.json
+
+      - name: Upload assets and publish Blob manifest
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/sync-release-to-blob.mjs release-published "${{ inputs.tag }}" release-published/release.json

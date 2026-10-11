@@ -59,6 +59,7 @@ const translations = {
   "download.changelogAll": "View all releases ↗",
   "download.platform": "Choose system",
   "download.source": "Download source (switch if a download fails)",
+  "download.blob": "Vercel Blob (Hong Kong)",
   "download.official": "GitHub official",
   "download.button": "View releases",
   "download.alternative": "GitHub original download",
@@ -130,7 +131,7 @@ function updateDownloadLink() {
   const target = downloadPlatform.value;
   const extension = target.startsWith("Windows") ? ".exe" : target.startsWith("macOS") ? ".zip" : ".AppImage";
   const asset = latestRelease?.assets?.find((item) =>
-    item.name.endsWith(`-${target}${extension}`) && item.browser_download_url?.startsWith("https://github.com/")
+    item.name.endsWith(`-${target}${extension}`) && /^(?:https:\/\/github\.com\/|https:\/\/.+\.public\.blob\.vercel-storage\.com\/)/.test(item.browser_download_url ?? "")
   );
   // If GitHub does not publish an asset digest, the build pipeline must inject its SHA-256 here.
   const checksum = /^sha256:[a-f\d]{64}$/i.test(asset?.digest ?? "") ? asset.digest.slice(7) : "";
@@ -139,15 +140,19 @@ function updateDownloadLink() {
   checksumStatus.textContent = "";
 
   downloadButton.href = asset
-    ? `/api/download?tag=${encodeURIComponent(latestRelease.tag_name)}&asset=${encodeURIComponent(asset.name)}&source=${encodeURIComponent(downloadSource.value)}`
+    ? downloadSource.value === "blob"
+      ? asset.browser_download_url
+      : `/api/download?tag=${encodeURIComponent(latestRelease.tag_name)}&asset=${encodeURIComponent(asset.name)}&source=${encodeURIComponent(downloadSource.value)}`
     : releasesUrl;
   downloadAlternative.hidden = !asset;
   if (asset) {
-    const official = downloadSource.value === "official";
-    downloadAlternative.href = official
-      ? `https://gh-proxy.com/${asset.browser_download_url}`
-      : asset.browser_download_url;
-    downloadAlternative.textContent = official
+    const source = downloadSource.value;
+    const githubUrl = asset.github_download_url ?? asset.browser_download_url;
+    const accelerated = source === "official";
+    downloadAlternative.href = accelerated
+      ? `https://gh-proxy.com/${githubUrl}`
+      : githubUrl;
+    downloadAlternative.textContent = accelerated
       ? (english ? "China accelerated download (gh-proxy.com)" : "国内加速下载（gh-proxy.com）")
       : (english ? "GitHub official direct link" : "GitHub 官方直链");
     downloadAlternative.setAttribute("aria-label", downloadAlternative.textContent);
@@ -155,7 +160,9 @@ function updateDownloadLink() {
   downloadButton.querySelector("#download-button-label").textContent = asset
     ? downloadSource.value === "official"
       ? (english ? "Download from GitHub" : "GitHub 官方下载")
-      : (english ? `Accelerated download (${downloadSource.selectedOptions[0].textContent})` : `国内加速下载（${downloadSource.selectedOptions[0].textContent}）`)
+      : downloadSource.value === "blob"
+        ? (english ? "Download from Vercel Blob" : "Vercel Blob 下载")
+        : (english ? `Accelerated download (${downloadSource.selectedOptions[0].textContent})` : `国内加速下载（${downloadSource.selectedOptions[0].textContent}）`)
     : (english ? "View releases" : "查看发行版本");
   downloadStatus.textContent = asset
     ? `${latestRelease.tag_name} · ${(asset.size / 1048576).toFixed(1)} MB · HTTPS`

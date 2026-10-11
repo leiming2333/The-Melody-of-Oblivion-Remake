@@ -122,3 +122,21 @@ jobs:
           find release-assets -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.sha256' \) -print0 \
             | xargs -0 -r -n1 gh release upload "${{ github.ref_name }}" --clobber
           gh release edit "${{ github.ref_name }}" --draft=false
+
+      - name: Sync published assets to Vercel Blob
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$BLOB_READ_WRITE_TOKEN" ]]; then
+            echo "::warning title=Blob sync skipped::Add the BLOB_READ_WRITE_TOKEN repository Actions secret to enable automatic Blob downloads."
+            exit 0
+          fi
+          mkdir -p release-published
+          gh release download "${{ github.ref_name }}" --repo "$GH_REPO" --dir release-published \
+            --pattern '*.exe' --pattern '*.zip' --pattern '*.AppImage'
+          gh release view "${{ github.ref_name }}" --repo "$GH_REPO" \
+            --json tagName,name,url,body,publishedAt > release-published/release.json
+          node scripts/sync-release-to-blob.mjs release-published "${{ github.ref_name }}" release-published/release.json

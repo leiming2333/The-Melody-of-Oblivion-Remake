@@ -1,5 +1,22 @@
 const RELEASE_API = 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest';
 
+async function latestBlobRelease() {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
+  try {
+    const { list } = await import('@vercel/blob');
+    const { blobs } = await list({ prefix: 'releases/latest.json', limit: 10 });
+    const manifestBlob = blobs.find((blob) => blob.pathname === 'releases/latest.json');
+    if (!manifestBlob) return null;
+    const response = await fetch(manifestBlob.url, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) return null;
+    const manifest = await response.json();
+    if (!manifest || !/^v\d+\.\d+\.\d+$/.test(manifest.tag_name) || !Array.isArray(manifest.assets)) return null;
+    return manifest;
+  } catch {
+    return null;
+  }
+}
+
 async function readChecksum(asset) {
   const sidecar = asset.checksumAsset;
   if (!sidecar?.browser_download_url?.startsWith('https://github.com/')) return null;
@@ -18,6 +35,12 @@ async function readChecksum(asset) {
 
 module.exports = async function latestRelease(_request, response) {
   try {
+    const blobRelease = await latestBlobRelease();
+    if (blobRelease) {
+      response.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+      response.status(200).json(blobRelease);
+      return;
+    }
     const upstream = await fetch(RELEASE_API, {
       headers: {
         Accept: 'application/vnd.github+json',

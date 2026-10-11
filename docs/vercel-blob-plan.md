@@ -4,49 +4,39 @@
 
 - Vercel 静态输出目录是仓库根目录 `.`；`.vercelignore` 忽略 `release/`，因此本地安装包不会被当前网站部署上传。
 - 本地 `release/` 中现有 Windows 产物约为 89.6 MiB（EXE）和 139.4 MiB（ZIP）。这只是已找到的 Windows 样本，不代表最新 Release 的全部平台产物；正式估算应在 CI 对当前 Release 的全部 `.exe`、`.zip`、`.AppImage` 求和。
-- GitHub Actions 已在 `.github/workflows/build.yml` 为安装包生成 `.sha256` 文件并上传到 GitHub Releases。当前站点从 GitHub Release API 读取版本和资产，`api/download.js` 重定向到 GitHub 或镜像。
-- 仓库未安装 `@vercel/blob`，也未配置 Blob token。
+- GitHub Actions 会为安装包生成 `.sha256` 文件并保留在 GitHub Releases；站点日志仍从 GitHub Release API 读取。
+- `download` Public Blob Store 已连接到网站项目，启用了 `BLOB_READ_WRITE_TOKEN`，区域为 HKG1。
+- 网站和 Release 工作流现已支持 Blob：工作流发布 GitHub Release 后重新下载公开资产、计算 SHA-256、上传至 `releases/<tag>/`，最后更新 `releases/latest.json`。网站默认从 Blob 下载；对象不存在时回退 GitHub。
+- 自动同步还需要在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加 `BLOB_READ_WRITE_TOKEN`。该值应从 Vercel Blob Store 凭据中取得，不要提交到仓库。
+- 已有 Release 可在 GitHub Actions 中运行 **Sync an existing release to Vercel Blob**，输入 tag（例如 `v1.6.1`）进行首次回填。
 
 ## 迁移步骤
 
-1. 在 Vercel 项目中打开 **Storage → Blob → Create Store**，选择 **Public**，将 Store 连接到网站项目。Public Blob 的读取 URL 可公开访问，写入凭据必须保密。
-2. 在 Vercel 项目环境变量中创建 `BLOB_READ_WRITE_TOKEN`，仅放入生产/预览部署环境及受信任的 GitHub Actions Secret。不要写入 `index.html`、`site.js`、仓库 JSON 或客户端代码。
-3. 在构建环境安装 `@vercel/blob`，提交 `package.json` 与锁文件。建议新增 `scripts/upload-release-assets.mjs`，由 GitHub Actions Release job 在生成 SHA-256 后调用。脚本上传当前 tag 的安装包和校验文件，路径固定为 `releases/<tag>/<asset-name>`，禁止覆盖不同 tag 的文件。
+1. Public Blob Store 已创建并连接项目。Public Blob 的读取 URL 可公开访问，写入凭据必须保密。
+2. 将 `BLOB_READ_WRITE_TOKEN` 添加为 GitHub 仓库 Actions Secret，使 Release workflow 可以上传对象。Vercel 项目自身已通过 Store 连接获得该变量。
+3. Release workflow 在发布 GitHub Release 后下载公开资产，运行 `scripts/sync-release-to-blob.mjs` 上传。路径固定为 `releases/<tag>/<asset-name>`；不同 tag 不会互相覆盖，同一 tag 重跑会更新对应对象。
 
-示意代码：
-
-```js
-import { readFile } from 'node:fs/promises';
-import { put } from '@vercel/blob';
-
-const blob = await put(`releases/${tag}/${assetName}`, await readFile(filePath), {
-  access: 'public',
-  addRandomSuffix: false,
-  contentType: contentTypeFor(assetName),
-  token: process.env.BLOB_READ_WRITE_TOKEN
-});
-```
-
-4. 上传脚本逐个读取资产的 SHA-256，并写出清单，例如 `releases/<tag>/manifest.json`：
+4. 上传脚本逐个计算 SHA-256，并最后写出稳定清单 `releases/latest.json`。字段与当前实现一致：
 
 ```json
 {
-  "tag": "vX.Y.Z",
+  "tag_name": "vX.Y.Z",
   "assets": [
     {
       "name": "The-Melody-of-Oblivion-Remake-Windows-x64.exe",
       "platform": "Windows-x64",
       "size": 93960000,
-      "sha256": "由构建产物计算的 64 位十六进制值",
-      "url": "https://<public-blob-url>"
+      "digest": "sha256:<64 位十六进制值>",
+      "browser_download_url": "https://<public-blob-url>",
+      "github_download_url": "https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>"
     }
   ]
 }
 ```
 
-5. 上传完当前版本的所有资产后，最后更新一个 `latest.json` 清单，包含 tag、Release 页面 URL、每个平台的文件名/大小/SHA-256/Blob URL。只有全部资产上传成功后才发布新清单，避免网站指向未完成的上传。
-6. 让 `api/latest-release.js` 从 Blob 的 `latest.json` 返回相同字段，让 `site.js` 从这份 JSON 取版本、下载 URL 和校验值；`api/download.js` 校验平台、文件名和 URL 后重定向到 Blob URL。迁移期保留 GitHub Releases 作为故障回退，官方线路或清单不可用时仍可跳转 GitHub。
-7. 在 Release job 中先上传 Blob，再发布或更新 `latest.json`，最后保留当前 GitHub Release 上传步骤。验证 Windows、macOS、Linux 每个资产的下载、SHA-256、浏览器 Range/断点续传行为和回退链路后，再决定是否停止 GitHub 镜像线路。
+5. 只有全部资产上传成功后才更新 `releases/latest.json`，避免网站指向未完成的上传。
+6. `api/latest-release.js` 从 Blob 清单读取版本、下载 URL 和校验值；页面默认直接下载 Blob URL，其他线路及 GitHub 原始链接继续保留。
+7. 配置 GitHub Actions Secret 后，创建一个测试 Release 验证 Windows、macOS、Linux 下载、SHA-256、Range/断点续传和 GitHub 回退链路。若 Secret 尚未配置，Release 会正常发布到 GitHub，但 Blob 同步会跳过并给出警告。
 
 ### 浏览器直传结构（备选）
 
