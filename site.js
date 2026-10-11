@@ -49,6 +49,9 @@ const translations = {
   "scene.text": "Your world is waiting.<br>Let's go.",
   "download.title": "Your next adventure starts here.",
   "download.body": "Choose your system and architecture to get the latest build.",
+  "download.github": "GitHub repository ↗",
+  "download.license": "GNU AGPL-3.0 license",
+  "download.latest": "Latest release",
   "download.platform": "Choose system",
   "download.source": "Download source (switch if a download fails)",
   "download.official": "GitHub official",
@@ -111,6 +114,7 @@ function detectPlatform() {
 
 function updateDownloadLink() {
   const english = document.documentElement.lang === "en";
+  document.querySelector("#latest-version").textContent = latestRelease?.tag_name ?? "—";
   const target = downloadPlatform.value;
   const extension = target.startsWith("Windows") ? ".exe" : target.startsWith("macOS") ? ".zip" : ".AppImage";
   const asset = latestRelease?.assets?.find((item) =>
