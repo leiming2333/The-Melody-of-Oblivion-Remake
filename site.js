@@ -61,6 +61,7 @@ const translations = {
   "download.source": "Download source (switch if a download fails)",
   "download.official": "GitHub official",
   "download.button": "View releases",
+  "download.alternative": "GitHub original download",
   "download.cloud": "Cloud downloads",
   "download.baidu": "Baidu Netdisk ↗",
   "download.lanzou": "Lanzou Cloud ↗",
@@ -81,6 +82,7 @@ const partnerWindow = document.querySelector("#partner-window");
 const downloadPlatform = document.querySelector("#download-platform");
 const downloadSource = document.querySelector("#download-source");
 const downloadButton = document.querySelector("#download-button");
+const downloadAlternative = document.querySelector("#download-alternative");
 const downloadStatus = document.querySelector("#download-status");
 const checksumValue = document.querySelector("#checksum-value");
 const checksumCopy = document.querySelector("#checksum-copy");
@@ -139,8 +141,21 @@ function updateDownloadLink() {
   downloadButton.href = asset
     ? `/api/download?tag=${encodeURIComponent(latestRelease.tag_name)}&asset=${encodeURIComponent(asset.name)}&source=${encodeURIComponent(downloadSource.value)}`
     : releasesUrl;
+  downloadAlternative.hidden = !asset;
+  if (asset) {
+    const official = downloadSource.value === "official";
+    downloadAlternative.href = official
+      ? `https://gh-proxy.com/${asset.browser_download_url}`
+      : asset.browser_download_url;
+    downloadAlternative.textContent = official
+      ? (english ? "China accelerated download (gh-proxy.com)" : "国内加速下载（gh-proxy.com）")
+      : (english ? "GitHub official direct link" : "GitHub 官方直链");
+    downloadAlternative.setAttribute("aria-label", downloadAlternative.textContent);
+  }
   downloadButton.querySelector("#download-button-label").textContent = asset
-    ? (english ? "Download installer" : "下载安装包")
+    ? downloadSource.value === "official"
+      ? (english ? "Download from GitHub" : "GitHub 官方下载")
+      : (english ? `Accelerated download (${downloadSource.selectedOptions[0].textContent})` : `国内加速下载（${downloadSource.selectedOptions[0].textContent}）`)
     : (english ? "View releases" : "查看发行版本");
   downloadStatus.textContent = asset
     ? `${latestRelease.tag_name} · ${(asset.size / 1048576).toFixed(1)} MB · HTTPS`
