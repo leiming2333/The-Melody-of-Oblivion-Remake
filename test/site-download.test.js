@@ -65,3 +65,28 @@ test('release endpoint returns public metadata and reports upstream failure', as
   await latestRelease({}, failure);
   assert.equal(failure.code, 502);
 });
+
+test('release endpoint reads existing SHA-256 sidecars when asset digests are absent', async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const asset = {
+    name: 'The-Melody-of-Oblivion-Remake-Windows-x64.exe',
+    browser_download_url: 'https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/v1.6.0/launcher.exe'
+  };
+  const sidecar = {
+    name: `${asset.name}.sha256`,
+    browser_download_url: `${asset.browser_download_url}.sha256`
+  };
+  const release = { tag_name: 'v1.6.0', assets: [asset, sidecar] };
+  globalThis.fetch = async (url) => {
+    if (url === 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest') {
+      return { ok: true, json: async () => release };
+    }
+    assert.equal(url, sidecar.browser_download_url);
+    return { ok: true, text: async () => `${'A'.repeat(64)}  launcher.exe\n` };
+  };
+  const result = response();
+  await latestRelease({}, result);
+  assert.equal(result.code, 200);
+  assert.equal(result.body.assets[0].digest, `sha256:${'a'.repeat(64)}`);
+});
