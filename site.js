@@ -54,6 +54,9 @@ const translations = {
   "download.latest": "Latest release",
   "download.checksum": "Installer SHA-256 checksum",
   "download.copy": "Copy",
+  "download.changelog": "Recent release notes",
+  "download.changelogLoading": "Loading release notes…",
+  "download.changelogAll": "View all releases ↗",
   "download.platform": "Choose system",
   "download.source": "Download source (switch if a download fails)",
   "download.official": "GitHub official",
@@ -82,6 +85,8 @@ const downloadStatus = document.querySelector("#download-status");
 const checksumValue = document.querySelector("#checksum-value");
 const checksumCopy = document.querySelector("#checksum-copy");
 const checksumStatus = document.querySelector("#checksum-status");
+const changelogDetails = document.querySelector("#changelog-details");
+const changelogList = document.querySelector("#changelog-list");
 const releasesUrl = "https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases";
 const releaseApiUrl = "/api/latest-release";
 let latestRelease = null;
@@ -157,6 +162,36 @@ async function loadLatestRelease() {
   updateDownloadLink();
 }
 
+async function loadChangelog() {
+  try {
+    const response = await fetch("/api/releases", { headers: { Accept: "application/vnd.github+json" } });
+    if (!response.ok) throw new Error(`GitHub API: ${response.status}`);
+    const releases = await response.json();
+    changelogList.replaceChildren();
+    for (const release of releases.slice(0, 5)) {
+      if (!release || typeof release.tag_name !== "string") continue;
+      const item = document.createElement("li");
+      const heading = document.createElement("h3");
+      heading.textContent = release.tag_name;
+      item.append(heading);
+      const notes = document.createElement("p");
+      notes.textContent = typeof release.body === "string" && release.body.trim()
+        ? release.body.trim()
+        : (document.documentElement.lang === "en" ? "No release notes." : "此版本没有填写更新说明。");
+      item.append(notes);
+      changelogList.append(item);
+    }
+    if (!changelogList.children.length) throw new Error("No releases");
+  } catch {
+    changelogList.replaceChildren();
+    const item = document.createElement("li");
+    item.textContent = document.documentElement.lang === "en"
+      ? "Release notes are temporarily unavailable. Open GitHub Releases to see them."
+      : "暂时无法读取更新日志，请前往 GitHub Releases 查看。";
+    changelogList.append(item);
+  }
+}
+
 function closeMenu() {
   document.body.classList.remove("menu-open");
   menuButton.setAttribute("aria-expanded", "false");
@@ -187,6 +222,12 @@ document.querySelector("#current-year").textContent = String(new Date().getFullY
 downloadPlatform.value = detectPlatform();
 downloadPlatform.addEventListener("change", updateDownloadLink);
 downloadSource.addEventListener("change", updateDownloadLink);
+changelogDetails.addEventListener("toggle", () => {
+  if (changelogDetails.open && !changelogDetails.dataset.loaded) {
+    changelogDetails.dataset.loaded = "true";
+    loadChangelog();
+  }
+});
 checksumCopy.addEventListener("click", async () => {
   if (!checksumValue.textContent.match(/^[a-f\d]{64}$/i)) return;
   try {
