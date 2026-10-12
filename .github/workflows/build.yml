@@ -96,6 +96,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install upload dependency
+        run: npm ci --omit=dev
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
