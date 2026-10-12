@@ -13,7 +13,7 @@ const LATEST_RELEASE_URL = 'https://api.github.com/repos/leiming2333/The-Melody-
 const PLATFORM_KEYWORDS = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux: 'Linux' });
 const USER_AGENT = 'melody-of-oblivion-launcher-updater';
 
-// 更新安装包优先使用镜像，过慢或失败时按序切换，最后回退官方源。
+// 更新安装包优先使用 Blob，过慢或失败时切换 GitHub 镜像，最后回退官方源。
 const GITHUB_MIRRORS = Object.freeze([
   'https://ghproxy.net',
   'https://gh-proxy.com',
@@ -77,6 +77,15 @@ function pickAsset(assets, platform, arch) {
 
 function isGithubUrl(url) {
   return /^https:\/\/(github\.com|api\.github\.com)\//i.test(String(url));
+}
+
+function isPublicBlobUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname.endsWith('.public.blob.vercel-storage.com');
+  } catch {
+    return false;
+  }
 }
 
 function mirrorUrls(url) {
@@ -422,22 +431,30 @@ class UpdateManager {
     return limited.replace(/\u0000/g, '');
   }
 
-  downloadCandidates(assetUrl, assetName) {
-    if (!isGithubUrl(assetUrl)) return [{ url: assetUrl, enforceMinSpeed: false }];
+  downloadCandidates(assetUrl, assetName, githubDownloadUrl = null) {
+    const blob = isPublicBlobUrl(assetUrl);
+    if (!blob && !isGithubUrl(assetUrl)) return [{ url: assetUrl, enforceMinSpeed: false }];
+    const tag = this.release?.tag_name ?? '';
+    const githubUrl = blob
+      ? isGithubUrl(githubDownloadUrl)
+        ? githubDownloadUrl
+        : `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(assetName)}`
+      : assetUrl;
     const websiteUrl = new URL('/api/download', WEBSITE_ORIGIN);
-    websiteUrl.searchParams.set('tag', this.release?.tag_name ?? '');
+    websiteUrl.searchParams.set('tag', tag);
     websiteUrl.searchParams.set('asset', assetName);
+    websiteUrl.searchParams.set('source', 'blob');
     return [
-      ...mirrorUrls(assetUrl).map((url) => ({ url, enforceMinSpeed: true })),
-      { url: websiteUrl.href, enforceMinSpeed: true },
-      { url: assetUrl, enforceMinSpeed: true },
+      { url: blob ? assetUrl : websiteUrl.href, enforceMinSpeed: true },
+      ...mirrorUrls(githubUrl).map((url) => ({ url, enforceMinSpeed: true })),
+      { url: githubUrl, enforceMinSpeed: true },
       // 所有镜像均不可用时，最后回退官方直连并放宽限速
-      { url: assetUrl, enforceMinSpeed: false }
+      { url: githubUrl, enforceMinSpeed: false }
     ];
   }
 
-  async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress) {
-    const candidates = this.downloadCandidates(assetUrl, assetName);
+  async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress, githubDownloadUrl = null) {
+    const candidates = this.downloadCandidates(assetUrl, assetName, githubDownloadUrl);
     let lastError = null;
     for (const candidate of candidates) {
       try {
@@ -478,7 +495,7 @@ class UpdateManager {
           progress: downloaded,
           message: `正在后台下载更新 ${downloaded}%`
         });
-      });
+      }, asset.github_download_url);
       this.setState({ status: 'verifying', progress: 100, message: '正在校验更新包…' });
       await this.verifyDownloadedFile(asset, temporaryPath);
       await this.fileSystem.rename(temporaryPath, targetPath);

@@ -7,6 +7,7 @@
 - GitHub Actions 会为安装包生成 `.sha256` 文件并保留在 GitHub Releases；站点日志仍从 GitHub Release API 读取。
 - `download` Public Blob Store 已连接到网站项目，启用了 `BLOB_READ_WRITE_TOKEN`，区域为 HKG1。
 - 网站和 Release 工作流现已支持 Blob：工作流发布 GitHub Release 后重新下载公开资产、计算 SHA-256、上传至 `releases/<tag>/`，最后更新 `releases/latest.json`。网站默认从 Blob 下载；对象不存在时回退 GitHub。
+- 启动器更新也优先读取网站 `/api/latest-release` 的 Blob 清单，并直接下载所选平台的公共 Blob URL。Blob 连接失败、停滞或速度过慢时，按清单中的 `github_download_url` 切换 GitHub 镜像与官方源；若清单接口回退 GitHub，启动器先尝试网站 `/api/download?source=blob`。更新包仍校验大小和 SHA-256，客户端无需 Blob 写入令牌。这些行为随新的启动器构建生效。
 - 自动同步还需要在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加 `BLOB_READ_WRITE_TOKEN`。该值应从 Vercel Blob Store 凭据中取得，不要提交到仓库。
 - 已有 Release 可在 GitHub Actions 中运行 **Sync an existing release to Vercel Blob**，输入 tag（例如 `v1.6.1`）进行首次回填。
 

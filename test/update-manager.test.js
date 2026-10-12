@@ -342,11 +342,12 @@ test('镜像下载失败时自动切换下一条镜像', async () => {
   });
   const state = await manager.check();
   assert.equal(state.status, 'downloaded');
-  assert.equal(calls.download[0].url, `${GITHUB_MIRRORS[0]}/${githubAssets[0].browser_download_url}`);
-  assert.equal(calls.download[1].url, `${GITHUB_MIRRORS[1]}/${githubAssets[0].browser_download_url}`);
+  assert.equal(new URL(calls.download[0].url).searchParams.get('source'), 'blob');
+  assert.equal(calls.download[1].url, `${GITHUB_MIRRORS[0]}/${githubAssets[0].browser_download_url}`);
+  assert.equal(calls.download[2].url, `${GITHUB_MIRRORS[1]}/${githubAssets[0].browser_download_url}`);
 });
 
-test('所有镜像失败时回退官网下载入口', async () => {
+test('GitHub release metadata uses the website Blob download entry first', async () => {
   const { manager, calls } = fixture({
     assets: githubAssets,
     downloadFile: async (url) => {
@@ -355,7 +356,65 @@ test('所有镜像失败时回退官网下载入口', async () => {
     }
   });
   assert.equal((await manager.check()).status, 'downloaded');
-  assert.equal(calls.download.length, GITHUB_MIRRORS.length + 1);
+  assert.equal(calls.download.length, 1);
+  const url = new URL(calls.download[0].url);
+  assert.equal(url.pathname, '/api/download');
+  assert.equal(url.searchParams.get('source'), 'blob');
+  assert.equal(url.searchParams.get('tag'), 'v9.9.9');
+  assert.equal(url.searchParams.get('asset'), githubAssets[0].name);
+});
+
+test('Blob manifests download the matching platform directly without a client token', async () => {
+  const assets = releaseAssets.map((asset) => ({
+    ...asset,
+    browser_download_url: `https://fixture.public.blob.vercel-storage.com/releases/v9.9.9/${asset.name}`,
+    github_download_url: `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/v9.9.9/${asset.name}`
+  }));
+  for (const [platform, arch] of [['win32', 'x64'], ['win32', 'ia32'], ['win32', 'arm64'], ['linux', 'x64'], ['linux', 'arm'], ['darwin', 'arm64']]) {
+    const { manager, calls } = fixture({ assets, platform, arch });
+    assert.equal((await manager.check()).status, 'downloaded');
+    assert.equal(calls.download.length, 1);
+    assert.equal(calls.download[0].url, pickAsset(assets, platform, arch).browser_download_url);
+    assert.equal(calls.updateReady.length, 1);
+  }
+});
+
+test('failed Blob and mirrors fall back to the matching GitHub asset with relaxed speed', async () => {
+  const asset = {
+    ...githubAssets[0],
+    browser_download_url: `https://fixture.public.blob.vercel-storage.com/releases/v9.9.9/${githubAssets[0].name}`,
+    github_download_url: githubAssets[0].browser_download_url
+  };
+  const { manager, calls } = fixture({
+    assets: [asset],
+    downloadFile: async (url, targetPath, _onProgress, options) => {
+      calls.download.push({ url, targetPath, options });
+      if (options.enforceMinSpeed) throw Object.assign(new Error('当前下载源速度过慢'), { code: 'SLOW_SOURCE' });
+    }
+  });
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(calls.download[0].url, asset.browser_download_url);
+  assert.deepEqual(calls.download.slice(1, 1 + GITHUB_MIRRORS.length).map((call) => call.url),
+    GITHUB_MIRRORS.map((mirror) => `${mirror}/${asset.github_download_url}`));
+  assert.equal(calls.download.at(-1).url, asset.github_download_url);
+  assert.equal(calls.download.at(-1).options.enforceMinSpeed, false);
+  assert.ok(calls.download.every((call) => call.targetPath === calls.download[0].targetPath));
+});
+
+test('Blob manifests without a GitHub URL reconstruct the versioned fallback', async () => {
+  const asset = {
+    ...githubAssets[0],
+    browser_download_url: `https://fixture.public.blob.vercel-storage.com/releases/v9.9.9/${githubAssets[0].name}`
+  };
+  const { manager, calls } = fixture({
+    assets: [asset],
+    downloadFile: async (url) => {
+      calls.download.push({ url });
+      if (url === asset.browser_download_url) throw new Error('下载更新失败（HTTP 404）');
+    }
+  });
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(calls.download[1].url, `${GITHUB_MIRRORS[0]}/${githubAssets[0].browser_download_url}`);
 });
 
 test('所有下载源均失败时报告聚合错误', async () => {
@@ -445,7 +504,8 @@ test('real file verification accepts valid bytes and removes a tampered update',
   const expected = Buffer.from('valid update bytes');
   const binary = {
     name: 'Launcher-v9.9.9-Windows-x64.exe',
-    browser_download_url: 'https://example.com/update',
+    browser_download_url: 'https://fixture.public.blob.vercel-storage.com/releases/v9.9.9/update.exe',
+    github_download_url: 'https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/v9.9.9/update.exe',
     size: expected.length,
     digest: `sha256:${crypto.createHash('sha256').update(expected).digest('hex')}`
   };
