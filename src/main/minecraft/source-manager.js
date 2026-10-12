@@ -45,19 +45,32 @@ function throwIfAborted(signal) {
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 12000, consumeResponse) {
   const { controller, timer } = createTimeoutSignal(timeoutMs);
-  const signals = [controller.signal, options.signal].filter(Boolean);
+  const { validateRedirect, ...fetchOptions } = options;
+  const signals = [controller.signal, fetchOptions.signal].filter(Boolean);
   const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
 
   try {
-    const response = await fetch(url, {
-      redirect: 'follow',
-      ...options,
-      headers: {
-        ...DEFAULT_HEADERS,
-        ...options.headers
-      },
-      signal
-    });
+    let currentUrl = String(url);
+    let response;
+    for (let redirects = 0; redirects <= 10; redirects += 1) {
+      if (validateRedirect) await validateRedirect(currentUrl);
+      response = await fetch(currentUrl, {
+        redirect: validateRedirect ? 'manual' : 'follow',
+        ...fetchOptions,
+        headers: {
+          ...DEFAULT_HEADERS,
+          ...fetchOptions.headers
+        },
+        signal
+      });
+      const location = response.headers?.get?.('location');
+      if (!validateRedirect || ![301, 302, 303, 307, 308].includes(response.status) || !location) break;
+      await response.body?.cancel().catch(() => {});
+      currentUrl = new URL(location, currentUrl).href;
+    }
+    if (response?.status >= 300 && response.status < 400 && response.headers?.get?.('location')) {
+      throw new Error('下载地址重定向次数过多');
+    }
     return consumeResponse ? await consumeResponse(response) : response;
   } finally {
     clearTimeout(timer);

@@ -295,7 +295,7 @@ function createDownloadSegments(
   }).filter((segment) => segment.start <= segment.end);
 }
 
-async function supportsRangeDownloads(url, totalSize, signal) {
+async function supportsRangeDownloads(url, totalSize, signal, validateRedirect) {
   throwIfAborted(signal);
   try {
     const response = await fetchWithTimeout(url, {
@@ -303,7 +303,8 @@ async function supportsRangeDownloads(url, totalSize, signal) {
         Range: 'bytes=0-0',
         'Accept-Encoding': 'identity'
       },
-      signal
+      signal,
+      validateRedirect
     }, 20000);
     const contentRange = response.headers.get('content-range') ?? '';
     const supported = response.status === 206 && contentRange.endsWith(`/${totalSize}`);
@@ -315,14 +316,15 @@ async function supportsRangeDownloads(url, totalSize, signal) {
   }
 }
 
-async function downloadSegment(url, segment, destination, signal, onChunk) {
+async function downloadSegment(url, segment, destination, signal, onChunk, validateRedirect) {
   throwIfAborted(signal);
   const response = await fetchWithTimeout(url, {
     headers: {
       Range: `bytes=${segment.start}-${segment.end}`,
       'Accept-Encoding': 'identity'
     },
-    signal
+    signal,
+    validateRedirect
   }, 30000);
   if (response.status !== 206 || !response.body) {
     throw new Error(`服务器不支持分段请求：HTTP ${response.status}`);
@@ -343,7 +345,7 @@ async function downloadSegment(url, segment, destination, signal, onChunk) {
 
 async function downloadFileSegmented(url, temporary, task) {
   const segments = createDownloadSegments(task.size, task.segmentConcurrency);
-  if (segments.length < 2 || !(await supportsRangeDownloads(url, task.size, task.signal))) {
+  if (segments.length < 2 || !(await supportsRangeDownloads(url, task.size, task.signal, task.validateRedirect))) {
     return undefined;
   }
 
@@ -356,7 +358,8 @@ async function downloadFileSegmented(url, temporary, task) {
         segment,
         chunkPaths[segment.index],
         poolSignal,
-        task.onChunk
+        task.onChunk,
+        task.validateRedirect
       );
     }, task.signal);
 
@@ -420,7 +423,10 @@ async function downloadFile(task) {
       }
 
       if (!segmentResult) {
-        const response = await fetchWithTimeout(url, { signal: attemptSignal }, 20000);
+        const response = await fetchWithTimeout(url, {
+          signal: attemptSignal,
+          validateRedirect: task.validateRedirect
+        }, 20000);
         if (!response.ok || !response.body) {
           throw new Error(`HTTP ${response.status}`);
         }

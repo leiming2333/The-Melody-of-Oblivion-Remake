@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
-[![Source](https://img.shields.io/badge/Source-v1.6.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.6.5-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> The current source version is `1.6.0` and retains Microsoft sign-in. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases; see the Release page for available versions. Back up your Minecraft data before testing.
+> The current source version is `1.6.5`, with Microsoft, offline, and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
 
 ## About this project
 
@@ -35,7 +35,7 @@ The current repository starts a new implementation; its version numbers and code
 ## What is implemented
 
 - **Game versions** — browse Mojang's version manifest, detect local installations, download Vanilla versions, verify required files, and move removable profiles to the recycle bin.
-- **Mod loaders** — discover and install Fabric, Forge, and NeoForge through a shared workflow.
+- **Mod loaders** — discover and install Fabric, Forge, NeoForge, and Quilt through a shared workflow.
 - **Resilient downloads** — choose between Mojang-hosted endpoints and BMCLAPI, probe sources in automatic mode, use configurable task concurrency, split large files with HTTP Range requests, verify SHA-1 metadata, cancel active work, and retry alternate sources.
 - **Accounts** — create offline profiles, sign in with a Microsoft device code, or use LittleSkin Yggdrasil; sync skin avatars, refresh online credentials before launch, and keep tokens out of the renderer process.
 - **Java management** — match the Java major version required by the selected game; scan system installations and managed runtimes. Download Java 8, 16, 17, 21, or 25 from the button next to the Java path setting, with progress and cancellation. Downloads prefer Azul JRE and fall back to Adoptium, use parallel transfers, and verify SHA-256. Launching without the required Java opens settings instead of starting a download.
@@ -45,6 +45,16 @@ The current repository starts a new implementation; its version numbers and code
 - **Desktop UI** — a compact fixed-size frameless Electron window with version, account, download, launch, and settings flows.
 
 The automated test suite covers accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, local version management, and launcher updates.
+
+## Actual interface
+
+These screenshots were captured from the current `1.6.5` Electron source, with no accounts added or games installed.
+
+![Actual launcher home screen with the default Desert Lake wallpaper](assets/launcher-screenshot.png)
+
+![Actual account management screen with Microsoft, offline, and LittleSkin sign-in](assets/launcher-accounts.png)
+
+The website shows the actual home and account screens and uses the same Desert Lake scene. Its download section offers system, architecture, and source selection. A separate release-notes section opens by default and shows only the latest version. The website does not display installer SHA-256 values; launcher updates still verify them before installation.
 
 ## Current limitations
 
@@ -58,7 +68,7 @@ The automated test suite covers accounts, authentication, downloads, Java select
 
 ## Requirements
 
-- Windows 10 or Windows 11
+- Windows 10/11, macOS, or Linux, with a download matching the device architecture
 - Node.js 22 or later
 - npm compatible with the committed lockfile
 - An internet connection for metadata, game files, authentication, and managed Java downloads
@@ -89,9 +99,9 @@ Download, loader, modpack, Java download and game-launch services initialize on 
 | `npm run check` | Syntax-check the main, preload, and renderer JavaScript |
 | `npm test` | Run the Node.js test suite |
 | `npm run smoke` | Load the Electron window with temporary user data and exit |
-| `npm run build:win` | Build Windows x64 portable EXE with a persistent runtime |
-| `npm run build:linux` | Build Linux x64 AppImage and deb packages |
-| `npm run build:mac` | Build macOS x64 dmg and zip packages |
+| `npm run build:win` | Build Windows portable EXE with a persistent runtime |
+| `npm run build:linux` | Build Linux AppImage |
+| `npm run build:mac` | Build macOS zip packages |
 
 ## Repository layout
 
@@ -110,7 +120,7 @@ site.js                   Landing-page translations and behavior
 styles.css                Landing-page styles
 ```
 
-The landing page in the repository root and the Electron renderer under `src/renderer` are separate interfaces.
+The repository root contains the website, while `src/renderer` contains the Electron launcher. The website displays actual launcher captures from `assets/launcher-screenshot.png` and `assets/launcher-accounts.png`; recapture them when the launcher interface changes.
 
 ## Security notes
 
@@ -127,7 +137,7 @@ Security-sensitive reports should not include account files, access tokens, refr
 
 - Finish modpack compatibility and recovery paths.
 - Improve error messages and cancellation behavior across the UI.
-- Add repeatable Windows packaging and release artifacts.
+- Improve repeatable multi-platform builds and release artifacts.
 - Polish per-platform update installation (Windows old-file cleanup and automatic macOS replacement).
 
 ## Historical references

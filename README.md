@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
-[![Source](https://img.shields.io/badge/Source-v1.6.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.6.5-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.6.0`，保留 Microsoft 登录。已发布的安装包可通过[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 获取，具体版本以 Release 页面为准。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.6.5`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -35,7 +35,7 @@
 ## 已实现功能
 
 - **游戏版本**：浏览 Mojang 版本清单、识别本地安装、下载原版游戏、验证所需文件，并将可移除的配置移动到回收站。
-- **模组加载器**：通过统一流程查询并安装 Fabric、Forge 与 NeoForge。
+- **模组加载器**：通过统一流程查询并安装 Fabric、Forge、NeoForge 与 Quilt。
 - **可靠下载**：在 Mojang 官方源与 BMCLAPI 之间选择；自动模式会测速；支持任务并发、大文件 HTTP Range 分段、SHA-1 校验、取消下载及失败后切换来源重试。
 - **账户系统**：支持离线账户、Microsoft 设备代码登录及 LittleSkin Yggdrasil；可同步皮肤头像、启动前刷新在线凭据，并阻止令牌进入渲染进程。
 - **Java 管理**：匹配游戏所需的 Java 主版本，检测系统安装与启动器托管环境。在 Java 路径设置旁手动下载 Java 8、16、17、21 或 25，支持进度与取消；优先 Azul JRE，失败后切换 Adoptium，使用并行下载与 SHA-256 校验。启动时缺少所需 Java 会打开设置，不再自动下载。
@@ -45,6 +45,16 @@
 - **桌面界面**：紧凑的固定尺寸无边框 Electron 窗口，覆盖版本、账户、下载、启动及设置流程。
 
 自动化测试覆盖账户、身份验证、下载、Java 选择、游戏启动、加载器、整合包、设置、本地版本管理及启动器更新等领域。
+
+## 实际界面
+
+以下截图来自当前 `1.6.5` 源码运行的 Electron 启动器，截图时尚未添加账户或安装游戏。
+
+![沙漠湖泊默认壁纸与启动器主界面](assets/launcher-screenshot.png)
+
+![Microsoft、离线和 LittleSkin 账户管理实际界面](assets/launcher-accounts.png)
+
+官网首屏使用上面的主界面截图，账户介绍使用账户管理截图，背景也采用沙漠湖泊场景。下载区可选择系统、架构和下载来源。版本更新公告单独显示，默认展开，只展示最新一个版本。官网不展示安装包的 SHA-256 校验值，启动器安装更新前仍会校验 SHA-256。
 
 ## 当前限制
 
@@ -58,7 +68,7 @@
 
 ## 运行要求
 
-- Windows 10/11、macOS 或 Linux x64
+- Windows 10/11、macOS 或 Linux，安装包架构需与设备匹配
 - Node.js 22 或更高版本
 - 与已提交锁文件兼容的 npm
 - 用于元数据、游戏文件、账户验证及托管 Java 下载的网络连接
@@ -93,9 +103,9 @@ Java 检测结果保存在用户数据目录的 `java-cache.json`，可执行文
 | `npm run check` | 检查主进程、预加载脚本与渲染脚本语法 |
 | `npm test` | 运行 Node.js 自动化测试 |
 | `npm run smoke` | 使用临时用户数据加载 Electron 窗口并退出 |
-| `npm run build:win` | 构建 Windows x64 持久运行目录便携 EXE |
-| `npm run build:linux` | 构建 Linux x64 AppImage 与 deb 包 |
-| `npm run build:mac` | 构建 macOS x64 dmg 与 zip 包 |
+| `npm run build:win` | 构建 Windows 持久运行目录便携 EXE |
+| `npm run build:linux` | 构建 Linux AppImage |
+| `npm run build:mac` | 构建 macOS zip 包 |
 
 ## 仓库结构
 
@@ -114,7 +124,7 @@ site.js                   落地页翻译与交互逻辑
 styles.css                落地页样式
 ```
 
-仓库根目录的落地页与 `src/renderer` 下的 Electron 界面是两个不同的界面。
+官网位于仓库根目录，Electron 启动器界面位于 `src/renderer`。官网使用 `assets/launcher-screenshot.png` 和 `assets/launcher-accounts.png` 两张真实截图展示启动器；界面变化后需重新采集截图。
 
 ## 安全说明
 

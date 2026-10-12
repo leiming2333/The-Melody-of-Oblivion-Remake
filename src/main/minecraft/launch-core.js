@@ -162,8 +162,17 @@ function normalizeZipPath(entryName) {
   return segments;
 }
 
-async function extractNativeArchive(archivePath, destination, excludes = []) {
+async function extractNativeArchive(archivePath, destination, excludes = [], limits = {}) {
+  const maxArchiveBytes = limits.maxArchiveBytes ?? 512 * 1024 * 1024;
+  const maxEntries = limits.maxEntries ?? 20000;
+  const maxEntryBytes = limits.maxEntryBytes ?? 128 * 1024 * 1024;
+  const maxTotalBytes = limits.maxTotalBytes ?? 2 * 1024 * 1024 * 1024;
+  const archiveStat = await fs.stat(archivePath);
+  if (archiveStat.size > maxArchiveBytes) {
+    throw new Error('压缩包过大，无法安全解压');
+  }
   const archive = await fs.readFile(archivePath);
+  if (archive.length > maxArchiveBytes) throw new Error('压缩包过大，无法安全解压');
   const minimumOffset = Math.max(0, archive.length - 65557);
   let endOffset = -1;
   for (let offset = archive.length - 22; offset >= minimumOffset; offset -= 1) {
@@ -175,13 +184,16 @@ async function extractNativeArchive(archivePath, destination, excludes = []) {
   if (endOffset < 0) throw new Error(`原生库压缩包无效：${path.basename(archivePath)}`);
 
   const entryCount = archive.readUInt16LE(endOffset + 10);
+  if (entryCount > maxEntries) throw new Error('压缩包包含过多文件');
   let centralOffset = archive.readUInt32LE(endOffset + 16);
+  let totalExpandedBytes = 0;
   for (let index = 0; index < entryCount; index += 1) {
     if (archive.readUInt32LE(centralOffset) !== 0x02014b50) {
       throw new Error(`原生库目录损坏：${path.basename(archivePath)}`);
     }
     const method = archive.readUInt16LE(centralOffset + 10);
     const compressedSize = archive.readUInt32LE(centralOffset + 20);
+    const uncompressedSize = archive.readUInt32LE(centralOffset + 24);
     const nameLength = archive.readUInt16LE(centralOffset + 28);
     const extraLength = archive.readUInt16LE(centralOffset + 30);
     const commentLength = archive.readUInt16LE(centralOffset + 32);
@@ -194,6 +206,9 @@ async function extractNativeArchive(archivePath, destination, excludes = []) {
 
     const slashName = entryName.replaceAll('\\', '/');
     if (slashName.endsWith('/') || excludes.some((prefix) => slashName.startsWith(prefix))) continue;
+    if (uncompressedSize > maxEntryBytes) throw new Error('压缩包中的单个文件过大');
+    totalExpandedBytes += uncompressedSize;
+    if (totalExpandedBytes > maxTotalBytes) throw new Error('压缩包解压后的总大小过大');
     const segments = normalizeZipPath(slashName);
     if (segments.length === 0) continue;
     if (archive.readUInt32LE(localOffset) !== 0x04034b50) {
@@ -205,8 +220,14 @@ async function extractNativeArchive(archivePath, destination, excludes = []) {
     const compressed = archive.subarray(dataOffset, dataOffset + compressedSize);
     let content;
     if (method === 0) content = compressed;
-    else if (method === 8) content = await inflateRaw(compressed);
+    else if (method === 8) {
+      const remainingBytes = maxTotalBytes - (totalExpandedBytes - uncompressedSize);
+      content = await inflateRaw(compressed, {
+        maxOutputLength: Math.min(maxEntryBytes, remainingBytes)
+      });
+    }
     else throw new Error(`原生库使用了不支持的压缩格式：${method}`);
+    if (content.length !== uncompressedSize) throw new Error('压缩包文件大小信息无效');
 
     const destinationPath = safePath(destination, ...segments);
     await fs.mkdir(path.dirname(destinationPath), { recursive: true });

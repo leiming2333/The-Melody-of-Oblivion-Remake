@@ -8,7 +8,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   version: 3,
   javaPath: '',
   javaRuntimes: Object.freeze([]),
-  wallpaperIndex: 0,
+  wallpaperIndex: 3,
   isolateProfiles: true,
   gameDirectoryMode: 'local',
   downloadSource: 'auto',

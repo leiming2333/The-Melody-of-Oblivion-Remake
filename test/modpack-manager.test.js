@@ -4,6 +4,8 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { fetchWithTimeout } = require('../src/main/minecraft/source-manager');
+const { extractNativeArchive } = require('../src/main/minecraft/launch-core');
 const {
   ModpackManager,
   createInstanceId,
@@ -11,7 +13,8 @@ const {
   parseModrinthIndex,
   publicPackInfo,
   resolveCurseForgeFile,
-  safeRelativePath
+  safeRelativePath,
+  validatePublicDownloadUrl
 } = require('../src/main/minecraft/modpack-manager');
 
 function storedZip(entries) {
@@ -138,6 +141,44 @@ test('整合包路径必须留在实例目录内', () => {
   assert.throws(() => safeRelativePath('C:\\outside.jar'), /不安全/);
 });
 
+test('整合包下载地址拒绝私有网段、回环 IPv6 和带凭据的 URL', async () => {
+  const publicLookup = async () => [{ address: '8.8.8.8', family: 4 }];
+  await assert.rejects(validatePublicDownloadUrl('https://172.20.0.4/file.jar'));
+  await assert.rejects(validatePublicDownloadUrl('https://[::1]/file.jar'));
+  await assert.rejects(validatePublicDownloadUrl('https://user:pass@example.com/file.jar'));
+  await assert.rejects(validatePublicDownloadUrl('https://pack.example/file.jar', async () => [
+    { address: '192.168.1.8', family: 4 }
+  ]));
+  assert.equal(await validatePublicDownloadUrl('https://pack.example/file.jar', publicLookup),
+    'https://pack.example/file.jar');
+});
+
+test('整合包下载重定向会在请求目标前重新校验', async (t) => {
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    requests += 1;
+    assert.equal(options.redirect, 'manual');
+    return new Response(null, { status: 302, headers: { location: 'https://127.0.0.1/private' } });
+  });
+  await assert.rejects(fetchWithTimeout('https://pack.example/file.jar', {
+    validateRedirect: (url) => validatePublicDownloadUrl(url, async () => [
+      { address: '8.8.8.8', family: 4 }
+    ])
+  }), /不安全/);
+  assert.equal(requests, 1);
+});
+
+test('ZIP 解压限制单个条目的解压大小', async (t) => {
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-limit-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const archivePath = path.join(temporaryRoot, 'large-entry.zip');
+  await fs.writeFile(archivePath, storedZip([['large.bin', '12345']]));
+  await assert.rejects(
+    extractNativeArchive(archivePath, path.join(temporaryRoot, 'out'), [], { maxEntryBytes: 4 }),
+    /单个文件过大/
+  );
+});
+
 test('实例 ID 是可启动且稳定格式的安全标识', () => {
   assert.equal(createInstanceId('My Fancy Pack!', 123456), 'My-Fancy-Pack-2n9c');
   assert.match(createInstanceId('冒险整合包', 1), /^modpack-[0-9a-z]+$/);
@@ -204,7 +245,8 @@ test('Modrinth 安装先下载索引文件，再应用通用与客户端覆盖�
   });
   const manager = new ModpackManager({
     gameDirectory: path.join(temporaryRoot, 'game'),
-    loaderManager: { installLoader: async () => ({ profileId: '1.21.1' }) }
+    loaderManager: { installLoader: async () => ({ profileId: '1.21.1' }) },
+    lookupHost: async () => [{ address: '8.8.8.8', family: 4 }]
   });
 
   const result = await manager.install(archivePath);

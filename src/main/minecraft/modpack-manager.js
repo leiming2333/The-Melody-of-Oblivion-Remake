@@ -1,6 +1,8 @@
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const dns = require('node:dns/promises');
+const net = require('node:net');
 const {
   createDownloadProgressTracker,
   downloadFile,
@@ -14,6 +16,21 @@ const { fetchWithTimeout } = require('./source-manager');
 
 const MODPACK_EXTENSIONS = Object.freeze(['.mrpack', '.zip']);
 const INSTANCE_ID_PATTERN = /^[0-9A-Za-z._-]{1,100}$/;
+const PRIVATE_NETWORKS = new net.BlockList();
+for (const [address, prefix, family] of [
+  ['0.0.0.0', 8, 'ipv4'], ['10.0.0.0', 8, 'ipv4'], ['100.64.0.0', 10, 'ipv4'],
+  ['127.0.0.0', 8, 'ipv4'], ['169.254.0.0', 16, 'ipv4'], ['172.16.0.0', 12, 'ipv4'],
+  ['192.0.0.0', 24, 'ipv4'], ['192.0.2.0', 24, 'ipv4'], ['192.168.0.0', 16, 'ipv4'],
+  ['198.18.0.0', 15, 'ipv4'], ['198.51.100.0', 24, 'ipv4'], ['203.0.113.0', 24, 'ipv4'],
+  ['224.0.0.0', 4, 'ipv4'], ['240.0.0.0', 4, 'ipv4'], ['::', 128, 'ipv6'],
+  ['::1', 128, 'ipv6'], ['fc00::', 7, 'ipv6'], ['fe80::', 10, 'ipv6'], ['ff00::', 8, 'ipv6']
+]) PRIVATE_NETWORKS.addSubnet(address, prefix, family);
+
+function isBlockedAddress(address) {
+  const family = net.isIP(address);
+  if (!family || (family === 6 && address.toLowerCase().startsWith('::ffff:'))) return true;
+  return PRIVATE_NETWORKS.check(address, family === 4 ? 'ipv4' : 'ipv6');
+}
 
 function requireVersion(value, label = 'Minecraft') {
   const version = String(value ?? '');
@@ -46,15 +63,31 @@ function safeDownloadUrl(value) {
   const hostname = parsed.hostname.toLowerCase();
   if (
     parsed.protocol !== 'https:'
+    || parsed.username
+    || parsed.password
     || hostname === 'localhost'
-    || hostname === '127.0.0.1'
-    || hostname === '::1'
-    || /^10\./.test(hostname)
-    || /^192\.168\./.test(hostname)
+    || hostname.endsWith('.localhost')
+    || (net.isIP(hostname) && isBlockedAddress(hostname))
   ) {
     throw new Error(`整合包包含不安全的模组下载地址：${parsed.hostname}`);
   }
   return parsed.toString();
+}
+
+async function validatePublicDownloadUrl(value, lookupHost = defaultLookupHost) {
+  const validated = safeDownloadUrl(value);
+  const hostname = new URL(validated).hostname;
+  if (net.isIP(hostname)) return validated;
+  const addresses = await lookupHost(hostname);
+  if (!Array.isArray(addresses) || addresses.length === 0
+    || addresses.some(({ address }) => isBlockedAddress(address))) {
+    throw new Error(`整合包下载地址解析到不安全的网络：${hostname}`);
+  }
+  return validated;
+}
+
+function defaultLookupHost(hostname) {
+  return dns.lookup(hostname, { all: true, verbatim: true });
 }
 
 function loaderFromModrinthDependencies(dependencies = {}) {
@@ -252,11 +285,12 @@ async function resolveCurseForgeFile(entry, signal) {
 }
 
 class ModpackManager {
-  constructor({ gameDirectory, loaderManager, concurrency = 16, segmentConcurrency = 8 }) {
+  constructor({ gameDirectory, loaderManager, concurrency = 16, segmentConcurrency = 8, lookupHost = defaultLookupHost }) {
     this.gameDirectory = gameDirectory;
     this.loaderManager = loaderManager;
     this.concurrency = concurrency;
     this.segmentConcurrency = segmentConcurrency;
+    this.lookupHost = lookupHost;
   }
 
   async withExtractedPack(filePath, operation) {
@@ -343,7 +377,8 @@ class ModpackManager {
           destination: safePath(stagingDirectory, ...safeRelativePath(file.path).split('/')),
           urls: file.urls,
           sha1: file.sha1,
-          size: file.size
+          size: file.size,
+          validateRedirect: (url) => validatePublicDownloadUrl(url, this.lookupHost)
         }));
         const progressTracker = createDownloadProgressTracker({
           tasks,
@@ -443,5 +478,6 @@ module.exports = {
   publicPackInfo,
   resolveCurseForgeFile,
   safeRelativePath,
+  validatePublicDownloadUrl,
   validateModpackFile
 };

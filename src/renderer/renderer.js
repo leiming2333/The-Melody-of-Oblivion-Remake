@@ -141,6 +141,7 @@ let loaderLoadToken = 0;
 const activeGameProfiles = new Set();
 let accountState = { currentId: null, current: null, accounts: [] };
 let launcherSettings = {
+  wallpaperIndex: 3,
   javaPath: '',
   gameDirectoryMode: 'local',
   downloadSource: 'auto',
@@ -560,7 +561,7 @@ async function loadAccountState() {
 }
 
 function applySettingsToForm() {
-  wallpaperSelect.value = String(launcherSettings.wallpaperIndex ?? 0);
+  wallpaperSelect.value = String(launcherSettings.wallpaperIndex ?? 3);
   selectWallpaper(Number(wallpaperSelect.value));
   selectedJavaPath = launcherSettings.javaPath ?? '';
   savedJavaRuntimes = (launcherSettings.javaRuntimes ?? []).map((entry) => ({ ...entry }));
