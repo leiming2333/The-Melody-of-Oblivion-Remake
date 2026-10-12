@@ -8,17 +8,18 @@ const translations = {
   "nav.get": "Get the launcher <span aria-hidden=\"true\">↗</span>",
   "hero.kicker": "Minecraft launcher · Windows / macOS / Linux",
   "hero.title": "Melody Launcher",
-  "hero.subtitle": "Open the game. Pick up where you left off.",
-  "hero.description": "Versions, accounts, and mod loaders live in one place. Choose the world you want to play; the launcher handles the setup.",
+  "hero.subtitle": "Your block world starts here.",
+  "hero.description": "A desert lake greets you on launch. Manage accounts, install versions, adjust Java and memory, then start your game.",
+  "hero.caption": "Actual v1.6.4 home screen · Default Desert Lake scene",
   "hero.download": "Download launcher",
   "hero.preview": "See the launcher",
   "hero.release": "Choose a build here and download over HTTPS",
-  "intro.title": "Find the version you want<br>at a glance.",
-  "intro.body": "The launch screen shows games you've actually installed. Switch versions or accounts and open settings without digging through a download catalog.",
+  "intro.title": "Your familiar accounts,<br>all in one place.",
+  "intro.body": "Manage Microsoft, offline, and LittleSkin accounts at the bottom left. Switch installed versions and open launch settings on the right, or change your wallpaper in settings.",
   "fact.accounts": "account types",
   "fact.threads": "download threads",
   "fact.platforms": "desktop platforms",
-  "intro.caption": "Actual launcher interface",
+  "intro.caption": "Actual v1.6.4 account management screen",
   "features.title": "Fewer steps between install and play.",
   "features.lead": "The things you use often stay close. Download and installation progress stay visible.",
   "feature.download.title": "Downloads that keep moving",
@@ -106,8 +107,13 @@ function setLanguage(language) {
   languageButton.textContent = english ? "中文" : "EN";
   languageButton.setAttribute("aria-label", english ? "切换为中文" : "Switch language");
   document.querySelector(".launcher-figure img").alt = english
-    ? "Screenshot of the Melody Launcher interface"
-    : "忘却的旋律启动器界面截图";
+    ? "Actual Melody Launcher account screen with Microsoft, offline, and LittleSkin sign-in"
+    : "忘却的旋律启动器真实账户管理界面，包含 Microsoft、离线和 LittleSkin 登录";
+  document.querySelector(".hero-launcher-preview img").alt = english
+    ? "Actual Melody Launcher 1.6.4 home screen with the default Desert Lake wallpaper"
+    : "忘却的旋律 1.6.4 启动器真实主界面，默认沙漠湖泊壁纸";
+  document.querySelector(".hero-launcher-preview a").setAttribute("aria-label", english
+    ? "View the launcher account screen" : "查看启动器账户界面");
   updateDownloadLink();
   try { localStorage.setItem("melody-site-language", language); } catch {}
 }
