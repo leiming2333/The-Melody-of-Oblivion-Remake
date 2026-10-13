@@ -126,12 +126,19 @@ The repository root contains the website, while `src/renderer` contains the Elec
 
 - Electron runs the renderer with context isolation, sandboxing, and Node.js integration disabled.
 - Microsoft and LittleSkin access, refresh, and client tokens are removed from renderer-facing account objects.
-- Online-account tokens are encrypted at rest with Electron's `safeStorage`. If secure storage is unavailable, the launcher refuses to save or read online credentials instead of falling back to plain text.
+- Online-account tokens are encrypted at rest with Electron's `safeStorage`. Unavailable secure storage or an unprotected Linux backend such as `basic_text` blocks saving and reading online credentials. Offline accounts remain usable.
+- Only one launcher can run per user-data directory; opening it again focuses the existing window. Account and settings changes also share a queue across store objects targeting the same file.
 - Microsoft sign-in uses a public OAuth application ID; `MELODY_MICROSOFT_CLIENT_ID` can override it when building. The repository contains no client secret, and public Electron builds cannot keep an embedded Client ID confidential.
 - Download destinations, modpack paths, archive extraction, and remote mod URLs are validated to reduce path-traversal and unsafe-URL risks.
 - SHA-1 checks detect accidental corruption when upstream metadata provides a hash; SHA-1 should not be treated as a modern authenticity guarantee.
 
 Security-sensitive reports should not include account files, access tokens, refresh tokens, device codes, or personal Minecraft data.
+
+## Diagnostics and installation retries
+
+Java stdout and stderr are saved under `launcher-cache/game-logs` in the game root. Each log is limited to 2 MiB, with five recent logs retained by default; logs for running games remain available. Known account tokens and common credential fields are redacted, and full launch commands are not recorded. Crash messages include the log path. Check usernames, server addresses, and other personal details before sharing a log.
+
+Modpack previews read only the manifest. SHA-1-verified downloads are cached under `launcher-cache/modpack-files` in the game root and survive failed or cancelled installations. Every reuse verifies the file again; files without a valid hash are not cached. To reclaim space, remove this cache directory after closing games and stopping installations.
 
 ## Next steps
 
