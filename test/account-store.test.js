@@ -50,6 +50,24 @@ test('signing out of Microsoft clears the active selection and retains the saved
   assert.equal((await store.getAccount(before.current.id)).microsoftRefreshToken, 'refresh');
 });
 
+test('refreshing Microsoft credentials preserves selection while an explicit login selects the account', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-refresh-account-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new AccountStore(path.join(root, 'accounts.json'));
+  const credentials = {
+    uuid: '01234567-89ab-cdef-0123-456789abcdef',
+    name: 'Player_01', accessToken: 'old-access', microsoftRefreshToken: 'old-refresh'
+  };
+  const microsoftId = (await store.upsertMicrosoft(credentials)).currentId;
+  const offlineId = (await store.addOffline('Steve')).currentId;
+  assert.equal((await store.upsertMicrosoft({ ...credentials, accessToken: 'refreshed-access' }, { select: false })).currentId, offlineId);
+  assert.equal((await store.getAccount(microsoftId)).accessToken, 'refreshed-access');
+  await store.select(microsoftId);
+  await store.signOut(microsoftId);
+  assert.equal((await store.upsertMicrosoft({ ...credentials, accessToken: 'latest-access' }, { select: false })).currentId, null);
+  assert.equal((await store.upsertMicrosoft(credentials)).currentId, microsoftId);
+});
+
 test('Microsoft 档案可解析正版皮肤地址并拒绝非官方纹理域名', () => {
   const textureUrl = 'https://textures.minecraft.net/texture/012345abcdef';
   const profile = {

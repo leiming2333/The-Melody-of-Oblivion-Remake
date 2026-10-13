@@ -10,6 +10,120 @@ test('lazy account UI renders the current state without opening a dialog', async
   assert.equal(empty.hidden, false);
 });
 
+async function accountUiFixture(t, rename) {
+  const { renderAccountList } = await import('../src/renderer/modules/account-ui.mjs');
+  const previousDocument = globalThis.document;
+  const createElement = (tag) => ({
+    tag, children: [], listeners: {}, classList: { toggle() {} },
+    append(...children) { this.children.push(...children); },
+    replaceChildren() { this.children = []; },
+    addEventListener(event, handler, options) {
+      (this.listeners[event] ??= []).push({ handler, once: options?.once });
+    },
+    async dispatch(event, details = {}) {
+      const listeners = [...(this.listeners[event] ?? [])];
+      this.listeners[event] = listeners.filter((listener) => !listener.once);
+      return Promise.all(listeners.map(({ handler }) => handler(details)));
+    },
+    blur() { return this.dispatch('blur'); }
+  });
+  globalThis.document = { createElement };
+  t.after(() => { globalThis.document = previousDocument; });
+  const account = { id: 'offline:steve', type: 'offline', name: 'Steve', uuid: 'offline-uuid', skinModel: 'steve' };
+  const state = { accountState: { accounts: [account], currentId: account.id, current: account } };
+  const calls = [], cards = [], toasts = [];
+  const accountList = createElement('div');
+  const context = {
+    state, accountList, accountEmpty: {}, skinUrlForAccount: () => null,
+    applySkinAvatar: (element, value) => { element.accountName = value.name; },
+    accountsApi: {
+      rename: async (id, name) => {
+        calls.push(name);
+        if (rename) return rename(id, name);
+        if (name === 'Invalid') throw new Error('Invalid name');
+        const renamed = { ...account, name };
+        return { accounts: [renamed], currentId: id, current: renamed };
+      }
+    },
+    updateAccountCard: () => cards.push(state.accountState.current?.name),
+    showToast: (message) => toasts.push(message), readableError: (error) => error.message,
+    selectAccount() {}, skinModelNames: {}, setAccountSkinModel() {}, removeAccount() {}
+  };
+  renderAccountList(context);
+  const row = accountList.children[0];
+  return { ...context, input: row.children[1].children[0], avatar: row.children[0], calls, cards, toasts, account };
+}
+
+test('offline names can be saved repeatedly and a failed rename restores the latest saved name', async (t) => {
+  const { input, avatar, state, calls, cards, toasts } = await accountUiFixture(t);
+  await input.blur();
+  input.value = 'Alex';
+  await input.blur();
+  await input.blur();
+  input.value = 'Player_02';
+  await input.blur();
+  input.value = 'Invalid';
+  await input.blur();
+  assert.deepEqual(calls, ['Alex', 'Player_02', 'Invalid']);
+  assert.equal(input.value, 'Player_02');
+  assert.equal(state.accountState.current.name, 'Player_02');
+  assert.deepEqual(cards, ['Alex', 'Player_02']);
+  assert.equal(avatar.accountName, 'Player_02');
+  assert.equal(avatar.textContent, 'P');
+  assert.equal(toasts.at(-1), 'Invalid name');
+});
+
+test('successive pending offline renames save in order without replacing later text or account selection', async (t) => {
+  let entered, release;
+  const requested = new Promise((resolve) => { entered = resolve; });
+  const allowed = new Promise((resolve) => { release = resolve; });
+  const fixture = await accountUiFixture(t, async (id, name) => {
+    if (name === 'First') { entered(); await allowed; }
+    return { accounts: [{ id, name }], currentId: id, current: { id, name } };
+  });
+  const { input, avatar, state, calls, cards, toasts } = fixture;
+  input.value = 'First';
+  const first = input.blur();
+  await requested;
+  input.value = 'Latest';
+  const latest = input.blur();
+  const duplicate = input.blur();
+  const selected = { id: 'offline:other', type: 'offline', name: 'Other', uuid: 'other-uuid' };
+  state.accountState.accounts.push(selected);
+  state.accountState.currentId = selected.id;
+  state.accountState.current = selected;
+  release();
+  await Promise.all([first, latest, duplicate]);
+  assert.deepEqual(calls, ['First', 'Latest']);
+  assert.equal(input.value, 'Latest');
+  assert.equal(state.accountState.accounts[0].name, 'Latest');
+  assert.equal(state.accountState.currentId, selected.id);
+  assert.equal(state.accountState.current, selected);
+  assert.deepEqual(cards, ['Other', 'Other']);
+  assert.equal(avatar.accountName, 'Latest');
+  assert.deepEqual(toasts, ['已改名：Latest']);
+});
+
+test('a pending rename failure preserves text typed after the save began', async (t) => {
+  let entered, release;
+  const requested = new Promise((resolve) => { entered = resolve; });
+  const allowed = new Promise((resolve) => { release = resolve; });
+  const { input, state, calls } = await accountUiFixture(t, async (id, name) => {
+    if (name === 'Invalid') { entered(); await allowed; throw new Error('Invalid name'); }
+    return { accounts: [{ id, name }] };
+  });
+  input.value = 'Invalid';
+  const saving = input.blur();
+  await requested;
+  input.value = 'Newest';
+  release();
+  await saving;
+  assert.equal(input.value, 'Newest');
+  await input.blur();
+  assert.equal(state.accountState.current.name, 'Newest');
+  assert.deepEqual(calls, ['Invalid', 'Newest']);
+});
+
 test('lazy modpack UI installs through existing IPC and resets state after success or failure', async (t) => {
   const { installDroppedModpack } = await import('../src/renderer/modules/modpack-ui.mjs');
   const previousWindow = globalThis.window;

@@ -395,7 +395,7 @@ class MicrosoftAuthManager {
       refreshToken: tokenResult.payload.refresh_token ?? account.microsoftRefreshToken,
       fetchImpl: this.fetchImpl
     });
-    await this.accountStore.upsertMicrosoft(refreshed);
+    await this.accountStore.upsertMicrosoft(refreshed, { select: false });
     return this.accountStore.getAccount(refreshed.id);
   }
 

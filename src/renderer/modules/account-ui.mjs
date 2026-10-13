@@ -26,27 +26,55 @@ export function renderAccountList(context) {
       nameInput.maxLength = 16;
       nameInput.title = '点击修改玩家 ID（3–16 位英文字母、数字或下划线）';
       nameInput.spellcheck = false;
-      const commitRename = async () => {
+      let renameQueue = Promise.resolve();
+      let renameRevision = 0;
+      let pendingName = null;
+      const latestAccount = () => state.accountState.accounts.find((item) => item.id === account.id);
+      const commitRename = () => {
+        const currentAccount = latestAccount();
+        if (!currentAccount) return;
         const newName = nameInput.value.trim();
-        if (!newName || newName === account.name) {
-          nameInput.value = account.name;
+        if (!newName) {
+          nameInput.value = currentAccount.name;
           return;
         }
-        try {
-          if (accountsApi?.rename) {
-            state.accountState = await accountsApi.rename(account.id, newName);
-          } else {
-            state.accountState.accounts = state.accountState.accounts.map((item) => (
-              item.id === account.id ? { ...item, name: newName } : item
-            ));
-            state.accountState.current = state.accountState.accounts.find((a) => a.id === state.accountState.currentId) ?? null;
-          }
-          updateAccountCard();
-          showToast(`已改名：${newName}`);
-        } catch (error) {
-          nameInput.value = account.name;
-          showToast(readableError(error));
+        if (newName === pendingName || (!pendingName && newName === currentAccount.name)) {
+          return renameQueue;
         }
+        const revision = ++renameRevision;
+        pendingName = newName;
+        // Save successive edits in order so an earlier slow response cannot undo a later name.
+        renameQueue = renameQueue.then(async () => {
+          try {
+            const renamed = accountsApi?.rename
+              ? (await accountsApi.rename(account.id, newName)).accounts.find((item) => item.id === account.id)
+              : { name: newName };
+            if (!renamed || !latestAccount()) return;
+            state.accountState = {
+              ...state.accountState,
+              accounts: state.accountState.accounts.map((item) => (
+                item.id === account.id ? { ...item, name: renamed.name, updatedAt: renamed.updatedAt } : item
+              ))
+            };
+            state.accountState.current = state.accountState.accounts.find((item) => item.id === state.accountState.currentId) ?? null;
+            const savedAccount = latestAccount();
+            applySkinAvatar(avatar, savedAccount);
+            avatar.textContent = skinUrlForAccount(savedAccount) ? '' : savedAccount.name.slice(0, 1).toUpperCase();
+            updateAccountCard();
+            if (revision === renameRevision) {
+              if (nameInput.value.trim() === newName) nameInput.value = savedAccount.name;
+              showToast(`已改名：${savedAccount.name}`);
+            }
+          } catch (error) {
+            if (revision === renameRevision) {
+              if (nameInput.value.trim() === newName) nameInput.value = latestAccount()?.name ?? '';
+              showToast(readableError(error));
+            }
+          } finally {
+            if (revision === renameRevision) pendingName = null;
+          }
+        });
+        return renameQueue;
       };
       nameInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -54,7 +82,7 @@ export function renderAccountList(context) {
           nameInput.blur();
         }
       });
-      nameInput.addEventListener('blur', commitRename, { once: true });
+      nameInput.addEventListener('blur', commitRename);
       copy.append(nameInput);
     } else {
       const name = document.createElement('strong');

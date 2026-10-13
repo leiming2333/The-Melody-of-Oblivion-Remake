@@ -1,5 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const { AccountStore } = require('../src/main/accounts/account-store');
 const {
   DEVICE_CODE_ENDPOINT,
   MICROSOFT_SCOPE,
@@ -53,6 +57,52 @@ test('transient Microsoft refresh failures do not mark the account as signed out
     type: 'microsoft', microsoftClientId: CLIENT_ID,
     microsoftRefreshToken: 'refresh', accessTokenExpiresAt: 0
   }), (error) => error.code !== 'MICROSOFT_AUTH_EXPIRED');
+});
+
+test('Microsoft refresh preserves account selection or sign-out while the request is pending', async (t) => {
+  for (const action of ['select', 'sign-out']) {
+    await t.test(action, async (t) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-refresh-selection-'));
+      t.after(() => fs.rm(root, { recursive: true, force: true }));
+      const accountStore = new AccountStore(path.join(root, 'accounts.json'));
+      const offlineId = (await accountStore.addOffline('Steve')).currentId;
+      const microsoftId = (await accountStore.upsertMicrosoft({
+        uuid: '01234567-89ab-cdef-0123-456789abcdef', name: 'Player_01',
+        accessToken: 'old-access', microsoftRefreshToken: 'old-refresh',
+        microsoftClientId: CLIENT_ID, accessTokenExpiresAt: 0
+      })).currentId;
+      let entered, release;
+      const requested = new Promise((resolve) => { entered = resolve; });
+      const allowed = new Promise((resolve) => { release = resolve; });
+      const responses = [
+        jsonResponse({ access_token: 'new-ms-token', refresh_token: 'new-refresh' }),
+        ...minecraftExchangeResponses()
+      ];
+      const manager = new MicrosoftAuthManager({
+        clientId: CLIENT_ID, accountStore,
+        fetchImpl: async (url) => {
+          if (url === TOKEN_ENDPOINT) {
+            entered();
+            await allowed;
+          }
+          return responses.shift();
+        }
+      });
+      const refreshing = manager.ensureAccount(await accountStore.getCurrentAccount());
+      await requested;
+      try {
+        if (action === 'select') await accountStore.select(offlineId);
+        else await accountStore.signOut(microsoftId);
+      } finally {
+        release();
+      }
+      const refreshed = await refreshing;
+      assert.equal(refreshed.id, microsoftId);
+      assert.equal(refreshed.accessToken, 'minecraft-token');
+      assert.equal(refreshed.microsoftRefreshToken, 'new-refresh');
+      assert.equal((await accountStore.getState()).currentId, action === 'select' ? offlineId : null);
+    });
+  }
 });
 
 test('读取授权响应时保留超时、断网和无效 JSON 错误', async () => {
@@ -252,10 +302,12 @@ test('设备代码登录会等待授权并保存最终 Microsoft 账户', async 
   const calls = [];
   const progress = [];
   let savedAccount;
+  let savedOptions;
   const manager = new MicrosoftAuthManager({
     accountStore: {
-      async upsertMicrosoft(account) {
+      async upsertMicrosoft(account, options) {
         savedAccount = account;
+        savedOptions = options;
         return { currentId: account.id, current: account, accounts: [account] };
       }
     },
@@ -272,6 +324,7 @@ test('设备代码登录会等待授权并保存最终 Microsoft 账户', async 
   const state = await manager.complete(started.sessionId, 7, (entry) => progress.push(entry.phase));
   assert.equal(state.current.name, 'Player_01');
   assert.equal(savedAccount.accessToken, 'minecraft-token');
+  assert.equal(savedOptions, undefined);
   assert.equal(calls[0].url, DEVICE_CODE_ENDPOINT);
   assert.equal(new URLSearchParams(calls[0].options.body).get('client_id'), CLIENT_ID);
   assert.equal(calls[1].url, TOKEN_ENDPOINT);
