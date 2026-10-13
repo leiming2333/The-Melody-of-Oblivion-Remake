@@ -66,8 +66,8 @@ function forgeLoaderVersions(gameVersion, versions) {
 
 function neoForgeVersionPrefix(gameVersion) {
   const segments = gameVersion.split('.');
-  if (segments[0] === '1' && segments.length >= 3) {
-    return `${segments[1]}.${segments[2]}.`;
+  if (segments[0] === '1' && segments.length >= 2) {
+    return `${segments[1]}.${segments[2] ?? '0'}.`;
   }
   if (segments.length >= 2) {
     return `${segments[0]}.${segments[1]}.`;

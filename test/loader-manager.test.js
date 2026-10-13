@@ -42,6 +42,25 @@ test('loader version validation forwards cancellation to metadata fetching', asy
   assert.equal(manager.cache.size, 0);
 });
 
+test('NeoForge lists the correct Maven series for Minecraft 1.21 and newer version formats', async (t) => {
+  const manager = new MinecraftLoaderManager({ gameDirectory: 'unused', sourceManager: new MinecraftSourceManager() });
+  const artifactVersions = ['21.0.167', '21.0.165-beta', '21.1.243', '26.2.0.1-beta'];
+  t.mock.method(manager, 'installedProfileIds', async () => new Set());
+  t.mock.method(manager, 'fetchMetadata', async () => ({
+    data: `<versions>${artifactVersions.map((version) => `<version>${version}</version>`).join('')}</versions>`,
+    source: { id: 'official' }
+  }));
+  for (const [gameVersion, expected] of [
+    ['1.21', ['21.0.167', '21.0.165-beta']],
+    ['1.21.0', ['21.0.167', '21.0.165-beta']],
+    ['1.21.1', ['21.1.243']],
+    ['26.2', ['26.2.0.1-beta']]
+  ]) {
+    const result = await manager.listLoaderVersions(gameVersion, 'neoforge');
+    assert.deepEqual(result.versions.map((entry) => entry.version), expected, gameVersion);
+  }
+});
+
 async function writeJson(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(value));

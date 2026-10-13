@@ -27,6 +27,18 @@ async function writeMarker(gameDirectory, profileId) {
   );
 }
 
+async function writeInstance(gameDirectory, instanceId, profileId, name = instanceId) {
+  const instanceRoot = path.join(gameDirectory, 'melody-instances', instanceId);
+  await fs.mkdir(instanceRoot, { recursive: true });
+  await fs.writeFile(path.join(instanceRoot, '.melody-instance.json'), JSON.stringify({
+    schemaVersion: 1,
+    instanceId,
+    profileId,
+    name
+  }));
+  return instanceRoot;
+}
+
 test('删除版本只接受安全的启动配置 ID', () => {
   assert.equal(validateProfileId('fabric-loader-0.16.10-1.21.1'), 'fabric-loader-0.16.10-1.21.1');
   assert.throws(() => validateProfileId('../outside'), /格式无效/);
@@ -149,4 +161,51 @@ test('被加载器继承的原版不能先删除，独立配置会移到回收�
   assert.deepEqual(trashed, [
     path.join(gameDirectory, 'versions', 'fabric-loader-0.16.10-1.21.1')
   ]);
+});
+
+test('整合包引用的加载器受到删除保护，移除实例后才能删除', async (t) => {
+  const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-instance-delete-test-'));
+  t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
+  await writeProfile(gameDirectory, 'fabric-test', { type: 'release' });
+  const instanceRoot = await writeInstance(gameDirectory, 'adventure-pack', 'fabric-test', 'Adventure Pack');
+  const trashed = [];
+  const manager = new MinecraftVersionManager({
+    gameDirectory,
+    trashItem: async (target) => trashed.push(target)
+  });
+
+  await assert.rejects(manager.deleteProfile('fabric-test'), /请先删除.*Adventure Pack.*adventure-pack/);
+  assert.deepEqual(trashed, []);
+  await fs.access(path.join(gameDirectory, 'versions', 'fabric-test', 'fabric-test.json'));
+  await fs.access(path.join(instanceRoot, '.melody-instance.json'));
+
+  await fs.rm(instanceRoot, { recursive: true });
+  await manager.deleteProfile('fabric-test');
+  assert.deepEqual(trashed, [path.join(gameDirectory, 'versions', 'fabric-test')]);
+});
+
+test('版本依赖会包含继承链上的整合包并安全终止无关循环', async (t) => {
+  const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-instance-chain-test-'));
+  t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
+  await writeProfile(gameDirectory, 'base', { type: 'release' });
+  await writeProfile(gameDirectory, 'loader', { inheritsFrom: 'base' });
+  await writeProfile(gameDirectory, 'custom', { inheritsFrom: 'loader' });
+  await writeProfile(gameDirectory, 'cycle-a', { inheritsFrom: 'cycle-b' });
+  await writeProfile(gameDirectory, 'cycle-b', { inheritsFrom: 'cycle-a' });
+  await writeInstance(gameDirectory, 'pack', 'custom', 'Adventure Pack');
+  await writeInstance(gameDirectory, 'unrelated-pack', 'cycle-a');
+  const manager = new MinecraftVersionManager({ gameDirectory });
+
+  assert.deepEqual(await manager.findDependents('base'), [
+    'custom', 'loader', '整合包 Adventure Pack（pack）'
+  ]);
+  await assert.rejects(manager.deleteProfile('loader'), /Adventure Pack/);
+});
+
+test('即使版本目录缺失也会扫描实例的直接引用', async (t) => {
+  const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-instance-missing-version-test-'));
+  t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
+  await writeInstance(gameDirectory, 'pack', 'missing-loader');
+  const manager = new MinecraftVersionManager({ gameDirectory });
+  assert.deepEqual(await manager.findDependents('missing-loader'), ['整合包 pack（pack）']);
 });

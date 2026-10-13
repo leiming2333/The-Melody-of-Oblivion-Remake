@@ -149,18 +149,55 @@ class MinecraftVersionManager {
     try {
       entries = await fs.readdir(versionsRoot, { withFileTypes: true });
     } catch (error) {
-      if (error.code === 'ENOENT') return [];
-      throw error;
+      if (error.code !== 'ENOENT') throw error;
     }
 
-    const dependents = await Promise.all(entries
-      .filter((entry) => entry.isDirectory() && entry.name !== profileId)
+    const profiles = await Promise.all(entries
+      .filter((entry) => entry.isDirectory() && PROFILE_ID_PATTERN.test(entry.name))
       .map(async (entry) => {
-        if (!PROFILE_ID_PATTERN.test(entry.name)) return undefined;
         const metadata = await readProfileMetadata(versionsRoot, entry.name);
-        return metadata?.inheritsFrom === profileId ? entry.name : undefined;
+        return [entry.name, metadata?.inheritsFrom];
       }));
-    return dependents.filter(Boolean).sort();
+    const parents = new Map(profiles);
+    const usesProfile = (referencedId) => {
+      const visited = new Set();
+      while (typeof referencedId === 'string' && PROFILE_ID_PATTERN.test(referencedId)) {
+        if (referencedId === profileId) return true;
+        if (visited.has(referencedId)) return false;
+        visited.add(referencedId);
+        referencedId = parents.get(referencedId);
+      }
+      return false;
+    };
+    const dependents = profiles
+      .filter(([id]) => id !== profileId && usesProfile(id))
+      .map(([id]) => id);
+
+    const instancesRoot = safePath(this.gameDirectory, 'melody-instances');
+    let instanceEntries = [];
+    try {
+      instanceEntries = await fs.readdir(instancesRoot, { withFileTypes: true });
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    const instances = await Promise.all(instanceEntries
+      .filter((entry) => entry.isDirectory() && PROFILE_ID_PATTERN.test(entry.name))
+      .map(async (entry) => {
+        let metadata;
+        try {
+          metadata = JSON.parse(await fs.readFile(
+            safePath(instancesRoot, entry.name, '.melody-instance.json'),
+            'utf8'
+          ));
+        } catch (error) {
+          if (error.code === 'ENOENT' || error instanceof SyntaxError) return undefined;
+          throw error;
+        }
+        if (metadata?.schemaVersion !== 1 || metadata.instanceId !== entry.name
+          || !usesProfile(metadata.profileId)) return undefined;
+        return `整合包 ${String(metadata.name ?? entry.name)}（${entry.name}）`;
+      }));
+    return [...dependents, ...instances.filter(Boolean)].sort();
   }
 
   async deleteProfile(profileId) {
