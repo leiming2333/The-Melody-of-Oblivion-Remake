@@ -5,6 +5,8 @@ const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { spawn } = require('node:child_process');
+const { constants: fsConstants } = require('node:fs');
+const { isPublicBlobUrl, isStableRelease, withBlobDownloads } = require('../../shared/release-metadata');
 
 const UPDATE_CHANNEL = 'updater:state';
 const WEBSITE_ORIGIN = 'https://the-melody-of-o-r.ccwu.cc';
@@ -77,15 +79,6 @@ function pickAsset(assets, platform, arch) {
 
 function isGithubUrl(url) {
   return /^https:\/\/(github\.com|api\.github\.com)\//i.test(String(url));
-}
-
-function isPublicBlobUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' && url.hostname.endsWith('.public.blob.vercel-storage.com');
-  } catch {
-    return false;
-  }
 }
 
 function mirrorUrls(url) {
@@ -289,6 +282,7 @@ class UpdateManager {
 
   async fetchLatestRelease() {
     const candidates = [WEBSITE_RELEASE_URL, LATEST_RELEASE_URL, ...mirrorUrls(LATEST_RELEASE_URL)];
+    let websiteRelease = null;
     let lastError = null;
     for (const url of candidates) {
       try {
@@ -297,10 +291,23 @@ class UpdateManager {
           signal: AbortSignal.timeout(API_TIMEOUT_MS)
         });
         if (!response.ok) throw new Error(`获取 Release 信息失败（HTTP ${response.status}）`);
-        return await response.json();
+        const release = await response.json();
+        if (!isStableRelease(release)) throw new Error('Release 信息无效');
+        if (url === WEBSITE_RELEASE_URL) {
+          websiteRelease = release;
+          continue;
+        }
+        if (websiteRelease && isNewerVersion(websiteRelease.tag_name, release.tag_name)) {
+          throw new Error('发布源返回了较旧版本，继续核对最新版本');
+        }
+        return withBlobDownloads(release, websiteRelease);
       } catch (error) {
         lastError = error;
       }
+    }
+    // A cached release can prove an update exists, but cannot prove we are current.
+    if (websiteRelease && isNewerVersion(websiteRelease.tag_name, this.state.currentVersion)) {
+      return websiteRelease;
     }
     throw lastError ?? new Error('获取 Release 信息失败');
   }
@@ -391,6 +398,9 @@ class UpdateManager {
       const latest = String(release?.tag_name ?? '').trim();
       if (!latest) throw new Error('Release 信息缺少版本标签');
       this.release = release;
+      if (isNewerVersion(this.state.currentVersion, latest)) {
+        throw new Error('发布源返回了较旧版本，无法确认最新版本，请稍后重试');
+      }
       if (!isNewerVersion(latest, this.state.currentVersion)) {
         this.setState({
           status: 'current',
@@ -478,8 +488,12 @@ class UpdateManager {
     let directory = this.getUpdateDirectory();
     const portableFile = this.env.PORTABLE_EXECUTABLE_FILE;
     const replacesPortable = this.platform === 'win32' && Boolean(portableFile);
+    const replacesAppImage = this.platform === 'linux' && Boolean(this.env.APPIMAGE);
     if (replacesPortable) {
       directory = path.join(directory, 'Melody', 'updates', normalizeVersion(this.state.availableVersion).join('.'));
+    } else if (replacesAppImage) {
+      // The published filename may equal the running AppImage (or its backup).
+      directory = path.join(directory, '.melody-updates', crypto.randomUUID());
     }
     const targetPath = path.join(directory, asset.name);
     const temporaryPath = `${targetPath}.part`;
@@ -536,19 +550,21 @@ class UpdateManager {
     await this.fileSystem.chmod(targetPath, 0o755);
     const currentAppImage = this.env.APPIMAGE;
     if (!currentAppImage) return targetPath;
-    const backupPath = `${currentAppImage}.old`;
-    await this.fileSystem.rm?.(backupPath, { force: true });
-    await this.fileSystem.rename(currentAppImage, backupPath);
-    try {
-      await this.fileSystem.rename(targetPath, currentAppImage);
-    } catch (error) {
-      try {
-        await this.fileSystem.rename(backupPath, currentAppImage);
-      } catch (restoreError) {
-        throw new AggregateError([error, restoreError], `更新替换失败，旧版本恢复失败，备份位于 ${backupPath}`);
-      }
-      throw error;
+    if (path.resolve(targetPath) === path.resolve(currentAppImage)) {
+      throw new Error('更新包必须位于独立暂存路径');
     }
+    const backupPath = `${currentAppImage}.old`;
+    let preservedBackup = backupPath;
+    try {
+      await this.fileSystem.copyFile(currentAppImage, preservedBackup, fsConstants.COPYFILE_EXCL);
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      preservedBackup = `${backupPath}-${crypto.randomUUID()}`;
+      await this.fileSystem.copyFile(currentAppImage, preservedBackup, fsConstants.COPYFILE_EXCL);
+    }
+    // Linux rename atomically replaces the pathname; failure leaves the old executable intact.
+    // Keep the backup and the verified staged package if committing fails.
+    await this.fileSystem.rename(targetPath, currentAppImage);
     return currentAppImage;
   }
 

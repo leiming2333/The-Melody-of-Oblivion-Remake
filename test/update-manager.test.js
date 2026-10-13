@@ -151,6 +151,73 @@ test('failed Linux replacement restores the original executable', async (t) => {
   await assert.rejects(manager.finalizeDownload(next), (error) => error === failure);
   assert.equal(await fs.readFile(current, 'utf8'), 'old');
   assert.equal(await fs.readFile(next, 'utf8'), 'new');
+  assert.equal(await fs.readFile(`${current}.old`, 'utf8'), 'old');
+});
+
+for (const [label, currentName] of [
+  ['same-name', 'The-Melody-of-Oblivion-Remake-Linux-x64.AppImage'],
+  ['renamed', '我的启动器.AppImage']
+]) {
+  test(`${label} Linux updates stage independently and preserve the running file as a backup`, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-appimage-stage-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const current = path.join(directory, currentName);
+    await fs.writeFile(current, 'previous build');
+    const bytes = Buffer.from('new verified build');
+    const asset = { ...releaseAssets[3], name: 'The-Melody-of-Oblivion-Remake-Linux-x64.AppImage',
+      size: bytes.length, digest: `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}` };
+    let stagedPath = null;
+    const { manager } = fixture({ platform: 'linux', assets: [asset],
+      downloadFile: async (_url, filePath) => {
+        stagedPath = filePath;
+        assert.equal(await fs.readFile(current, 'utf8'), 'previous build');
+        await fs.writeFile(filePath, bytes);
+      } });
+    manager.env = { APPIMAGE: current };
+    manager.fileSystem = fs;
+    manager.hashFile = async (filePath) => crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+
+    assert.equal((await manager.check()).status, 'downloaded');
+    assert.equal(manager.updateFilePath, current);
+    assert.ok(stagedPath.startsWith(path.join(directory, '.melody-updates') + path.sep));
+    assert.notEqual(path.dirname(stagedPath), directory);
+    assert.equal(await fs.readFile(current, 'utf8'), bytes.toString());
+    assert.equal(await fs.readFile(`${current}.old`, 'utf8'), 'previous build');
+  });
+}
+
+test('failed same-name Linux replacement retains the old AppImage, prior backup and staged update', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-appimage-failure-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const name = 'The-Melody-of-Oblivion-Remake-Linux-x64.AppImage';
+  const current = path.join(directory, name);
+  await fs.writeFile(current, 'previous build');
+  await fs.writeFile(`${current}.old`, 'older backup');
+  const bytes = Buffer.from('new verified build');
+  const asset = { ...releaseAssets[3], name, size: bytes.length,
+    digest: `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}` };
+  let stagedPath = null;
+  const { manager, calls } = fixture({ platform: 'linux', assets: [asset],
+    downloadFile: async (_url, filePath) => {
+      stagedPath = filePath.slice(0, -'.part'.length);
+      await fs.writeFile(filePath, bytes);
+    } });
+  manager.env = { APPIMAGE: current };
+  manager.fileSystem = { ...fs, rename: async (from, to) => {
+    if (to === current) throw Object.assign(new Error('replacement denied'), { code: 'EACCES' });
+    return fs.rename(from, to);
+  } };
+  manager.hashFile = async (filePath) => crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+
+  assert.equal((await manager.check()).status, 'error');
+  assert.equal(await fs.readFile(current, 'utf8'), 'previous build');
+  assert.equal(await fs.readFile(`${current}.old`, 'utf8'), 'older backup');
+  const preservedBackup = (await fs.readdir(directory)).find((entry) => entry.startsWith(`${name}.old-`));
+  assert.ok(preservedBackup);
+  assert.equal(await fs.readFile(path.join(directory, preservedBackup), 'utf8'), 'previous build');
+  assert.equal(await fs.readFile(stagedPath, 'utf8'), bytes.toString());
+  assert.equal(calls.updateReady.length, 0);
+  await assert.rejects(manager.install(), /尚未下载完成/);
 });
 
 test('manual update checks read the current download policy', async () => {
@@ -232,6 +299,7 @@ function fixture({
       statfs: async () => ({ bavail: 1024n * 1024n * 8n, bsize: 1024n }),
       stat: async () => ({ size: 1024 }),
       chmod: async () => {},
+      copyFile: async () => {},
       rename: async () => {},
       rm: async () => {}
     },
@@ -392,6 +460,119 @@ test('Release 接口直连失败时自动尝试镜像源', async () => {
   assert.equal(requestedUrls[0], 'https://the-melody-of-o-r.ccwu.cc/api/latest-release');
   assert.equal(requestedUrls[1], 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest');
   assert.ok(requestedUrls[2].startsWith(`${GITHUB_MIRRORS[0]}/https://api.github.com/`));
+});
+
+test('stale website metadata cannot hide a newer GitHub release', async () => {
+  const requested = [];
+  const { manager } = fixture({ fetchImpl: async (url) => {
+    requested.push(url);
+    const tag = url.includes('the-melody-of-o-r.ccwu.cc') ? 'v1.2.0' : 'v9.9.9';
+    return { ok: true, json: async () => ({ tag_name: tag, assets: releaseAssets }) };
+  } });
+  const state = await manager.check({ autoDownload: false });
+  assert.equal(state.status, 'available');
+  assert.equal(state.availableVersion, '9.9.9');
+  assert.equal(requested.length, 2);
+});
+
+test('updater keeps Blob download URLs only for the verified GitHub version', async () => {
+  const asset = githubAssets[0];
+  const blobAsset = { ...asset,
+    browser_download_url: `https://fixture.public.blob.vercel-storage.com/releases/v9.9.9/${asset.name}` };
+  const { manager, calls } = fixture({ fetchImpl: async (url) => ({ ok: true,
+    json: async () => ({ tag_name: 'v9.9.9', assets: [url.includes('the-melody-of-o-r.ccwu.cc') ? blobAsset : asset] }) }) });
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(calls.download[0].url, blobAsset.browser_download_url);
+  assert.equal(manager.release.assets[0].github_download_url, asset.browser_download_url);
+});
+
+test('stale mirrors cannot hide a known newer website release after GitHub fails', async () => {
+  const requested = [];
+  const { manager } = fixture({ fetchImpl: async (url) => {
+    requested.push(url);
+    if (url.startsWith('https://api.github.com/')) throw new Error('fetch failed');
+    return { ok: true, json: async () => ({
+      tag_name: url.includes('the-melody-of-o-r.ccwu.cc') ? 'v9.9.9' : 'v1.2.0', assets: releaseAssets
+    }) };
+  } });
+  const state = await manager.check({ autoDownload: false });
+  assert.equal(state.status, 'available');
+  assert.equal(state.availableVersion, '9.9.9');
+  assert.ok(requested.includes(`${GITHUB_MIRRORS.at(-1)}/https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest`));
+});
+
+test('an outdated mirror is skipped until a later source confirms the website version', async () => {
+  const asset = githubAssets[0];
+  const blobAsset = { ...asset,
+    browser_download_url: `https://fixture.public.blob.vercel-storage.com/releases/v9.9.9/${asset.name}` };
+  const requested = [];
+  const { manager } = fixture({ fetchImpl: async (url) => {
+    requested.push(url);
+    if (url.startsWith('https://api.github.com/')) throw new Error('fetch failed');
+    if (url.includes('the-melody-of-o-r.ccwu.cc')) {
+      return { ok: true, json: async () => ({ tag_name: 'v9.9.9', body: 'website notes', assets: [blobAsset] }) };
+    }
+    const outdated = url.startsWith(`${GITHUB_MIRRORS[0]}/`);
+    return { ok: true, json: async () => ({
+      tag_name: outdated ? 'v1.2.0' : 'v9.9.9', body: 'verified notes', assets: [asset]
+    }) };
+  } });
+  const state = await manager.check({ autoDownload: false });
+  assert.equal(state.status, 'available');
+  assert.equal(state.availableVersion, '9.9.9');
+  assert.equal(state.releaseNotes, 'verified notes');
+  assert.equal(manager.release.assets[0].browser_download_url, blobAsset.browser_download_url);
+  assert.equal(requested.length, 4);
+  assert.ok(requested.at(-1).startsWith(`${GITHUB_MIRRORS[1]}/`));
+});
+
+test('same-tag Blob digests cannot replace missing official digests or bypass official sidecars', async () => {
+  for (const digest of [undefined, null, 'sha256:invalid']) {
+    const binary = { ...githubAssets[0], digest };
+    const sidecar = { name: `${binary.name}.sha256`, browser_download_url: `${binary.browser_download_url}.sha256` };
+    const staleBlob = { ...binary, digest: `sha256:${'b'.repeat(64)}`,
+      browser_download_url: `https://fixture.public.blob.vercel-storage.com/releases/v9.9.9/${binary.name}` };
+    const requested = [];
+    const { manager } = fixture({ fetchImpl: async (url) => {
+      requested.push(url);
+      if (url === sidecar.browser_download_url) {
+        return { ok: true, text: async () => `${fixtureHash}  ${binary.name}\n` };
+      }
+      return { ok: true, json: async () => ({ tag_name: 'v9.9.9',
+        assets: url.includes('the-melody-of-o-r.ccwu.cc') ? [staleBlob] : [binary, sidecar] }) };
+    } });
+    assert.equal((await manager.check()).status, 'downloaded');
+    assert.equal(manager.release.assets[0].browser_download_url, binary.browser_download_url);
+    assert.equal(manager.release.assets[0].digest, digest);
+    assert.ok(requested.includes(sidecar.browser_download_url));
+  }
+});
+
+test('unverified current website metadata reports a failed check when GitHub and mirrors are unavailable', async () => {
+  const { manager } = fixture({ fetchImpl: async (url) => {
+    if (!url.includes('the-melody-of-o-r.ccwu.cc')) throw new Error('fetch failed');
+    return { ok: true, json: async () => ({ tag_name: 'v1.2.0', assets: releaseAssets }) };
+  } });
+  const state = await manager.check({ autoDownload: false });
+  assert.equal(state.status, 'error');
+  assert.doesNotMatch(state.message, /已是最新版本/);
+});
+
+test('known newer website release remains available when GitHub and mirrors are unavailable', async () => {
+  const { manager } = fixture({ fetchImpl: async (url) => {
+    if (!url.includes('the-melody-of-o-r.ccwu.cc')) throw new Error('fetch failed');
+    return { ok: true, json: async () => ({ tag_name: 'v9.9.9', assets: releaseAssets }) };
+  } });
+  const state = await manager.check({ autoDownload: false });
+  assert.equal(state.status, 'available');
+  assert.equal(state.availableVersion, '9.9.9');
+});
+
+test('a release older than the installed launcher cannot produce a current result', async () => {
+  const { manager } = fixture({ tag: 'v1.1.0' });
+  const state = await manager.check({ autoDownload: false });
+  assert.equal(state.status, 'error');
+  assert.match(state.message, /较旧版本/);
 });
 
 test('Windows portable updates ignore installer assets', () => {
