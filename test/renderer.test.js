@@ -49,6 +49,7 @@ function loaderFixture() {
     gameVersion: { id: '1.21.1', installed: false },
     loaderTypeSelect: { value: 'fabric' }, loaderVersionSelect: select,
     loaderVersions: [], loaderLoadToken: 0, loaderCatalogLoading: false,
+    localProfiles: [], versionCatalogLoading: false,
     loaderNames: { fabric: 'Fabric', vanilla: 'Vanilla' },
     minecraft: { listLoaders: () => new Promise((resolve) => { finish = resolve; }) },
     selectedRemoteVersion: () => context.gameVersion,
@@ -238,4 +239,165 @@ test('a game crash displays the saved diagnostic log while normal exit stays non
   assert.deepEqual(toasts, ['游戏已退出']);
   receive({ phase: 'exited', targetId: 'game', signal: 'SIGTERM', logError: 'EACCES' });
   assert.match(problems[1].message, /SIGTERM.*\n游戏日志保存失败（EACCES）/);
+});
+
+test('saving once then reopening settings and pressing Esc never saves the new draft', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  let onClose;
+  const updates = [];
+  const dialog = {
+    open: false, returnValue: 'save',
+    showModal() { this.open = true; },
+    addEventListener(_name, callback) { onClose = callback; },
+    close(value) {
+      if (value !== undefined) this.returnValue = value;
+      this.open = false;
+      return onClose();
+    }
+  };
+  const context = {
+    settingsDialog: dialog, launcherSettingsLoaded: true,
+    launcherSettings: { memoryMb: 4096, gameDirectoryMode: 'local' },
+    selectedJavaPath: '', savedJavaRuntimes: [],
+    wallpaperSelect: { value: '3' }, gameDirectoryModeSelect: { value: 'local' },
+    isolateProfilesCheck: { checked: true }, downloadSourceSelect: { value: 'auto' },
+    downloadConcurrencySelect: { value: '16' }, memoryRange: { value: '4096' },
+    autoUpdateCheck: { checked: true }, launcherUpdatePolicySelect: { value: 'off' },
+    settingsApi: { update: async (patch) => { updates.push(patch); return patch; } },
+    applySettingsToForm() { context.memoryRange.value = String(context.launcherSettings.memoryMb); },
+    showToast() {}, readableError: (error) => error.message
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('async function ensureSettingsOpen()'),
+    source.indexOf('async function openJavaSettings(')), context);
+  vm.runInContext(source.slice(source.indexOf("settingsDialog.addEventListener('close'"),
+    source.indexOf("gameDirectoryModeSelect.addEventListener('change'")), context);
+  await context.ensureSettingsOpen();
+  assert.equal(dialog.returnValue, '');
+  context.memoryRange.value = '8192';
+  await dialog.close('save');
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].memoryMb, 8192);
+
+  dialog.returnValue = 'save';
+  await context.ensureSettingsOpen();
+  assert.equal(dialog.returnValue, '');
+  context.memoryRange.value = '6144';
+  await context.ensureSettingsOpen();
+  assert.equal(context.memoryRange.value, '6144');
+  await dialog.close(); // Native Esc closes without replacing returnValue.
+  assert.equal(updates.length, 1);
+  assert.equal(context.memoryRange.value, '8192');
+});
+
+function catalogFixture() {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  function select() {
+    return {
+      children: [], disabled: false,
+      replaceChildren() { this.children = []; },
+      append(child) {
+        this.children.push(child);
+        child.remove = () => { this.children = this.children.filter((item) => item !== child); };
+      },
+      get options() {
+        const options = this.children.flatMap((child) => child.children.length ? child.children : [child]);
+        options.forEach((option, index) => { option.index = index; });
+        return options;
+      },
+      get selectedOptions() { return this.options.filter((option) => option.selected); },
+      get value() { return this.selectedOptions[0]?.value ?? ''; },
+      set value(value) { this.options.forEach((option) => { option.selected = option.value === value; }); },
+      set selectedIndex(value) { this.options.forEach((option, index) => { option.selected = index === value; }); }
+    };
+  }
+  const gameSelect = select();
+  gameSelect.append({ children: [], selected: true, value: '1.21.1' });
+  const context = {
+    document: { createElement: () => ({ children: [], append(child) { this.children.push(child); } }) },
+    localProfiles: [{ profileId: '1.21.1', type: 'release', valid: true, complete: true, loaderType: 'vanilla' }],
+    remoteVersions: [], filteredVersions: [], versionCatalogLoaded: false,
+    versionCatalogLoading: false, versionCatalogLoadToken: 0,
+    versionCatalog: select(), loaderVersionSelect: select(), versionSelect: gameSelect,
+    versionSearch: { value: '' }, versionTypeFilter: { value: 'all' },
+    loaderTypeSelect: { value: 'vanilla' }, refreshVersionsButton: {}, versionEmpty: {},
+    loaderVersions: [], loaderLoadToken: 0, loaderCatalogLoading: false,
+    loaderNames: { vanilla: '原版', fabric: 'Fabric' },
+    versionDownloadActive: false, versionDeleteActive: false, versionVerifyActive: false,
+    launchRequestActive: false, lastDownloadFailed: false,
+    downloadVersionButton: {}, deleteVersionButton: {}, clearVersionSelectionButton: {},
+    gameStatus: {}, statusBadge: {}, versionDialog: { close() {} }, versionCloseButtons: [], deleted: [],
+    versionTypeName: (type) => type, rememberSelectedGame() {}, updateLaunchButtonState() {},
+    loadLocalProfiles: async () => {}, readableError: (error) => error.message,
+    showToast() {}, window: { confirm: () => true },
+    minecraft: {
+      listVersions: async () => { throw new Error('offline'); },
+      listLoaders: async () => { throw new Error('offline'); },
+      deleteVersion: async (profileId) => { context.deleted.push(profileId); }
+    }
+  };
+  vm.createContext(context);
+  for (const [start, end] of [
+    ['function selectedRemoteVersion()', 'function renderLocalProfileOptions()'],
+    ['function localBaseProfiles()', 'async function verifyLocalVersionsAfterLoad()'],
+    ['function renderVersionCatalog(', 'function invalidateVersionCatalogForDirectoryChange()'],
+    ['async function loadVersionCatalog(', 'function clearVersionSelection()'],
+    ['async function installSelectedVersion()', "wallpaperSelect.addEventListener('change'"]
+  ]) vm.runInContext(source.slice(source.indexOf(start), source.indexOf(end)), context);
+  return { context, source };
+}
+
+test('the first offline catalog load initializes use and delete for local vanilla and loader profiles', async () => {
+  for (const type of ['vanilla', 'fabric']) {
+    const { context } = catalogFixture();
+    context.loaderTypeSelect.value = type;
+    if (type === 'fabric') context.localProfiles.push({
+      profileId: 'fabric-loader-0.16.10-1.21.1', inheritsFrom: '1.21.1',
+      valid: true, complete: true, loaderType: 'fabric'
+    });
+    await context.loadVersionCatalog();
+    assert.match(context.versionEmpty.textContent, /在线版本加载失败.*offline/);
+    assert.equal(context.downloadVersionButton.disabled, false, type);
+    assert.equal(context.deleteVersionButton.disabled, false, type);
+    assert.equal(context.downloadVersionButton.textContent, '使用此版本');
+    const selected = context.selectedLoaderVersion();
+    await context.installSelectedVersion();
+    assert.equal(context.versionSelect.value, selected.profileId);
+    assert.equal(context.statusBadge.textContent, 'SELECTED');
+    const profileId = selected.profileId;
+    await context.deleteSelectedVersion();
+    assert.deepEqual(context.deleted, [profileId]);
+    assert.equal(context.localProfiles.some((profile) => profile.profileId === profileId), false);
+    assert.equal(context.deleteVersionButton.disabled, true);
+    if (type === 'fabric') {
+      assert.equal(context.selectedLoaderVersion(), undefined);
+      assert.equal(context.downloadVersionButton.disabled, true);
+    }
+    await context.loadLoaderCatalog();
+    assert.equal(context.deleteVersionButton.disabled, true);
+  }
+});
+
+test('local loader actions survive a failed loader request and merge without duplicates when online returns', async () => {
+  const { context } = catalogFixture();
+  const profileId = 'fabric-loader-0.16.10-1.21.1';
+  context.localProfiles.push({ profileId, inheritsFrom: '1.21.1',
+    valid: true, complete: true, loaderType: 'fabric' });
+  context.loaderTypeSelect.value = 'fabric';
+  await context.loadVersionCatalog();
+  await context.loadLoaderCatalog();
+  assert.equal(context.downloadVersionButton.disabled, false);
+  assert.equal(context.deleteVersionButton.disabled, false);
+  context.minecraft.listLoaders = async () => ({ versions: [
+    { version: '0.16.10', profileId, installed: true },
+    { version: '0.16.11', installed: false }
+  ] });
+  await context.loadLoaderCatalog(true);
+  assert.equal(context.loaderVersions.length, 2);
+  assert.equal(context.selectedLoaderVersion().profileId, profileId);
+  await context.deleteSelectedVersion();
+  assert.equal(context.selectedLoaderVersion().version, '0.16.10');
+  assert.equal(context.selectedLoaderVersion().installed, false);
+  assert.equal(context.downloadVersionButton.disabled, false);
+  assert.equal(context.downloadVersionButton.textContent, '安装 Fabric');
 });

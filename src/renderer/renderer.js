@@ -171,13 +171,7 @@ async function withLauncherUpdateUi(callback) {
           updateBadgeRefresh, updateBadgeCheck, updateBadgeDownload, updateBadgeError,
           launcherUpdateProgress, launcherUpdateButton, launcherUpdateNotesSetting,
           launcherUpdateNotes, settingsDialog },
-        ensureSettingsOpen: async () => {
-          if (!settingsDialog.open) {
-            if (!launcherSettingsLoaded) await loadLauncherSettings();
-            applySettingsToForm();
-            settingsDialog.showModal();
-          }
-        }
+        ensureSettingsOpen
       })
     )).catch((error) => {
       launcherUpdateUiModule = undefined;
@@ -705,12 +699,18 @@ async function prepareJavaDownloadSelection(requiredMajorVersion) {
   }
 }
 
-async function openJavaSettings(requiredMajorVersion) {
+async function ensureSettingsOpen() {
+  if (settingsDialog.open) return;
   if (!launcherSettingsLoaded) await loadLauncherSettings();
   if (!settingsDialog.open) {
     applySettingsToForm();
+    settingsDialog.returnValue = '';
     settingsDialog.showModal();
   }
+}
+
+async function openJavaSettings(requiredMajorVersion) {
+  await ensureSettingsOpen();
   setJavaDownloadPanelOpen(true);
   await prepareJavaDownloadSelection(requiredMajorVersion);
   javaDownloadPanel.scrollIntoView({ block: 'nearest' });
@@ -1215,6 +1215,39 @@ function selectedLoaderVersion() {
   return loaderVersions.find((loader) => loader.version === loaderVersionSelect.value);
 }
 
+function localLoaderVersions(gameVersion, loaderType) {
+  if (!gameVersion) return [];
+  if (loaderType === 'vanilla') return [{
+    version: gameVersion.id,
+    stable: true,
+    installed: gameVersion.installed,
+    profileId: gameVersion.installed ? gameVersion.id : undefined
+  }];
+
+  const byId = new Map(localProfiles.filter((profile) => !profile.isInstance)
+    .map((profile) => [profile.profileId, profile]));
+  function inheritsGame(profile) {
+    const visited = new Set();
+    while (profile?.inheritsFrom && !visited.has(profile.profileId)) {
+      if (profile.inheritsFrom === gameVersion.id) return true;
+      visited.add(profile.profileId);
+      profile = byId.get(profile.inheritsFrom);
+    }
+    return false;
+  }
+  return [...byId.values()]
+    .filter((profile) => profile.valid && profile.complete
+      && profile.loaderType === loaderType && inheritsGame(profile))
+    .map((profile) => ({ version: profile.profileId, installed: true, profileId: profile.profileId, localOnly: true }));
+}
+
+function seedLoaderCatalogWithLocalProfiles() {
+  loaderLoadToken += 1;
+  loaderCatalogLoading = false;
+  loaderVersions = localLoaderVersions(selectedRemoteVersion(), loaderTypeSelect.value);
+  renderLoaderCatalog();
+}
+
 function renderLoaderCatalog(preferredVersion) {
   const previousVersion = preferredVersion ?? loaderVersionSelect.value;
   loaderVersionSelect.replaceChildren();
@@ -1257,7 +1290,8 @@ async function loadLoaderCatalog(force = false) {
   const gameVersion = selectedRemoteVersion();
   const loaderType = loaderTypeSelect.value;
   const requestToken = ++loaderLoadToken;
-  loaderVersions = [];
+  const localLoaders = localLoaderVersions(gameVersion, loaderType);
+  loaderVersions = localLoaders;
   loaderCatalogLoading = false;
 
   if (!gameVersion) {
@@ -1266,12 +1300,6 @@ async function loadLoaderCatalog(force = false) {
   }
 
   if (loaderType === 'vanilla') {
-    loaderVersions = [{
-      version: gameVersion.id,
-      stable: true,
-      installed: gameVersion.installed,
-      profileId: gameVersion.installed ? gameVersion.id : undefined
-    }];
     renderLoaderCatalog(gameVersion.id);
     return;
   }
@@ -1289,7 +1317,9 @@ async function loadLoaderCatalog(force = false) {
       ? await minecraft.listLoaders(gameVersion.id, loaderType, { force })
       : await delay(180).then(() => fallbackLoaderResult(gameVersion.id, loaderType));
     if (requestToken !== loaderLoadToken) return;
-    loaderVersions = result.versions;
+    const onlineProfileIds = new Set(result.versions.map((loader) => loader.profileId));
+    loaderVersions = [...result.versions,
+      ...localLoaders.filter((loader) => !onlineProfileIds.has(loader.profileId))];
     renderLoaderCatalog();
     if (loaderVersions.length === 0) {
       versionEmpty.textContent = `${loaderNames[loaderType]} 暂不支持 Minecraft ${gameVersion.id}`;
@@ -1297,7 +1327,7 @@ async function loadLoaderCatalog(force = false) {
   } catch (error) {
     if (requestToken !== loaderLoadToken) return;
     const message = readableError(error);
-    loaderVersions = [];
+    loaderVersions = localLoaders;
     renderLoaderCatalog();
     versionEmpty.textContent = `${loaderNames[loaderType]} 获取失败：${message}`;
     showToast(message);
@@ -1314,7 +1344,7 @@ function updateVersionAction() {
   const version = selectedRemoteVersion();
   const loaderType = loaderTypeSelect.value;
   const loader = selectedLoaderVersion();
-  const busy = versionDownloadActive || versionDeleteActive || versionVerifyActive;
+  const busy = versionDownloadActive || versionDeleteActive || versionVerifyActive || versionCatalogLoading;
   downloadVersionButton.disabled = !version || !loader || busy || loaderCatalogLoading;
   deleteVersionButton.disabled = !loader?.installed || busy;
   clearVersionSelectionButton.disabled = !versionSelect.value || busy || launchRequestActive;
@@ -1486,6 +1516,7 @@ async function loadVersionCatalog(force = false) {
     if (requestToken !== versionCatalogLoadToken) return;
     seedCatalogWithLocalProfiles();
     renderVersionCatalog(versionSelect.value);
+    seedLoaderCatalogWithLocalProfiles();
     versionEmpty.textContent = `已检查 ${localProfiles.length} 个启动配置，正在加载全部版本…`;
     const result = minecraft
       ? await minecraft.listVersions({ force })
@@ -1496,6 +1527,7 @@ async function loadVersionCatalog(force = false) {
     renderVersionCatalog(versionSelect.value);
     await loadLoaderCatalog(force);
   } catch (error) {
+    if (requestToken !== versionCatalogLoadToken) return;
     const message = readableError(error);
     versionEmpty.textContent = localProfiles.length > 0
       ? `已加载 ${localProfiles.length} 个启动配置；在线版本加载失败：${message}`
@@ -1666,6 +1698,8 @@ async function deleteSelectedVersion() {
       await delay(180);
     }
 
+    localProfiles = localProfiles.filter((profile) => profile.profileId !== profileId);
+    if (loader.localOnly) loaderVersions = loaderVersions.filter((item) => item !== loader);
     loader.installed = false;
     loader.profileId = undefined;
     if (loaderType === 'vanilla') version.installed = false;
@@ -1738,9 +1772,7 @@ accountsApi?.onMicrosoftProgress?.((progress) => {
 });
 
 document.querySelector('#settingsButton').addEventListener('click', async () => {
-  if (!launcherSettingsLoaded) await loadLauncherSettings();
-  applySettingsToForm();
-  settingsDialog.showModal();
+  await ensureSettingsOpen();
   void prepareJavaDownloadSelection();
 });
 
@@ -1773,7 +1805,9 @@ document.querySelector('#versionButton').addEventListener('click', () => {
 });
 
 settingsDialog.addEventListener('close', async () => {
-  if (settingsDialog.returnValue === 'save') {
+  const saveRequested = settingsDialog.returnValue === 'save';
+  settingsDialog.returnValue = '';
+  if (saveRequested) {
     try {
       const previousDirectoryMode = launcherSettings.gameDirectoryMode ?? 'local';
       const patch = {
