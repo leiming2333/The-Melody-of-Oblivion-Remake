@@ -4,8 +4,10 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const { fetchWithTimeout } = require('../src/main/minecraft/source-manager');
 const { extractNativeArchive } = require('../src/main/minecraft/launch-core');
+const { downloadModpackFile } = require('../src/main/minecraft/modpack-download-cache');
 const {
   ModpackManager,
   createInstanceId,
@@ -23,25 +25,29 @@ function storedZip(entries) {
   let localOffset = 0;
   for (const [entryName, value] of entries) {
     const name = Buffer.from(entryName);
-    const content = Buffer.from(value);
+    const content = Buffer.from(value?.content ?? value);
+    const method = value?.method ?? 0;
+    const compressed = method === 8 ? zlib.deflateRawSync(content) : content;
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
-    local.writeUInt32LE(content.length, 18);
+    local.writeUInt16LE(method, 8);
+    local.writeUInt32LE(compressed.length, 18);
     local.writeUInt32LE(content.length, 22);
     local.writeUInt16LE(name.length, 26);
-    localParts.push(local, name, content);
+    localParts.push(local, name, compressed);
 
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50, 0);
     central.writeUInt16LE(20, 4);
     central.writeUInt16LE(20, 6);
-    central.writeUInt32LE(content.length, 20);
+    central.writeUInt16LE(method, 10);
+    central.writeUInt32LE(compressed.length, 20);
     central.writeUInt32LE(content.length, 24);
     central.writeUInt16LE(name.length, 28);
     central.writeUInt32LE(localOffset, 42);
     centralParts.push(central, name);
-    localOffset += local.length + name.length + content.length;
+    localOffset += local.length + name.length + compressed.length;
   }
   const centralDirectory = Buffer.concat(centralParts);
   const end = Buffer.alloc(22);
@@ -215,6 +221,69 @@ test('可以从最小 mrpack 压缩包读取安装信息', async (t) => {
   });
 });
 
+test('预览仅读取压缩清单，不展开整合包覆盖文件', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-preview-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const archivePath = path.join(root, 'wrapped.mrpack');
+  const index = {
+    formatVersion: 1, game: 'minecraft', name: 'Wrapped Pack',
+    dependencies: { minecraft: '1.21.1' }, files: []
+  };
+  const archive = storedZip([
+    ['wrapped/modrinth.index.json', { content: JSON.stringify(index), method: 8 }],
+    ['wrapped/overrides/unused.txt', 'invalid deflate payload']
+  ]);
+  // A broken override still permits a manifest preview, but must fail when
+  // installed. This also ensures preview never inflates unrelated entries.
+  const endOffset = archive.length - 22;
+  const centralOffset = archive.readUInt32LE(endOffset + 16);
+  const firstRecordSize = 46 + archive.readUInt16LE(centralOffset + 28);
+  const secondRecord = centralOffset + firstRecordSize;
+  const secondLocal = archive.readUInt32LE(secondRecord + 42);
+  archive.writeUInt16LE(8, secondRecord + 10);
+  archive.writeUInt16LE(8, secondLocal + 8);
+  await fs.writeFile(archivePath, archive);
+  const manager = new ModpackManager({ gameDirectory: root, loaderManager: {} });
+  assert.equal((await manager.inspect(archivePath)).name, 'Wrapped Pack');
+  await assert.rejects(manager.install(archivePath));
+});
+
+test('预览拒绝过大的清单、不安全路径和损坏的目录边界', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-preview-limits-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const archivePath = path.join(root, 'unsafe.mrpack');
+  const manager = new ModpackManager({ gameDirectory: root, loaderManager: {} });
+  const archive = storedZip([['modrinth.index.json', '{}']]);
+  const centralOffset = archive.readUInt32LE(archive.length - 22 + 16);
+  archive.writeUInt32LE(4 * 1024 * 1024 + 1, centralOffset + 24);
+  await fs.writeFile(archivePath, archive);
+  await assert.rejects(manager.inspect(archivePath), /清单过大/);
+
+  await fs.writeFile(archivePath, storedZip([
+    ['modrinth.index.json', '{}'], ['overrides/../../escape', 'x']
+  ]));
+  await assert.rejects(manager.inspect(archivePath), /不安全/);
+
+  const broken = storedZip([['modrinth.index.json', '{}']]);
+  broken.writeUInt32LE(0xffffffff - 1, broken.length - 22 + 16);
+  await fs.writeFile(archivePath, broken);
+  await assert.rejects(manager.inspect(archivePath), /损坏/);
+});
+
+test('预览拒绝清单解压炸弹，即使目录谎报解压大小', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-manifest-bomb-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const archivePath = path.join(root, 'bomb.mrpack');
+  const archive = storedZip([
+    ['modrinth.index.json', { content: ' '.repeat(4 * 1024 * 1024 + 1), method: 8 }]
+  ]);
+  const centralOffset = archive.readUInt32LE(archive.length - 22 + 16);
+  archive.writeUInt32LE(2, centralOffset + 24);
+  await fs.writeFile(archivePath, archive);
+  const manager = new ModpackManager({ gameDirectory: root, loaderManager: {} });
+  await assert.rejects(manager.inspect(archivePath), /larger than|大小|length/i);
+});
+
 test('Modrinth 安装先下载索引文件，再应用通用与客户端覆盖文件', async (t) => {
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-overrides-test-'));
   t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
@@ -251,10 +320,117 @@ test('Modrinth 安装先下载索引文件，再应用通用与客户端覆盖�
 
   const result = await manager.install(archivePath);
   const configurationRoot = path.join(manager.gameDirectory, 'melody-instances', result.instanceId, 'config');
-  assert.equal(downloads, 3);
+  assert.equal(downloads, 1); // Identical hash-checked content shares one download.
   assert.equal(await fs.readFile(path.join(configurationRoot, 'common.txt'), 'utf8'), 'common override');
   assert.equal(await fs.readFile(path.join(configurationRoot, 'client.txt'), 'utf8'), 'client override');
   assert.equal(await fs.readFile(path.join(configurationRoot, 'download-only.txt'), 'utf8'), downloadedContent);
+});
+
+test('整合包安装失败保留校验后的下载，重试复用并重新检查缓存', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-retry-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const archivePath = path.join(root, 'retry.mrpack');
+  const content = { 'first.jar': 'first downloaded jar', 'second.jar': 'second downloaded jar' };
+  const hashes = Object.fromEntries(Object.entries(content).map(([name, value]) => [
+    name, crypto.createHash('sha1').update(value).digest('hex')
+  ]));
+  const index = {
+    formatVersion: 1, game: 'minecraft', name: 'Retry Pack',
+    dependencies: { minecraft: '1.21.1' },
+    files: Object.entries(content).map(([name, value]) => ({
+      path: `mods/${name}`, hashes: { sha1: hashes[name] }, fileSize: Buffer.byteLength(value),
+      downloads: [`https://cdn.modrinth.com/data/${name}`]
+    }))
+  };
+  await fs.writeFile(archivePath, storedZip([['modrinth.index.json', JSON.stringify(index)]]));
+  const counts = { 'first.jar': 0, 'second.jar': 0 };
+  let failSecond = true;
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    const name = new URL(url).pathname.split('/').at(-1);
+    counts[name] += 1;
+    return failSecond && name === 'second.jar'
+      ? new Response(null, { status: 503 })
+      : new Response(content[name]);
+  });
+  const manager = new ModpackManager({
+    gameDirectory: path.join(root, 'game'), concurrency: 1,
+    loaderManager: { installLoader: async () => ({ profileId: '1.21.1' }) },
+    lookupHost: async () => [{ address: '8.8.8.8', family: 4 }]
+  });
+  await assert.rejects(manager.install(archivePath), /下载失败/);
+  const cacheRoot = path.join(manager.gameDirectory, 'launcher-cache', 'modpack-files');
+  assert.equal(await fs.readFile(path.join(cacheRoot, hashes['first.jar']), 'utf8'), content['first.jar']);
+  assert.deepEqual(await fs.readdir(path.join(manager.gameDirectory, 'melody-instances')), []);
+  assert.deepEqual(await fs.readdir(cacheRoot), [hashes['first.jar']]);
+
+  failSecond = false;
+  const retry = await manager.install(archivePath);
+  assert.deepEqual(counts, { 'first.jar': 1, 'second.jar': 2 });
+  assert.equal(await fs.readFile(path.join(manager.gameDirectory, 'melody-instances',
+    retry.instanceId, 'mods', 'first.jar'), 'utf8'), content['first.jar']);
+
+  // Same-length tampering must cause a fresh download rather than a cache hit.
+  await fs.writeFile(path.join(cacheRoot, hashes['first.jar']), 'x'.repeat(content['first.jar'].length));
+  const recovered = await manager.install(archivePath);
+  assert.deepEqual(counts, { 'first.jar': 2, 'second.jar': 2 });
+  assert.equal(await fs.readFile(path.join(manager.gameDirectory, 'melody-instances',
+    recovered.instanceId, 'mods', 'first.jar'), 'utf8'), content['first.jar']);
+});
+
+test('取消整合包安装保留已完成的缓存，重试继续下载剩余文件', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-cancel-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const archivePath = path.join(root, 'cancel.mrpack');
+  const index = {
+    formatVersion: 1, game: 'minecraft', name: 'Cancel Pack',
+    dependencies: { minecraft: '1.21.1' },
+    files: ['first.jar', 'second.jar'].map((name) => ({
+      path: `mods/${name}`, downloads: [`https://cdn.modrinth.com/data/${name}`],
+      hashes: { sha1: crypto.createHash('sha1').update(name).digest('hex') },
+      fileSize: Buffer.byteLength(name)
+    }))
+  };
+  await fs.writeFile(archivePath, storedZip([['modrinth.index.json', JSON.stringify(index)]]));
+  const requested = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    const name = new URL(url).pathname.split('/').at(-1);
+    requested.push(name);
+    return new Response(name);
+  });
+  const manager = new ModpackManager({
+    gameDirectory: path.join(root, 'game'), concurrency: 1,
+    loaderManager: { installLoader: async () => ({ profileId: '1.21.1' }) },
+    lookupHost: async () => [{ address: '8.8.8.8', family: 4 }]
+  });
+  const controller = new AbortController();
+  await assert.rejects(manager.install(archivePath, (progress) => {
+    if (progress.phase === 'downloading-files' && progress.completedFiles === 1) controller.abort();
+  }, { signal: controller.signal }), { name: 'AbortError' });
+  assert.deepEqual(requested, ['first.jar']);
+  assert.deepEqual(await fs.readdir(path.join(manager.gameDirectory, 'melody-instances')), []);
+  await manager.install(archivePath);
+  assert.deepEqual(requested, ['first.jar', 'second.jar']);
+});
+
+test('没有可信哈希或校验失败的下载不会进入可复用整合包缓存', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-unverified-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const cacheRoot = path.join(root, 'cache');
+  let downloads = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    downloads += 1;
+    return new Response('downloaded content');
+  });
+  const task = { label: 'test', urls: ['https://cdn.modrinth.com/data/unverified.jar'] };
+  await downloadModpackFile({ ...task, destination: path.join(root, 'attempt-one', 'mod.jar') }, cacheRoot);
+  await downloadModpackFile({ ...task, destination: path.join(root, 'attempt-two', 'mod.jar') }, cacheRoot);
+  assert.equal(downloads, 2);
+  await assert.rejects(fs.stat(cacheRoot), { code: 'ENOENT' });
+
+  await assert.rejects(downloadModpackFile({
+    ...task, destination: path.join(root, 'bad-hash.jar'), sha1: '0'.repeat(40)
+  }, cacheRoot), /校验失败/);
+  assert.deepEqual(await fs.readdir(cacheRoot), []);
 });
 
 test('CurseForge 文件缺少下载地址时给出受限提示', async () => {

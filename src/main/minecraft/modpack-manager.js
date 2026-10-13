@@ -5,7 +5,6 @@ const dns = require('node:dns/promises');
 const net = require('node:net');
 const {
   createDownloadProgressTracker,
-  downloadFile,
   runPool,
   safePath,
   throwIfAborted,
@@ -13,6 +12,8 @@ const {
 } = require('./downloader');
 const { extractNativeArchive } = require('./launch-core');
 const { fetchWithTimeout } = require('./source-manager');
+const { readModpackManifest } = require('./modpack-archive');
+const { downloadModpackFile } = require('./modpack-download-cache');
 
 const MODPACK_EXTENSIONS = Object.freeze(['.mrpack', '.zip']);
 const INSTANCE_ID_PATTERN = /^[0-9A-Za-z._-]{1,100}$/;
@@ -307,8 +308,12 @@ class ModpackManager {
     }
   }
 
-  inspect(filePath) {
-    return this.withExtractedPack(filePath, async ({ pack }) => publicPackInfo(pack));
+  async inspect(filePath) {
+    const manifest = await readModpackManifest(validateModpackFile(filePath));
+    const pack = manifest.name === 'modrinth.index.json'
+      ? parseModrinthIndex(manifest.value)
+      : parseCurseForgeManifest(manifest.value);
+    return publicPackInfo(pack);
   }
 
   async install(filePath, onProgress = () => {}, { signal, installOptionalFiles = false } = {}) {
@@ -387,13 +392,14 @@ class ModpackManager {
           baseProgress: { modpackName: pack.name }
         });
         progressTracker.start(`准备下载 ${tasks.length} 个整合包文件`);
+        const cacheRoot = safePath(this.gameDirectory, 'launcher-cache', 'modpack-files');
         await runPool(tasks, this.concurrency, async (task, _index, poolSignal) => {
-          const result = await downloadFile({
+          const result = await downloadModpackFile({
             ...task,
             signal: poolSignal,
             segmentConcurrency: this.segmentConcurrency,
             ...progressTracker.hooks(task)
-          });
+          }, cacheRoot);
           progressTracker.complete(task, result);
         }, signal);
 
