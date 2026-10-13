@@ -13,6 +13,7 @@ const { ManagedJavaRuntime } = require('./managed-java-runtime');
 const { validateProfileId } = require('./version-manager');
 const { offlineUuidForSkinModel } = require('../accounts/account-store');
 const { copyCachedNativeArchive } = require('./native-cache');
+const { createGameLog, gameLogSecrets, redactGameOutput } = require('./game-log');
 
 const inflateRaw = promisify(zlib.inflateRaw);
 const gunzip = promisify(zlib.gunzip);
@@ -612,15 +613,27 @@ class MinecraftLauncher {
       requiredJavaVersion: prepared.requiredJavaVersion
     });
 
+    // Keep startup failures and the tail of a crash log without persisting the
+    // command line, which contains the Minecraft access token.
+    let logError;
+    const gameLog = await createGameLog(this.gameDirectory, validatedId, account).catch((error) => {
+      logError = error.code ?? 'LOG_CREATE_FAILED';
+      return undefined;
+    });
     let child;
     let started = false;
     try {
       child = this.spawnProcess(prepared.javaExecutable, prepared.argumentsList, {
         cwd: prepared.gameDirectory,
         windowsHide: true,
-        stdio: 'ignore'
+        stdio: ['ignore', 'pipe', 'pipe']
       });
+      for (const channel of ['stdout', 'stderr']) {
+        child[channel]?.on('data', (chunk) => gameLog?.write(channel, chunk));
+        child[channel]?.on('error', (error) => gameLog?.append(`[${channel}] ${error.message}`));
+      }
       child.once('close', async (code, signal) => {
+        await gameLog?.close(`Exited with code ${code ?? 'unknown'}${signal ? `; signal ${signal}` : ''}`);
         await fs.rm(prepared.nativesDirectory, { recursive: true, force: true }).catch(() => {});
         if (!started) return;
         this.activeGames.delete(launchTargetId);
@@ -629,7 +642,9 @@ class MinecraftLauncher {
           profileId: validatedId,
           targetId: launchTargetId,
           code,
-          signal
+          signal,
+          logPath: gameLog?.filePath,
+          logError: gameLog?.writeError ?? logError
         });
       });
       await new Promise((resolve, reject) => {
@@ -637,8 +652,10 @@ class MinecraftLauncher {
         child.once('error', reject);
       });
     } catch (error) {
+      await gameLog?.close(`Unable to start Java: ${error.message}`);
       await fs.rm(prepared.nativesDirectory, { recursive: true, force: true }).catch(() => {});
-      throw new Error(`无法启动 Java：${error.message}`);
+      const message = redactGameOutput(error.message, gameLogSecrets(account));
+      throw new Error(`无法启动 Java：${message}${gameLog ? `\n游戏日志：${gameLog.filePath}` : ''}`);
     }
 
     started = true;
@@ -648,14 +665,18 @@ class MinecraftLauncher {
       phase: 'running',
       profileId: validatedId,
       targetId: launchTargetId,
-      pid: child.pid
+      pid: child.pid,
+      logPath: gameLog?.filePath,
+      logError: gameLog?.writeError ?? logError
     });
     return {
       javaExecutable: prepared.javaExecutable,
       pid: child.pid,
       profileId: validatedId,
       targetId: launchTargetId,
-      requiredJavaVersion: prepared.requiredJavaVersion
+      requiredJavaVersion: prepared.requiredJavaVersion,
+      logPath: gameLog?.filePath,
+      logError: gameLog?.writeError ?? logError
     };
   }
 }

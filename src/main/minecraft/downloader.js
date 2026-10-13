@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
+const { setTimeout: delay } = require('node:timers/promises');
 const { SOURCES, fetchWithTimeout } = require('./source-manager');
 
 const fsPromises = fs.promises;
@@ -265,12 +266,39 @@ async function fileMatches(filePath, options = {}) {
   }
 }
 
+async function replaceFileAtomic(temporary, destination, signal) {
+  for (let attempt = 0; ; attempt += 1) {
+    throwIfAborted(signal);
+    try {
+      await fsPromises.rename(temporary, destination);
+      return;
+    } catch (error) {
+      // Concurrent Windows renames and antivirus scans can hold a short-lived
+      // sharing lock. Retry the rename, always retaining the previous file.
+      if (process.platform !== 'win32' || attempt >= 4
+        || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+      await delay(10 * (2 ** attempt), undefined, { signal });
+    }
+  }
+}
+
 async function writeJsonAtomic(destination, value) {
   await fsPromises.mkdir(path.dirname(destination), { recursive: true });
-  const temporary = `${destination}.part`;
-  await fsPromises.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  await fsPromises.rm(destination, { force: true });
-  await fsPromises.rename(temporary, destination);
+  const temporary = `${destination}.${process.pid}-${crypto.randomUUID()}.part`;
+  try {
+    const file = await fsPromises.open(temporary, 'wx', 0o600);
+    try {
+      await file.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    // A same-directory rename replaces the old file atomically. In particular,
+    // never unlink the destination first: a failed rename must leave it intact.
+    await replaceFileAtomic(temporary, destination);
+  } finally {
+    await fsPromises.rm(temporary, { force: true }).catch(() => {});
+  }
 }
 
 
@@ -389,7 +417,7 @@ async function downloadFile(task) {
   }
 
   await fsPromises.mkdir(path.dirname(task.destination), { recursive: true });
-  const temporary = `${task.destination}.part`;
+  const temporary = `${task.destination}.${process.pid}-${crypto.randomUUID()}.part`;
   const errors = [];
 
   for (let urlIndex = 0; urlIndex < task.urls.length; urlIndex += 1) {
@@ -455,8 +483,7 @@ async function downloadFile(task) {
       }
 
       const stat = await fsPromises.stat(temporary);
-      await fsPromises.rm(task.destination, { force: true });
-      await fsPromises.rename(temporary, task.destination);
+      await replaceFileAtomic(temporary, task.destination, task.signal);
       return {
         skipped: false,
         bytes: stat.size,
