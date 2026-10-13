@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { runFileExclusive } = require('../file-write-queue');
 
 const OFFLINE_NAME_PATTERN = /^[A-Za-z0-9_]{3,16}$/;
 const SKIN_MODELS = Object.freeze(['steve', 'alex']);
@@ -203,7 +204,7 @@ class AccountStore {
   }
 
   runExclusive(operation) {
-    const next = this.queue.then(operation, operation);
+    const next = runFileExclusive(this.filePath, operation);
     this.queue = next.catch(() => {});
     return next;
   }

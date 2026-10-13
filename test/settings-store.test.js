@@ -148,3 +148,37 @@ test('设置保存期间读取始终获得现有配置', async (t) => {
   }
   assert.equal((await store.getState()).memoryMb, 4096);
 });
+
+test('不同存储对象同时修改同一设置文件时保留双方更新', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-shared-settings-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'settings.json');
+  const first = new SettingsStore(file);
+  const second = new SettingsStore(path.join(root, '.', 'settings.json'));
+  await first.update({});
+  await Promise.all([
+    first.update({ memoryMb: 8192 }),
+    second.update({ downloadSource: 'official' }),
+    new SettingsStore(file).update({ wallpaperIndex: 1 }),
+    first.update({ launcherUpdatePolicy: 'off' })
+  ]);
+  const state = await second.getState();
+  assert.equal(state.memoryMb, 8192);
+  assert.equal(state.downloadSource, 'official');
+  assert.equal(state.wallpaperIndex, 1);
+  assert.equal(state.launcherUpdatePolicy, 'off');
+});
+
+test('一次写入失败不会阻止另一个存储对象后续保存', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-shared-settings-retry-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'settings.json');
+  const first = new SettingsStore(file);
+  const second = new SettingsStore(file);
+  t.mock.method(first, 'write', async () => { throw new Error('Write failed'); });
+  const failing = first.update({ memoryMb: 8192 });
+  const retrying = second.update({ downloadSource: 'official' });
+  await assert.rejects(failing, /Write failed/);
+  assert.equal((await retrying).downloadSource, 'official');
+  assert.equal((await second.getState()).memoryMb, DEFAULT_SETTINGS.memoryMb);
+});

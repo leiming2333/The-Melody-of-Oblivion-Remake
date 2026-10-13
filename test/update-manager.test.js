@@ -19,7 +19,7 @@ const {
 
 const fixtureHash = 'a'.repeat(64);
 
-test('Windows replacement waits for a locked EXE and preserves the old bytes', {
+test('Windows replacement waits for Electron exit even after its EXE unlocks, preserving old bytes', {
   skip: process.platform !== 'win32'
 }, async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "melody-update-quote'-"));
@@ -29,7 +29,7 @@ test('Windows replacement waits for a locked EXE and preserves the old bytes', {
   await fs.writeFile(destination, 'previous build');
   await fs.writeFile(source, 'new verified build');
   const quote = (value) => `'${value.replaceAll("'", "''")}'`;
-  const holderScript = `$f = [IO.File]::Open(${quote(destination)}, 'Open', 'Read', 'Read'); [Console]::WriteLine('ready'); [Console]::ReadLine() | Out-Null; $f.Dispose()`;
+  const holderScript = `$f = [IO.File]::Open(${quote(destination)}, 'Open', 'Read', 'Read'); [Console]::WriteLine('ready'); [Console]::ReadLine() | Out-Null; $f.Dispose(); [Console]::WriteLine('unlocked'); [Console]::ReadLine() | Out-Null`;
   const holder = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(holderScript, 'utf16le').toString('base64')], { windowsHide: true });
   t.after(() => holder.kill());
   await new Promise((resolve, reject) => {
@@ -38,10 +38,16 @@ test('Windows replacement waits for a locked EXE and preserves the old bytes', {
   });
   const { replacementScript } = require('../src/main/updater/windows-replacement');
   // Exercise real file operations without launching a fixture as an application.
-  const script = replacementScript(source, destination).replaceAll(
+  const script = replacementScript(source, destination, holder.pid).replaceAll(
     'Start-Process -FilePath $destination -WindowStyle Hidden', "[Console]::WriteLine('relaunched')");
   const replacement = promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
   await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.equal(await fs.readFile(destination, 'utf8'), 'previous build');
+  assert.equal(await fs.readFile(source, 'utf8'), 'new verified build');
+  const unlocked = new Promise((resolve) => holder.stdout.once('data', resolve));
+  holder.stdin.write('\n');
+  await unlocked;
+  await new Promise((resolve) => setTimeout(resolve, 1000));
   assert.equal(await fs.readFile(destination, 'utf8'), 'previous build');
   assert.equal(await fs.readFile(source, 'utf8'), 'new verified build');
   holder.stdin.end('\n');
@@ -63,6 +69,68 @@ test('same-name portable updates stage the download and replace only after quitt
   const script = Buffer.from(calls.spawn[0].args.at(-1), 'base64').toString('utf16le');
   assert.ok(script.includes(manager.env.PORTABLE_EXECUTABLE_FILE));
   assert.ok(script.includes(manager.updateFilePath));
+  assert.ok(script.includes(`Get-Process -Id ${process.pid}`));
+  assert.ok(script.indexOf('WaitForExit(120000)') < script.indexOf('Move-Item'));
+});
+
+test('renamed portable updates replace the original path without changing the user filename', async () => {
+  const { manager, calls } = fixture();
+  const directory = path.resolve('renamed-portable-fixture');
+  const original = path.join(directory, '我的启动器.exe');
+  manager.env = { PORTABLE_EXECUTABLE_DIR: directory, PORTABLE_EXECUTABLE_FILE: original };
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(manager.updateFilePath, path.join(directory, 'Melody', 'updates', '9.9.9', releaseAssets[0].name));
+  assert.equal(manager.portableReplacement, original);
+  await manager.install();
+  const script = Buffer.from(calls.spawn[0].args.at(-1), 'base64').toString('utf16le');
+  assert.ok(script.includes(`$destination = '${original}'`));
+  assert.ok(script.includes(`$source = '${manager.updateFilePath}'`));
+  assert.ok(script.includes(`Get-Process -Id ${process.pid}`));
+  assert.equal(calls.quit, 1);
+});
+
+test('Windows launch helper waits for the previous process to exit', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-update-launch-wait-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const marker = path.join(directory, 'relaunched.txt');
+  const holder = spawn(process.execPath, ['-e',
+    "process.stdout.write('ready'); process.stdin.once('data', () => process.exit(0));"], { windowsHide: true });
+  t.after(() => holder.kill());
+  await new Promise((resolve, reject) => {
+    holder.stdout.once('data', resolve);
+    holder.once('error', reject);
+  });
+  const { launchScript } = require('../src/main/updater/windows-replacement');
+  const script = launchScript(marker, holder.pid).replace(
+    'Start-Process -FilePath $destination -WindowStyle Hidden',
+    "[IO.File]::WriteAllText($destination, 'relaunched')");
+  const launching = promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+    Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await assert.rejects(fs.stat(marker), { code: 'ENOENT' });
+  holder.stdin.end('\n');
+  await launching;
+  assert.equal(await fs.readFile(marker, 'utf8'), 'relaunched');
+});
+
+test('Windows replacement restores the old file if committing the staged update fails', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-update-windows-rollback-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const destination = path.join(directory, 'launcher.exe');
+  const missingSource = path.join(directory, 'removed-update.exe');
+  await fs.writeFile(destination, 'previous build');
+  const { replacementScript } = require('../src/main/updater/windows-replacement');
+  const script = replacementScript(missingSource, destination, 0x7fffffff)
+    .replace('AddMinutes(2)', 'AddMilliseconds(1000)')
+    .replaceAll('Start-Process -FilePath $destination -WindowStyle Hidden', "[Console]::WriteLine('relaunched')");
+  const result = await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+    Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
+  assert.match(result.stdout, /relaunched/);
+  assert.equal(await fs.readFile(destination, 'utf8'), 'previous build');
 });
 
 test('failed Linux replacement restores the original executable', async (t) => {
@@ -248,11 +316,17 @@ test('下载失败会报告错误', async () => {
   assert.match(state.message, /网络中断/);
 });
 
-test('Windows 安装更新会启动新版本并退出', async () => {
+test('Windows 无便携环境的更新也在退出后由隐藏的等待脚本启动', async () => {
   const { manager, calls } = fixture();
   await manager.check();
   assert.equal((await manager.install()).installing, true);
   assert.equal(calls.spawn.length, 1);
+  assert.equal(calls.spawn[0].command, 'powershell.exe');
+  assert.equal(calls.spawn[0].options.windowsHide, true);
+  const script = Buffer.from(calls.spawn[0].args.at(-1), 'base64').toString('utf16le');
+  assert.ok(script.includes(`Get-Process -Id ${process.pid}`));
+  assert.ok(script.indexOf('WaitForExit(120000)') < script.indexOf('Start-Process'));
+  assert.equal(script.includes('Move-Item'), false);
   assert.equal(calls.quit, 1);
 });
 

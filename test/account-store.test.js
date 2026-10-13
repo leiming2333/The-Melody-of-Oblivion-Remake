@@ -347,3 +347,15 @@ test('账户保存期间读取始终获得现有文件', async (t) => {
   }
   assert.equal((await store.getCurrentAccount()).name, 'Alex');
 });
+
+test('多个账户存储对象同时保存时保留所有账户', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-shared-accounts-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'accounts.json');
+  await Promise.all(['Steve', 'Alex', 'Player_01', 'Player_02'].map((name) => (
+    new AccountStore(file).addOffline(name)
+  )));
+  const state = await new AccountStore(file).getState();
+  assert.deepEqual(state.accounts.map((account) => account.name).sort(), ['Alex', 'Player_01', 'Player_02', 'Steve']);
+  assert.equal(state.current.name, 'Player_02');
+});

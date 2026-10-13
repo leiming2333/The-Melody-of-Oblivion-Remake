@@ -1,5 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { runFileExclusive } = require('../file-write-queue');
 
 const DOWNLOAD_CONCURRENCY_OPTIONS = Object.freeze([4, 8, 12, 16, 24, 32]);
 const DOWNLOAD_SOURCE_OPTIONS = Object.freeze(['auto', 'bmclapi', 'official']);
@@ -99,7 +100,7 @@ class SettingsStore {
   }
 
   runExclusive(operation) {
-    const next = this.queue.then(operation, operation);
+    const next = runFileExclusive(this.filePath, operation);
     this.queue = next.catch(() => {});
     return next;
   }

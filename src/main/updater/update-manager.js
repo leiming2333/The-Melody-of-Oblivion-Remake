@@ -477,8 +477,7 @@ class UpdateManager {
     if (!asset) throw new Error('Release 中未找到适合当前系统的更新文件');
     let directory = this.getUpdateDirectory();
     const portableFile = this.env.PORTABLE_EXECUTABLE_FILE;
-    const replacesPortable = this.platform === 'win32' && portableFile
-      && path.resolve(directory, asset.name).toLowerCase() === path.resolve(portableFile).toLowerCase();
+    const replacesPortable = this.platform === 'win32' && Boolean(portableFile);
     if (replacesPortable) {
       directory = path.join(directory, 'Melody', 'updates', normalizeVersion(this.state.availableVersion).join('.'));
     }
@@ -562,13 +561,12 @@ class UpdateManager {
       return { installing: true };
     }
     if (this.platform === 'win32') {
+      const { launchScript, replacementScript } = require('./windows-replacement');
       const script = this.portableReplacement
-        ? require('./windows-replacement').replacementScript(this.updateFilePath, this.portableReplacement)
-        : null;
-      const child = script
-        ? this.spawnProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
-          Buffer.from(script, 'utf16le').toString('base64')], { detached: true, stdio: 'ignore', windowsHide: true })
-        : this.spawnProcess(this.updateFilePath, [], { detached: true, stdio: 'ignore' });
+        ? replacementScript(this.updateFilePath, this.portableReplacement, process.pid)
+        : launchScript(this.updateFilePath, process.pid);
+      const child = this.spawnProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+        Buffer.from(script, 'utf16le').toString('base64')], { detached: true, stdio: 'ignore', windowsHide: true });
       child?.unref?.();
     } else {
       this.app.relaunch?.();

@@ -138,7 +138,7 @@ test('main creates a window with all IPC registered before loading business serv
     const handlers = new Map();
     const app = new EventEmitter();
     Object.assign(app, { whenReady: () => Promise.resolve(), getPath: () => process.argv[1],
-      getAppPath: () => process.cwd(), setAppUserModelId() {}, isPackaged: false });
+      getAppPath: () => process.cwd(), setAppUserModelId() {}, requestSingleInstanceLock: () => true, isPackaged: false });
     const expectedIcon = 'app-icon.' + (process.platform === 'win32' ? 'ico' : process.platform === 'darwin' ? 'icns' : 'png');
     const shouldReapplyIcon = process.platform !== 'darwin';
     let created = false;

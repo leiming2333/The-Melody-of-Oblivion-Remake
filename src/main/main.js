@@ -19,6 +19,8 @@ if (isSmokeTest) {
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.melodyofoblivion.launcher');
 }
+const hasSingleInstanceLock = require('./single-instance').acquireSingleInstance(app, BrowserWindow, createWindow);
+if (!hasSingleInstanceLock) app.quit();
 
 ipcMain.on('window:minimize', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize();
@@ -150,27 +152,6 @@ function createWindow() {
   }
 }
 
-function createSecretCodec() {
-  const prefix = 'safe-storage:v1:';
-  return {
-    encode(value) {
-      if (!safeStorage.isEncryptionAvailable()) {
-        throw new Error('系统凭据存储当前不可用，已拒绝保存在线账户登录信息');
-      }
-      return `${prefix}${safeStorage.encryptString(value).toString('base64')}`;
-    },
-    decode(value) {
-      if (!String(value).startsWith(prefix)) {
-        throw new Error('检测到未加密的在线账户登录信息，请删除该账户后重新登录');
-      }
-      if (!safeStorage.isEncryptionAvailable()) {
-        throw new Error('系统凭据存储当前不可用，无法读取在线账户登录信息');
-      }
-      return safeStorage.decryptString(Buffer.from(String(value).slice(prefix.length), 'base64'));
-    }
-  };
-}
-
 const services = createLazyServices({
   errorLog: () => {
     const { ErrorLog } = require('./error-log');
@@ -178,7 +159,8 @@ const services = createLazyServices({
   },
   accountStore: () => {
     const { AccountStore } = require('./accounts/account-store');
-    return new AccountStore(path.join(app.getPath('userData'), 'accounts.json'), { secretCodec: createSecretCodec() });
+    const { createSecretCodec } = require('./accounts/secret-codec');
+    return new AccountStore(path.join(app.getPath('userData'), 'accounts.json'), { secretCodec: createSecretCodec(safeStorage) });
   },
   settingsStore: () => {
     const { SettingsStore } = require('./settings/settings-store');
@@ -287,7 +269,7 @@ async function initializeBackgroundServices() {
   }
 }
 
-app.whenReady().then(() => {
+if (hasSingleInstanceLock) app.whenReady().then(() => {
   startupMetrics.attach(app.getPath('userData'));
   startupMetrics.mark('electron-ready');
   require('./accounts/ipc').registerAccountIpc({ app, ipcMain, shell, clipboard, getAccountStore, getMicrosoftAuth, getYggdrasilAuth });
