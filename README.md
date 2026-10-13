@@ -16,7 +16,7 @@
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.6.5`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.6.6`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 

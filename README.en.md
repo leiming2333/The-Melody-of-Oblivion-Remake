@@ -16,7 +16,7 @@
 </div>
 
 > [!IMPORTANT]
-> The current source version is `1.6.5`, with Microsoft, offline, and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
+> The current source version is `1.6.6`, with Microsoft, offline, and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
 
 ## About this project
 

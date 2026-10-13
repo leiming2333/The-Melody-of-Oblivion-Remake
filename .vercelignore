@@ -1,7 +1,9 @@
 node_modules
-src
+src/*
+!src/shared/
+!src/shared/**
 test
-release
+release*/
 .git
 .github
 *.md
