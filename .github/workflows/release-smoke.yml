@@ -1,0 +1,53 @@
+name: Verify release packages
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Final package (${{ matrix.os }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+            artifact: dist-windows-latest-x64
+          - os: windows-latest
+            arch: ia32
+            artifact: dist-windows-latest-ia32
+          - os: windows-11-arm
+            arch: arm64
+            artifact: dist-windows-latest-arm64
+          - os: ubuntu-latest
+            arch: x64
+            artifact: dist-ubuntu-latest-x64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            artifact: dist-ubuntu-latest-arm64
+          - os: macos-15-intel
+            arch: x64
+            artifact: dist-macos-latest-x64
+          - os: macos-15
+            arch: arm64
+            artifact: dist-macos-latest-arm64
+    # Linux armv7l has no supported native GitHub runner. Its package is built
+    # and source-tested, but runtime validation still requires an ARMv7 host.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download the final build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release
+      - uses: ./.github/actions/package-smoke
+        with:
+          arch: ${{ matrix.arch }}

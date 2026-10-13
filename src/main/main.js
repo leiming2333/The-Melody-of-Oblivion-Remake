@@ -135,7 +135,8 @@ function createWindow() {
         if (!valid) throw new Error('Smoke test: renderer or preload API missing');
         await mainWindow.webContents.executeJavaScript(`Promise.all([
           import('./modules/account-ui.mjs').then(m => typeof m.renderAccountList === 'function'),
-          import('./modules/modpack-ui.mjs').then(m => typeof m.installDroppedModpack === 'function')
+          import('./modules/modpack-ui.mjs').then(m => typeof m.installDroppedModpack === 'function'),
+          import('./modules/launcher-update-ui.mjs').then(m => typeof m.createLauncherUpdateUi === 'function')
         ]).then(values => { if (!values.every(Boolean)) throw new Error('Missing renderer module'); })`);
         if (process.env.MELODY_SMOKE_RESULT) {
           await require('node:fs/promises').writeFile(process.env.MELODY_SMOKE_RESULT, JSON.stringify({

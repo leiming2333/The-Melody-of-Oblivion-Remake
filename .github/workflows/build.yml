@@ -87,10 +87,17 @@ jobs:
           path: ${{ matrix.pattern }}
           if-no-files-found: error
 
+  smoke:
+    name: Verify final packages
+    needs: build
+    uses: ./.github/workflows/release-smoke.yml
+    permissions:
+      contents: read
+
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: [build, smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

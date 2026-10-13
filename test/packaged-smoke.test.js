@@ -30,3 +30,14 @@ test('package verification rejects failed and stalled binaries', async t => {
   const stalled = await script(t, 'setInterval(() => {}, 1000);');
   await assert.rejects(verify(process.execPath, [stalled], { timeoutMs: 500 }), /timed out/);
 });
+
+test('package verification checks the requested artifact architecture when the host can run another architecture', async t => {
+  const reportedArch = process.arch === 'ia32' ? 'x64' : 'ia32';
+  const binary = await script(t, `require('fs').writeFileSync(process.env.MELODY_SMOKE_RESULT,
+    JSON.stringify({ ok: true, packaged: true, platform: process.platform, arch: '${reportedArch}' }));`);
+  await assert.rejects(verify(process.execPath, [binary]), /does not match/);
+  assert.equal((await verify(process.execPath, [binary], { expectedArch: reportedArch })).arch, reportedArch);
+  const wrongPlatform = await script(t, `require('fs').writeFileSync(process.env.MELODY_SMOKE_RESULT,
+    JSON.stringify({ ok: true, packaged: true, platform: 'another-platform', arch: '${reportedArch}' }));`);
+  await assert.rejects(verify(process.execPath, [wrongPlatform], { expectedArch: reportedArch }), /does not match/);
+});

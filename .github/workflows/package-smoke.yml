@@ -7,6 +7,9 @@ on:
       - 'scripts/verify-packaged.cjs'
       - 'package*.json'
       - '.github/workflows/package-smoke.yml'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/release-smoke.yml'
+      - '.github/actions/package-smoke/**'
 permissions:
   contents: read
 jobs:
@@ -38,33 +41,8 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run ${{ matrix.script }} -- --${{ matrix.arch }}
-      - name: Windows portable smoke
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $artifact = Get-ChildItem -LiteralPath release -Filter *.exe | Select-Object -First 1
-          if (-not $artifact) { throw 'Missing portable EXE' }
-          node scripts/verify-packaged.cjs $artifact.FullName
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Linux AppImage smoke
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          artifact=$(find release -maxdepth 1 -name '*.AppImage' -print -quit)
-          test -n "$artifact"
-          chmod +x "$artifact"
-          # Extract the actual AppImage to avoid a FUSE requirement on CI.
-          "$artifact" --appimage-extract >/dev/null
-          xvfb-run -a node scripts/verify-packaged.cjs squashfs-root/AppRun --no-sandbox
-      - name: macOS ZIP smoke
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          artifact=$(find release -maxdepth 1 -name '*.zip' -print -quit)
-          test -n "$artifact"
-          unzip -q "$artifact" -d package-smoke
-          binary=$(find package-smoke -path '*/Contents/MacOS/*' -type f -print -quit)
-          test -n "$binary"
-          node scripts/verify-packaged.cjs "$binary"
+        env:
+          MELODY_MICROSOFT_CLIENT_ID: '72867f11-f8bf-4086-a502-39039a08970c'
+      - uses: ./.github/actions/package-smoke
+        with:
+          arch: ${{ matrix.arch }}

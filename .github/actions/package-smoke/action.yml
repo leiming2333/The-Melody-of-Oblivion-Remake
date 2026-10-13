@@ -1,0 +1,45 @@
+name: Verify packaged application
+description: Start the final portable EXE, extracted AppImage, or application from the macOS ZIP.
+inputs:
+  arch:
+    description: Expected architecture in the application's smoke report.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Windows portable smoke
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        SMOKE_ARCH: ${{ inputs.arch }}
+      run: |
+        $artifacts = @(Get-ChildItem -LiteralPath release -Filter *.exe)
+        if ($artifacts.Count -ne 1) { throw 'Expected exactly one portable EXE' }
+        node scripts/verify-packaged.cjs --expected-arch $env:SMOKE_ARCH $artifacts[0].FullName
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    - name: Linux AppImage smoke
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        SMOKE_ARCH: ${{ inputs.arch }}
+      run: |
+        set -euo pipefail
+        test "$(find release -maxdepth 1 -name '*.AppImage' | wc -l)" -eq 1
+        artifact=$(find release -maxdepth 1 -name '*.AppImage' -print -quit)
+        chmod +x "$artifact"
+        # Extract the final AppImage to avoid a FUSE requirement on CI.
+        "$artifact" --appimage-extract >/dev/null
+        xvfb-run -a node scripts/verify-packaged.cjs --expected-arch "$SMOKE_ARCH" squashfs-root/AppRun --no-sandbox
+    - name: macOS ZIP smoke
+      if: runner.os == 'macOS'
+      shell: bash
+      env:
+        SMOKE_ARCH: ${{ inputs.arch }}
+      run: |
+        set -euo pipefail
+        test "$(find release -maxdepth 1 -name '*.zip' | wc -l)" -eq 1
+        artifact=$(find release -maxdepth 1 -name '*.zip' -print -quit)
+        unzip -q "$artifact" -d package-smoke
+        binary=$(find package-smoke -path '*/Contents/MacOS/*' -type f -print -quit)
+        test -n "$binary"
+        node scripts/verify-packaged.cjs --expected-arch "$SMOKE_ARCH" "$binary"

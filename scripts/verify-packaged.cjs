@@ -3,7 +3,9 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 
-async function verify(binary, args = [], { timeoutMs = 60000, requirePackaged = true } = {}) {
+async function verify(binary, args = [], {
+  timeoutMs = 60000, requirePackaged = true, expectedArch = process.arch
+} = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-package-smoke-'));
   const resultFile = path.join(directory, 'result.json');
   const env = { ...process.env, MELODY_SMOKE_RESULT: resultFile };
@@ -20,8 +22,8 @@ async function verify(binary, args = [], { timeoutMs = 60000, requirePackaged = 
       });
     });
     const result = JSON.parse(await fs.readFile(resultFile, 'utf8'));
-    if (!result.ok || (requirePackaged && !result.packaged) || result.platform !== process.platform || result.arch !== process.arch) {
-      throw new Error('Smoke report does not match the native packaged application');
+    if (!result.ok || (requirePackaged && !result.packaged) || result.platform !== process.platform || result.arch !== expectedArch) {
+      throw new Error('Smoke report does not match the expected packaged application');
     }
     console.log(JSON.stringify(result));
     return result;
@@ -29,8 +31,16 @@ async function verify(binary, args = [], { timeoutMs = 60000, requirePackaged = 
 }
 
 if (require.main === module) {
-  const [binary, ...args] = process.argv.slice(2);
-  if (!binary) { console.error('Usage: node scripts/verify-packaged.cjs <native executable> [arguments]'); process.exitCode = 1; }
-  else verify(binary, args).catch(error => { console.error(error.message); process.exitCode = 1; });
+  const cliArgs = process.argv.slice(2);
+  const options = {};
+  if (cliArgs[0] === '--expected-arch') {
+    cliArgs.shift();
+    options.expectedArch = cliArgs.shift();
+  }
+  const [binary, ...args] = cliArgs;
+  if (!binary || (options.expectedArch && !['x64', 'ia32', 'arm64', 'arm'].includes(options.expectedArch))) {
+    console.error('Usage: node scripts/verify-packaged.cjs [--expected-arch <arch>] <executable> [arguments]');
+    process.exitCode = 1;
+  } else verify(binary, args, options).catch(error => { console.error(error.message); process.exitCode = 1; });
 }
 module.exports = { verify };

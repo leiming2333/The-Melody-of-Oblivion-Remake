@@ -211,3 +211,31 @@ test('startup paints before background initialization and missing Java stays non
   assert.ok(events.includes('profiles-loaded'));
   assert.ok(events.includes('java-detected'));
 });
+
+test('a game crash displays the saved diagnostic log while normal exit stays nonmodal', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  let receive;
+  const problems = [];
+  const toasts = [];
+  const context = {
+    minecraft: { onLaunchStatus: (callback) => { receive = callback; } },
+    versionSelect: { value: 'game' }, launchRequestActive: false,
+    activeGameProfiles: new Set(), gameStatus: {}, statusBadge: {},
+    launchButton: { classList: { remove() {} } }, launchLabel: {}, launchHint: {},
+    showProblem: (error, title) => problems.push({ message: error.message, title }),
+    showToast: (message) => toasts.push(message)
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('function updateLaunchButtonState()'),
+    source.indexOf('let modpackUiModule;')), context);
+  receive({ phase: 'running', targetId: 'game', logPath: '/logs/game.log' });
+  assert.equal(context.launchButton.disabled, true);
+  receive({ phase: 'exited', targetId: 'game', code: 1, logPath: '/logs/game.log' });
+  assert.match(problems[0].message, /异常退出.*1.*\n游戏日志：\/logs\/game.log/);
+  assert.equal(context.launchButton.disabled, false);
+  receive({ phase: 'exited', targetId: 'game', code: 0, logPath: '/logs/game.log' });
+  assert.equal(problems.length, 1);
+  assert.deepEqual(toasts, ['游戏已退出']);
+  receive({ phase: 'exited', targetId: 'game', signal: 'SIGTERM', logError: 'EACCES' });
+  assert.match(problems[1].message, /SIGTERM.*\n游戏日志保存失败（EACCES）/);
+});

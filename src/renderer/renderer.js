@@ -162,97 +162,47 @@ let microsoftLoginSessionId;
 let microsoftLoginActive = false;
 let microsoftLoginRequestId = 0;
 let littleSkinLoginActive = false;
-let launcherUpdateState = { status: 'idle', progress: 0, installAction: null, message: '尚未检查更新' };
-
-function setUpdateStatusBadgeSpinning(spinning) {
-  if (!updateStatusBadgeSvg) return;
-  updateStatusBadge.classList.toggle('is-spinning', spinning);
-}
-
-function renderLauncherUpdate(state = launcherUpdateState) {
-  const downloadFailed = state.status === 'error'
-    && ['downloading', 'verifying'].includes(launcherUpdateState.status);
-  launcherUpdateState = state;
-  launcherUpdateStatus.textContent = state.message ?? '尚未检查更新';
-  if (state.currentVersion) {
-    launcherVersionMeta.textContent = `Launcher ${state.currentVersion}`;
-  }
-  const hasUpdate = Boolean(state.availableVersion)
-    || ['available', 'downloading', 'verifying', 'downloaded'].includes(state.status);
-  const isCurrent = state.status === 'current';
-  const hasError = state.status === 'error';
-  updateStatusBadge.classList.toggle('has-update', hasUpdate);
-  updateStatusBadge.classList.toggle('is-current', isCurrent);
-  updateStatusBadge.classList.toggle('has-error', hasError);
-  updateStatusBadge.title = state.message ?? '尚未检查更新';
-  updateStatusBadge.setAttribute('aria-label', state.message ?? '检查启动器更新');
-  updateBadgeRefresh.hidden = hasUpdate || isCurrent || hasError;
-  updateBadgeCheck.hidden = !isCurrent;
-  updateBadgeDownload.hidden = !hasUpdate;
-  updateBadgeError.hidden = !hasError;
-  setUpdateStatusBadgeSpinning(state.status === 'checking');
-  const showProgress = ['downloading', 'verifying'].includes(state.status);
-  launcherUpdateProgress.hidden = !showProgress;
-  const updatePercent = renderProgressBar(launcherUpdateProgress, state.progress, 100,
-    state.status === 'downloaded');
-  if (state.status === 'verifying') launcherUpdateProgress.removeAttribute('value');
-  launcherUpdateButton.disabled = ['checking', 'downloading', 'verifying', 'unavailable'].includes(state.status);
-  launcherUpdateButton.textContent = state.status === 'available'
-    ? `下载 ${state.availableVersion ?? '更新'}`
-    : state.status === 'downloaded'
-      ? (state.installAction === 'open-folder' ? '打开下载位置' : '重启并安装')
-      : state.status === 'checking'
-        ? '正在检查…'
-        : state.status === 'verifying'
-          ? '正在校验…'
-        : state.status === 'downloading'
-          ? (updatePercent === null ? '下载中' : `${updatePercent}%`)
-          : '检查更新';
-  renderLauncherUpdateNotes(state);
-  if (downloadFailed) showToast(`下载失败：${state.message ?? '启动器更新下载失败'}`, true);
-}
-
-// 有新版本且 Release 带正文时展示更新日志（文本渲染，不含 HTML）
-function renderLauncherUpdateNotes(state) {
-  if (!launcherUpdateNotesSetting || !launcherUpdateNotes) return;
-  const notes = typeof state.releaseNotes === 'string' && state.releaseNotes.trim()
-    ? state.releaseNotes
-    : '';
-  const visible = Boolean(notes)
-    && ['available', 'downloading', 'verifying', 'downloaded', 'error'].includes(state.status);
-  launcherUpdateNotesSetting.hidden = !visible;
-  if (visible) {
-    launcherUpdateNotes.textContent = notes;
-  }
-}
-
-async function handleLauncherUpdate() {
+let launcherUpdateUiModule;
+async function withLauncherUpdateUi(callback) {
   try {
-    if (launcherUpdateState.status === 'available') {
-      renderLauncherUpdate(await updaterApi.download());
-    } else if (launcherUpdateState.status === 'downloaded') {
-      await updaterApi.install();
-    } else {
-      renderLauncherUpdate(await updaterApi.check());
-    }
+    launcherUpdateUiModule ??= import('./modules/launcher-update-ui.mjs').then(({ createLauncherUpdateUi }) => (
+      createLauncherUpdateUi({ updaterApi, renderProgressBar, showToast, showProblem,
+        elements: { launcherUpdateStatus, launcherVersionMeta, updateStatusBadge, updateStatusBadgeSvg,
+          updateBadgeRefresh, updateBadgeCheck, updateBadgeDownload, updateBadgeError,
+          launcherUpdateProgress, launcherUpdateButton, launcherUpdateNotesSetting,
+          launcherUpdateNotes, settingsDialog },
+        ensureSettingsOpen: async () => {
+          if (!settingsDialog.open) {
+            if (!launcherSettingsLoaded) await loadLauncherSettings();
+            applySettingsToForm();
+            settingsDialog.showModal();
+          }
+        }
+      })
+    )).catch((error) => {
+      launcherUpdateUiModule = undefined;
+      throw error;
+    });
+    return await callback(await launcherUpdateUiModule);
   } catch (error) {
-    showProblem(error);
+    showToast('更新界面加载失败：' + readableError(error), true);
   }
 }
 
-async function openLauncherUpdateSettings() {
-  if (!settingsDialog.open) {
-    if (!launcherSettingsLoaded) await loadLauncherSettings();
-    applySettingsToForm();
-    settingsDialog.showModal();
-  }
-  settingsDialog.querySelector('.launcher-update-setting')?.scrollIntoView({ block: 'center' });
-  launcherUpdateButton.focus();
+function renderLauncherUpdate(state) {
+  return withLauncherUpdateUi((ui) => ui.render(state));
 }
 
-async function handleLauncherUpdateFromBadge() {
-  await openLauncherUpdateSettings();
-  await handleLauncherUpdate();
+function handleLauncherUpdate() {
+  return withLauncherUpdateUi((ui) => ui.handle());
+}
+
+function openLauncherUpdateSettings() {
+  return withLauncherUpdateUi((ui) => ui.openSettings());
+}
+
+function handleLauncherUpdateFromBadge() {
+  return withLauncherUpdateUi((ui) => ui.handleFromBadge());
 }
 
 const loaderNames = Object.freeze({
@@ -2000,6 +1950,7 @@ if (minecraft?.onLaunchStatus) {
       activeGameProfiles.add(launchTargetId);
       if (versionSelect.value === launchTargetId) {
         gameStatus.textContent = `${launchTargetId} 正在运行`;
+        gameStatus.title = status.logPath ? `游戏日志：${status.logPath}` : '';
         statusBadge.textContent = 'RUNNING';
       }
     } else if (status.phase === 'java' || status.phase === 'launching') {
@@ -2020,8 +1971,15 @@ if (minecraft?.onLaunchStatus) {
         gameStatus.textContent = normalExit
           ? `${launchTargetId} 已退出`
           : `${launchTargetId} 异常退出（${status.code ?? status.signal ?? '未知'}）`;
+        gameStatus.title = status.logPath ? `游戏日志：${status.logPath}` : '';
         statusBadge.textContent = normalExit ? 'READY' : 'ERROR';
-        showToast(normalExit ? '游戏已退出' : '游戏进程异常退出');
+        if (normalExit) showToast('游戏已退出');
+        else {
+          const detail = status.logError
+            ? `游戏日志保存失败（${status.logError}）`
+            : status.logPath ? `游戏日志：${status.logPath}` : '游戏日志不可用';
+          showProblem(new Error(`${gameStatus.textContent}\n${detail}`), '游戏异常退出');
+        }
       }
     }
     updateLaunchButtonState();
