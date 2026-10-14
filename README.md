@@ -12,7 +12,7 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
-[![Source](https://img.shields.io/badge/Source-v1.6.5-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.6.6-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
@@ -106,6 +106,8 @@ Java 检测结果保存在用户数据目录的 `java-cache.json`，可执行文
 | `npm run build:win` | 构建 Windows 持久运行目录便携 EXE |
 | `npm run build:linux` | 构建 Linux AppImage |
 | `npm run build:mac` | 构建 macOS zip 包 |
+
+持续检查、发布门槛与各平台启动验证范围见[持续检查与发布验证](docs/ci-release-validation.md)。
 
 ## 仓库结构
 

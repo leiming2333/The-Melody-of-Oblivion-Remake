@@ -12,7 +12,7 @@
 [![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
-[![Source](https://img.shields.io/badge/Source-v1.6.5-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.6.6-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
@@ -102,6 +102,8 @@ Download, loader, modpack, Java download and game-launch services initialize on 
 | `npm run build:win` | Build Windows portable EXE with a persistent runtime |
 | `npm run build:linux` | Build Linux AppImage |
 | `npm run build:mac` | Build macOS zip packages |
+
+See [CI and release validation](docs/ci-release-validation.md) (in Chinese) for checks, release gates, and platform startup coverage.
 
 ## Repository layout
 
