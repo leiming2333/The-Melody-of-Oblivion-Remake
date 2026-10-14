@@ -8,6 +8,9 @@ module.exports = async function portableBuildHook(context) {
   if (context.electronPlatformName !== 'win32') return;
   const target = context.targets.find((item) => item.name === 'portable');
   if (!target) return;
+  // The bundled NSIS 7z decoder predates the ARM64 filter selected by 7-Zip 24.
+  // Use a supported, reversible filter for every portable archive, including ARM64.
+  process.env.ELECTRON_BUILDER_7Z_FILTER = 'BCJ';
   const hash = crypto.createHash('sha256');
   async function visit(directory, relative = '') {
     const entries = await fs.readdir(directory, { withFileTypes: true });

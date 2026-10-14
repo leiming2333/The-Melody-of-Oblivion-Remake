@@ -1,0 +1,54 @@
+name: Diagnose a Windows release package
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Build run containing the final dist-windows-latest artifact
+        required: true
+        type: string
+      arch:
+        description: Architecture of the original portable EXE
+        required: true
+        default: arm64
+        type: choice
+        options: [x64, ia32, arm64]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose:
+    runs-on: ${{ inputs.arch == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate build run
+        shell: pwsh
+        env:
+          BUILD_RUN_ID: ${{ inputs.run_id }}
+        run: |
+          if ($env:BUILD_RUN_ID -notmatch '^\d+$') { throw 'run_id must be a numeric GitHub Actions run ID' }
+      - name: Download the original final package
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-windows-latest-${{ inputs.arch }}
+          path: diagnostic-package
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Observe portable package startup
+        shell: pwsh
+        env:
+          PACKAGE_ARCH: ${{ inputs.arch }}
+        run: |
+          & ./scripts/diagnose-windows-package.ps1 -ArtifactDirectory diagnostic-package -ExpectedArch $env:PACKAGE_ARCH -ReportDirectory package-diagnostics -TimeoutSeconds 180
+          exit $LASTEXITCODE
+      - name: Upload startup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package-diagnostics-${{ inputs.arch }}-${{ github.run_id }}
+          path: package-diagnostics
+          if-no-files-found: warn
+          retention-days: 7
