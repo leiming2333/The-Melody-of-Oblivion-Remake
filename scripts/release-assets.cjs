@@ -88,7 +88,8 @@ async function prepareRelease(input, output, { tag, commit, smokeDirectory, vers
       if (!upgradeReport.ok || upgradeReport.target !== item.target.id || upgradeReport.version !== version || upgradeReport.artifactSha256 !== item.sha256
         || upgradeReport.artifact !== item.name || upgradeReport.upgrades !== 2 || !upgradeReport.previousBackupPreserved || !upgradeReport.olderManagedBackupCleaned
         || upgradeReport.previousVersion !== '0.0.0' || !upgradeReport.previousReport?.ok || !upgradeReport.previousReport.packaged
-        || upgradeReport.previousReport.version !== '0.0.0' || upgradeReport.previousReport.arch !== item.target.arch || upgradeReport.previousReport.platform !== item.target.platform) throw new Error(`Upgrade report mismatch: ${item.target.id}`);
+        || upgradeReport.previousReport.version !== '0.0.0' || upgradeReport.previousReport.arch !== item.target.arch || upgradeReport.previousReport.platform !== item.target.platform
+        || (item.target.platform === 'darwin' && upgradeReport.manualPermissionFallbackPassed !== true)) throw new Error(`Upgrade report mismatch: ${item.target.id}`);
       upgrade = { status: 'passed', report: upgradeReport };
     }
     assets.push({ name: item.name, target: item.target.id, platform: item.target.platform, arch: item.target.arch, size: item.size, sha256: item.sha256, build: metadata, smoke, upgrade });

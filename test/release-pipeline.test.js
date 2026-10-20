@@ -35,6 +35,7 @@ async function fixture(t) {
     if (target.smokeRunner) await fs.writeFile(path.join(smoke, `upgrade-${target.id}.json`), JSON.stringify({
       ok: true, target: target.id, version, artifact: target.filename, artifactSha256: await hashFile(file),
       upgrades: 2, previousBackupPreserved: true, olderManagedBackupCleaned: true,
+      ...(target.platform === 'darwin' ? { manualPermissionFallbackPassed: true } : {}),
       previousVersion: '0.0.0', previousReport: { ok: true, packaged: true, version: '0.0.0', arch: target.arch, platform: target.platform }
     }));
   }
@@ -102,6 +103,21 @@ test('wrong embedded version, package hash, missing target and tag mismatch fail
   await fs.rm(path.join(f.input, targets[0].id, targets[0].filename));
   await assert.rejects(collectPackages(f.input), /Expected 8/);
   await assert.rejects(fs.access(f.output));
+});
+
+test('release requires real permission fallback evidence from both macOS architectures', async t => {
+  const f = await fixture(t);
+  for (const target of targets.filter(item => item.platform === 'darwin')) {
+    const reportPath = path.join(f.smoke, `upgrade-${target.id}.json`);
+    const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+    delete report.manualPermissionFallbackPassed;
+    await fs.writeFile(reportPath, JSON.stringify(report));
+    await assert.rejects(f.prepare(), new RegExp(`Upgrade report mismatch: ${target.id}`));
+    await fs.writeFile(reportPath, JSON.stringify({ ...report, manualPermissionFallbackPassed: false }));
+    await assert.rejects(f.prepare(), new RegExp(`Upgrade report mismatch: ${target.id}`));
+    await fs.writeFile(reportPath, JSON.stringify({ ...report, manualPermissionFallbackPassed: true }));
+  }
+  assert.equal((await f.prepare()).assets.filter(asset => asset.platform === 'darwin' && asset.upgrade.report.manualPermissionFallbackPassed).length, 2);
 });
 
 test('published release retries are read-only and reject changed bytes before any mutation', async t => {

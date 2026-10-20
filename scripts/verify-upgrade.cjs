@@ -45,6 +45,50 @@ async function waitUntil(read, message, timeout = 180000) {
   throw new Error(message);
 }
 
+async function verifyMacPermissionFallback({ createManager, targetParent, installation, packageHash, installationHash, dataDirectory }) {
+  if (process.platform !== 'darwin' || process.getuid?.() === 0) throw new Error('macOS permission smoke requires a native non-root runner');
+  let quitCalls = 0;
+  let helperCalls = 0;
+  const updater = createManager('0.0.0', { dataDirectory,
+    quit: () => { quitCalls++; },
+    helper: async () => { helperCalls++; throw new Error('Read-only application location must not start an installation helper'); } });
+  // Complete the real download and create its journal before restricting the
+  // application directory. Records/packages remain writable outside it.
+  const downloaded = await updater.check();
+  if (downloaded.status !== 'downloaded' || downloaded.installAction !== 'relaunch') throw new Error('Permission fallback package was not prepared for automatic installation');
+  const downloadPath = updater.updateFilePath;
+  const originalMode = (await fs.stat(targetParent)).mode & 0o7777;
+  const probe = path.join(targetParent, '.melody-permission-smoke-probe');
+  let probeCreated = false;
+  let permissionError;
+  try {
+    await fs.chmod(targetParent, originalMode & ~0o222);
+    try { await fs.mkdir(probe); probeCreated = true; }
+    catch (error) {
+      if (!['EACCES', 'EPERM', 'EROFS'].includes(error.code)) throw error;
+      permissionError = error.code;
+    }
+    if (!permissionError) throw new Error('Application directory remained writable after chmod; real permission fallback was not exercised');
+    const state = await updater.install();
+    if (state.status !== 'downloaded' || state.installAction !== 'open-folder' || !/目录不可写/.test(state.manualInstallReason || '')
+      || state.installing || quitCalls || helperCalls) throw new Error('Read-only application location did not preserve manual installation without quitting');
+    if (updater.updateFilePath !== downloadPath || await hashFile(downloadPath) !== packageHash) throw new Error('Manual installation fallback did not preserve the verified ZIP');
+    if (await hashInstallation(installation) !== installationHash) throw new Error('Manual installation fallback changed the current application');
+    await updater.store.load();
+    if (updater.store.latest()?.phase !== 'prepared') throw new Error('Manual installation fallback did not retain its prepared recovery record');
+  } finally {
+    await fs.chmod(targetParent, originalMode);
+    if (probeCreated) await fs.rmdir(probe);
+    // Keep this intentionally abandoned transaction separate from the real
+    // two-package upgrade that follows, including when an assertion fails.
+    await updater.recover('keep-current');
+  }
+  await updater.store.load();
+  if (updater.store.latest()?.phase !== 'abandoned' || updater.publicState().status !== 'idle') throw new Error('Permission fallback recovery did not keep the current application');
+  return { passed: true, permissionError, archivePreserved: true, currentApplicationPreserved: true,
+    quitCalls, helperCalls, recoveryAction: 'keep-current' };
+}
+
 async function verifyUpgrade({ target: targetId, artifact, previousArtifact, report: reportPath }) {
   const target = targets.find(item => item.id === targetId);
   if (!target?.smokeRunner || target.platform !== process.platform) throw new Error('Upgrade smoke requires a native runnable target');
@@ -58,6 +102,7 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
   if (previousPackageHash === packageHash) throw new Error('Previous test package must contain a different version');
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-real-upgrade-'));
   const userData = path.join(directory, 'user-data');
+  const permissionUserData = path.join(directory, 'permission-user-data');
   const smokeResult = path.join(directory, 'new-package-smoke.json');
   let installation;
   let executable;
@@ -71,7 +116,9 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
       await run('/usr/bin/ditto', ['-x', '-k', previousPackage, extracted]);
       const bundles = (await fs.readdir(extracted)).filter(name => name.endsWith('.app'));
       if (bundles.length !== 1) throw new Error('Expected one application bundle');
-      installation = path.join(directory, bundles[0]);
+      const targetParent = path.join(directory, 'application-location');
+      await fs.mkdir(targetParent);
+      installation = path.join(targetParent, bundles[0]);
       await fs.rename(path.join(extracted, bundles[0]), installation);
       const binaries = await fs.readdir(path.join(installation, 'Contents', 'MacOS'));
       if (binaries.length !== 1) throw new Error('Expected one application executable');
@@ -104,11 +151,11 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
     const previousReport = target.platform === 'linux'
       ? await launchLinux('0.0.0', previousReportPath)
       : await verify(executable, [], { expectedArch: target.arch, expectedVersion: '0.0.0', reportPath: previousReportPath });
-    function manager(currentVersion) {
+    function manager(currentVersion, { dataDirectory = userData, quit = () => {}, helper } = {}) {
       return new UpdateManager({
         app: { isPackaged: true, getVersion: () => currentVersion,
-          getPath: name => name === 'exe' ? executable : name === 'userData' ? userData : directory,
-          quit() {}, relaunch() { launchPromise = launchLinux(); } },
+          getPath: name => name === 'exe' ? executable : name === 'userData' ? dataDirectory : directory,
+          quit, relaunch() { launchPromise = launchLinux(); } },
         installationTarget: installation, platform: target.platform, arch: target.arch,
         env: { ...process.env, PORTABLE_EXECUTABLE_FILE: installation, PORTABLE_EXECUTABLE_DIR: directory, APPIMAGE: installation },
         fetchImpl: async () => new Response(JSON.stringify(release), { status: 200, headers: { 'content-type': 'application/json' } }),
@@ -118,10 +165,14 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
           for (const stream of [child.stdout, child.stderr]) stream?.on('data', data => { helperOutput = (helperOutput + data.toString()).slice(-32000); });
           return child;
         },
-        startHelper: options => startInstallHelper({ ...options, parentPid: 0x7fffffff,
-          launchArguments: ['--smoke-test', `--smoke-result=${smokeResult}`] })
+        startHelper: helper || (options => startInstallHelper({ ...options, parentPid: 0x7fffffff,
+          launchArguments: ['--smoke-test', `--smoke-result=${smokeResult}`] }))
       });
     }
+    const manualPermissionFallback = target.platform === 'darwin'
+      ? await verifyMacPermissionFallback({ createManager: manager, targetParent: path.dirname(installation), installation,
+        packageHash, installationHash: originalHash, dataDirectory: permissionUserData })
+      : null;
     const records = [];
     for (let generation = 0; generation < 2; generation++) {
       await fs.rm(smokeResult, { force: true });
@@ -169,6 +220,7 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
       previousReport, healthyConfirmation: 'Explicit harness call after real packaged startup',
       backupCleanupReinstall: true, upgrades: records.length,
       previousBackupPreserved: true, olderManagedBackupCleaned: true,
+      ...(manualPermissionFallback ? { manualPermissionFallbackPassed: manualPermissionFallback.passed, manualPermissionFallback } : {}),
       reports: records.map(record => record.smoke) };
     if (reportPath) { await fs.mkdir(path.dirname(path.resolve(reportPath)), { recursive: true }); await fs.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`); }
     succeeded = true;
@@ -176,10 +228,13 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
     return report;
   } catch (error) {
     if (reportPath) {
-      const journals = await fs.readdir(path.join(userData, 'updates')).catch(() => []);
       const transactions = [];
-      for (const journal of journals.filter(name => name.endsWith('.json'))) {
-        transactions.push(JSON.parse(await fs.readFile(path.join(userData, 'updates', journal), 'utf8')));
+      for (const dataDirectory of [userData, permissionUserData]) {
+        const journals = await fs.readdir(path.join(dataDirectory, 'updates')).catch(() => []);
+        for (const journal of journals.filter(name => name.endsWith('.json'))) {
+          transactions.push({ userData: path.basename(dataDirectory),
+            ...JSON.parse(await fs.readFile(path.join(dataDirectory, 'updates', journal), 'utf8')) });
+        }
       }
       await fs.mkdir(path.dirname(path.resolve(reportPath)), { recursive: true });
       await fs.writeFile(reportPath, `${JSON.stringify({ ok: false, target: targetId, message: error.message,
