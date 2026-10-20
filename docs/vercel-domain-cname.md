@@ -2,6 +2,8 @@
 
 示例域名使用 `dl.yourdomain.com`。开始前先确认域名已注册、可编辑 DNS，且该主机名没有被其他服务占用。
 
+网站部署使用 Vercel 支持的 Node.js `24.x`，项目的 Node.js Version 设为 `24.x`。仓库根 `package.json` 的 `engines.node` 同时兼容 `24.x` 和启动器构建所需的 `26.10.0`；不要将它改回仅含 `26.10.0`，否则 Vercel 会在安装依赖前拒绝部署。启动器的 `.node-version`、CI 构建环境与 `scripts/toolchain.cjs` 继续固定为 `26.10.0`。网站 CI 单独在 Node.js 24 下安装生产依赖并运行网站 API 测试。
+
 ## 绑定到 Vercel
 
 1. 打开 Vercel 项目 **Settings → Domains → Add**，输入 `dl.yourdomain.com` 并添加到当前网站项目。

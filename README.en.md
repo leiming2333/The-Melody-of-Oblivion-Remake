@@ -71,6 +71,7 @@ The website shows the actual home and account screens and uses the same Desert L
 
 - Windows 10/11, macOS, or Linux, with a download matching the device architecture
 - Node.js `26.10.0` and npm `11.13.0` for source development and builds
+- The Vercel website uses Node.js `24.x`. `engines.node` supports both environments; `.node-version` and the build preflight still require `26.10.0` for launcher builds.
 - An internet connection for metadata, game files, authentication, and managed Java downloads
 - A legally owned Minecraft: Java Edition account for authenticated online play
 

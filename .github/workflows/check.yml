@@ -20,3 +20,15 @@ jobs:
           skip-electron: 'true'
       - run: npm run check
       - run: npm test
+  website:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm install --global npm@11.13.0 --ignore-scripts
+      - run: npm ci --omit=dev --ignore-scripts
+      - run: node --test test/website-*.test.js
