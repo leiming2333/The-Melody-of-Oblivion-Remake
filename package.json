@@ -1,6 +1,6 @@
 {
   "name": "melody-of-oblivion-launcher",
-  "version": "1.6.6",
+  "version": "1.7.0",
   "description": "我的世界忘却的旋律启动器",
   "author": {
     "name": "leiming2333",
@@ -11,16 +11,19 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "build": "electron-builder",
-    "build:win": "node scripts/generate-client-id.js && electron-builder --win --publish never",
-    "build:linux": "node scripts/generate-client-id.js && electron-builder --linux AppImage --publish never",
-    "build:mac": "node scripts/generate-client-id.js && electron-builder --mac zip --publish never",
+    "build": "node scripts/build.cjs",
+    "build:win": "node scripts/build.cjs --win",
+    "build:linux": "node scripts/build.cjs --linux",
+    "build:mac": "node scripts/build.cjs --mac",
+    "build:targets": "node scripts/release-targets.cjs",
+    "verify:toolchain": "node scripts/toolchain.cjs",
     "smoke": "electron . --smoke-test",
     "check": "node scripts/check.js",
     "test": "node --test test/*.test.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": "26.10.0",
+    "npm": "11.13.0"
   },
   "build": {
     "appId": "com.melodyofoblivion.launcher",
@@ -69,10 +72,10 @@
   },
   "packageManager": "npm@11.13.0",
   "devDependencies": {
-    "electron": "^43.2.0",
-    "electron-builder": "^26.15.3"
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3"
   },
   "dependencies": {
-    "@vercel/blob": "^2.8.1"
+    "@vercel/blob": "2.8.1"
   }
 }

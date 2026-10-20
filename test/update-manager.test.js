@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
+const { EventEmitter } = require('node:events');
 const {
   GITHUB_MIRRORS,
   UpdateManager,
@@ -18,6 +19,11 @@ const {
 } = require('../src/main/updater/update-manager');
 
 const fixtureHash = 'a'.repeat(64);
+function spawnedWindowsHelper(call) {
+  const bootstrap = Buffer.from(call.args.at(-1), 'base64').toString('utf16le');
+  const encoded = bootstrap.match(/'-EncodedCommand', '([A-Za-z0-9+/=]+)'/);
+  return encoded ? Buffer.from(encoded[1], 'base64').toString('utf16le') : bootstrap;
+}
 
 test('Windows replacement waits for Electron exit even after its EXE unlocks, preserving old bytes', {
   skip: process.platform !== 'win32'
@@ -62,15 +68,15 @@ test('same-name portable updates stage the download and replace only after quitt
   const directory = path.resolve('portable-update-fixture');
   manager.env = { PORTABLE_EXECUTABLE_DIR: directory, PORTABLE_EXECUTABLE_FILE: path.join(directory, name) };
   assert.equal((await manager.check()).status, 'downloaded');
-  assert.equal(manager.updateFilePath, path.join(directory, 'Melody', 'updates', '9.9.9', name));
+  assert.equal(manager.updateFilePath, path.join(directory, 'Melody', 'updates', manager.transaction.id, name));
   await manager.install();
   assert.equal(calls.spawn[0].command, 'powershell.exe');
   assert.equal(calls.spawn[0].options.windowsHide, true);
-  const script = Buffer.from(calls.spawn[0].args.at(-1), 'base64').toString('utf16le');
+  const script = spawnedWindowsHelper(calls.spawn[0]);
   assert.ok(script.includes(manager.env.PORTABLE_EXECUTABLE_FILE));
   assert.ok(script.includes(manager.updateFilePath));
   assert.ok(script.includes(`Get-Process -Id ${process.pid}`));
-  assert.ok(script.indexOf('WaitForExit(120000)') < script.indexOf('Move-Item'));
+  assert.ok(script.indexOf('WaitForExit(200)') < script.indexOf('[IO.File]::Replace($source'));
 });
 
 test('renamed portable updates replace the original path without changing the user filename', async () => {
@@ -79,10 +85,10 @@ test('renamed portable updates replace the original path without changing the us
   const original = path.join(directory, '我的启动器.exe');
   manager.env = { PORTABLE_EXECUTABLE_DIR: directory, PORTABLE_EXECUTABLE_FILE: original };
   assert.equal((await manager.check()).status, 'downloaded');
-  assert.equal(manager.updateFilePath, path.join(directory, 'Melody', 'updates', '9.9.9', releaseAssets[0].name));
-  assert.equal(manager.portableReplacement, original);
+  assert.equal(manager.updateFilePath, path.join(directory, 'Melody', 'updates', manager.transaction.id, releaseAssets[0].name));
+  assert.equal(manager.transaction.targetPath, original);
   await manager.install();
-  const script = Buffer.from(calls.spawn[0].args.at(-1), 'base64').toString('utf16le');
+  const script = spawnedWindowsHelper(calls.spawn[0]);
   assert.ok(script.includes(`$destination = '${original}'`));
   assert.ok(script.includes(`$source = '${manager.updateFilePath}'`));
   assert.ok(script.includes(`Get-Process -Id ${process.pid}`));
@@ -127,9 +133,8 @@ test('Windows replacement restores the old file if committing the staged update 
   const script = replacementScript(missingSource, destination, 0x7fffffff)
     .replace('AddMinutes(2)', 'AddMilliseconds(1000)')
     .replaceAll('Start-Process -FilePath $destination -WindowStyle Hidden', "[Console]::WriteLine('relaunched')");
-  const result = await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
-    Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
-  assert.match(result.stdout, /relaunched/);
+  await assert.rejects(promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+    Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true }));
   assert.equal(await fs.readFile(destination, 'utf8'), 'previous build');
 });
 
@@ -174,15 +179,19 @@ for (const [label, currentName] of [
         await fs.writeFile(filePath, bytes);
       } });
     manager.env = { APPIMAGE: current };
+    manager.app.getPath = () => path.join(directory, 'user-data');
     manager.fileSystem = fs;
     manager.hashFile = async (filePath) => crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
 
     assert.equal((await manager.check()).status, 'downloaded');
-    assert.equal(manager.updateFilePath, current);
+    const record = manager.transaction;
+    assert.notEqual(manager.updateFilePath, current);
     assert.ok(stagedPath.startsWith(path.join(directory, '.melody-updates') + path.sep));
     assert.notEqual(path.dirname(stagedPath), directory);
+    assert.equal(await fs.readFile(current, 'utf8'), 'previous build');
+    await manager.install();
     assert.equal(await fs.readFile(current, 'utf8'), bytes.toString());
-    assert.equal(await fs.readFile(`${current}.old`, 'utf8'), 'previous build');
+    assert.equal(await fs.readFile(record.backupPath, 'utf8'), 'previous build');
   });
 }
 
@@ -203,20 +212,22 @@ test('failed same-name Linux replacement retains the old AppImage, prior backup 
       await fs.writeFile(filePath, bytes);
     } });
   manager.env = { APPIMAGE: current };
+  manager.app.getPath = () => path.join(directory, 'user-data');
   manager.fileSystem = { ...fs, rename: async (from, to) => {
     if (to === current) throw Object.assign(new Error('replacement denied'), { code: 'EACCES' });
     return fs.rename(from, to);
   } };
   manager.hashFile = async (filePath) => crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
 
-  assert.equal((await manager.check()).status, 'error');
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal((await manager.install()).status, 'error');
   assert.equal(await fs.readFile(current, 'utf8'), 'previous build');
   assert.equal(await fs.readFile(`${current}.old`, 'utf8'), 'older backup');
   const preservedBackup = (await fs.readdir(directory)).find((entry) => entry.startsWith(`${name}.old-`));
   assert.ok(preservedBackup);
   assert.equal(await fs.readFile(path.join(directory, preservedBackup), 'utf8'), 'previous build');
   assert.equal(await fs.readFile(stagedPath, 'utf8'), bytes.toString());
-  assert.equal(calls.updateReady.length, 0);
+  assert.equal(calls.updateReady.length, 1);
   await assert.rejects(manager.install(), /尚未下载完成/);
 });
 
@@ -305,7 +316,11 @@ function fixture({
     },
     spawnProcess: (command, args, options) => {
       calls.spawn.push({ command, args, options });
-      return { unref: () => {} };
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+      child.unref = () => {}; child.kill = () => {};
+      queueMicrotask(() => child.stdout.emit('data', Buffer.from('MELODY_UPDATE_READY\n')));
+      return child;
     }
   });
   manager.start();
@@ -391,9 +406,9 @@ test('Windows 无便携环境的更新也在退出后由隐藏的等待脚本启
   assert.equal(calls.spawn.length, 1);
   assert.equal(calls.spawn[0].command, 'powershell.exe');
   assert.equal(calls.spawn[0].options.windowsHide, true);
-  const script = Buffer.from(calls.spawn[0].args.at(-1), 'base64').toString('utf16le');
+  const script = spawnedWindowsHelper(calls.spawn[0]);
   assert.ok(script.includes(`Get-Process -Id ${process.pid}`));
-  assert.ok(script.indexOf('WaitForExit(120000)') < script.indexOf('Start-Process'));
+  assert.ok(script.indexOf('WaitForExit(200)') < script.indexOf('Start-Process'));
   assert.equal(script.includes('Move-Item'), false);
   assert.equal(calls.quit, 1);
 });
@@ -810,11 +825,13 @@ test('an active update stream can outlast its connection timeout', async (t) => 
         clearInterval(timer);
         response.end();
       }
-    }, 40);
+    }, 600);
     response.on('close', () => clearInterval(timer));
   });
   await downloadToFile(url, target, undefined, {
-    enforceMinSpeed: false, connectTimeoutMs: 100, stallTimeoutMs: 1000
+    // Keep the body slower than the connection deadline, allowing enough time
+    // for a cold native fetch connection on the slower macOS Intel runner.
+    enforceMinSpeed: false, connectTimeoutMs: 2000, stallTimeoutMs: 5000
   });
   assert.equal(await fs.readFile(target, 'utf8'), 'aaaaa');
 });

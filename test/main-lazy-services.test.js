@@ -118,7 +118,7 @@ test('settings and update IPC resolve services on demand and preserve current up
   assert.deepEqual(calls, []);
   assert.deepEqual(await handlers.get('settings:update')({}, { memoryMb: 4096 }), { memoryMb: 4096 });
   assert.deepEqual(await handlers.get('settings:get-state')(), { launcherUpdatePolicy: 'notify' });
-  assert.deepEqual(handlers.get('updater:get-state')(), { status: 'idle' });
+  assert.deepEqual(await handlers.get('updater:get-state')(), { status: 'idle' });
   assert.deepEqual(await handlers.get('updater:check')(), { autoDownload: false });
   policy = 'auto';
   assert.deepEqual(await handlers.get('updater:check')(), { autoDownload: true });
@@ -146,6 +146,8 @@ test('main creates a window with all IPC registered before loading business serv
     class BrowserWindow extends EventEmitter {
       constructor(options) {
         super();
+          this.webContents = new EventEmitter();
+          this.webContents.getURL = () => '';
         created = true;
         assert.ok(options.icon.endsWith(expectedIcon));
         this.setIcon = (icon) => iconUpdates.push(icon);

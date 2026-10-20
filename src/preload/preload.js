@@ -1,10 +1,18 @@
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+async function invokeTask(channel, ...args) {
+  // Keep failures as data through both IPC and contextBridge. A rejected Error
+  // loses its custom fields at either boundary; the renderer restores it there.
+  return ipcRenderer.invoke(channel, ...args);
+}
+
 contextBridge.exposeInMainWorld('launcherEnvironment', {
   diagnostics: Object.freeze({
     markStartup: (stage) => ipcRenderer.send('startup:stage', stage),
     whenWindowShown: () => ipcRenderer.invoke('startup:when-window-shown'),
+    rendererReady: () => ipcRenderer.invoke('startup:renderer-ready'),
+    copyError: (message) => ipcRenderer.invoke('diagnostics:copy-error', String(message)),
     reportError: (message) => ipcRenderer.send('diagnostics:error', String(message))
   }),
   windowControls: Object.freeze({
@@ -22,22 +30,25 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     listLocalVersions: () => ipcRenderer.invoke('minecraft:list-local-versions'),
     getJavaRequirement: (targetId) => ipcRenderer.invoke('minecraft:get-java-requirement', targetId),
     detectJava: (options = {}) => ipcRenderer.invoke('minecraft:detect-java', options),
-    downloadJava: (majorVersion) => ipcRenderer.invoke('minecraft:download-java', majorVersion),
+    downloadJava: (majorVersion, options = {}) => invokeTask('minecraft:download-java', majorVersion, options),
     cancelJavaDownload: () => ipcRenderer.invoke('minecraft:cancel-java-download'),
     onJavaDownloadProgress: (callback) => {
       const listener = (_event, progress) => callback(progress);
       ipcRenderer.on('minecraft:java-download-progress', listener);
       return () => ipcRenderer.removeListener('minecraft:java-download-progress', listener);
     },
-    inspectModpack: (filePath) => ipcRenderer.invoke('minecraft:inspect-modpack', filePath),
-    installModpack: (filePath, options = {}) => ipcRenderer.invoke('minecraft:install-modpack', filePath, options),
-    downloadVersion: (versionId) => ipcRenderer.invoke('minecraft:download-version', versionId),
+    inspectModpack: (filePath, options = {}) => invokeTask('minecraft:inspect-modpack', filePath, options),
+    installModpack: (filePath, options = {}) => invokeTask('minecraft:install-modpack', filePath, options),
+    resumeModpack: (sessionId, options = {}) => invokeTask('minecraft:resume-modpack', sessionId, options),
+    selectMissingModpackFile: (sessionId, identity, options = {}) => invokeTask('minecraft:select-missing-modpack-file', sessionId, identity, options),
+    discardModpackSession: (sessionId) => invokeTask('minecraft:discard-modpack-session', sessionId),
+    downloadVersion: (versionId, options = {}) => invokeTask('minecraft:download-version', versionId, options),
     listLoaders: (gameVersion, loaderType, options = {}) => ipcRenderer.invoke(
       'minecraft:list-loaders',
       { gameVersion, loaderType, ...options }
     ),
-    installLoader: (request) => ipcRenderer.invoke('minecraft:install-loader', request),
-    cancelDownload: () => ipcRenderer.invoke('minecraft:cancel-download'),
+    installLoader: (request) => invokeTask('minecraft:install-loader', request),
+    cancelDownload: (options = {}) => invokeTask('minecraft:cancel-download', options),
     verifyVersion: (versionId) => ipcRenderer.invoke('minecraft:verify-version', versionId),
     deleteVersion: (profileId) => ipcRenderer.invoke('minecraft:delete-version', profileId),
     launchVersion: (profileId) => ipcRenderer.invoke('minecraft:launch-version', profileId),
@@ -69,10 +80,14 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     selectJava: () => ipcRenderer.invoke('settings:select-java')
   }),
   updater: Object.freeze({
-    getState: () => ipcRenderer.invoke('updater:get-state'),
-    check: () => ipcRenderer.invoke('updater:check'),
-    download: () => ipcRenderer.invoke('updater:download'),
-    install: () => ipcRenderer.invoke('updater:install'),
+    getState: () => invokeTask('updater:get-state'),
+    check: () => invokeTask('updater:check'),
+    download: () => invokeTask('updater:download'),
+    cancel: () => invokeTask('updater:cancel'),
+    install: () => invokeTask('updater:install'),
+    recover: (action) => invokeTask('updater:recover', action),
+    listHistory: () => invokeTask('updater:list-history'),
+    cleanupHistory: (ids) => invokeTask('updater:cleanup-history', ids),
     onState: (callback) => {
       const listener = (_event, state) => callback(state);
       ipcRenderer.on('updater:state', listener);

@@ -139,7 +139,9 @@ test('lazy modpack UI installs through existing IPC and resets state after succe
   useVersion: (...args) => calls.push(args), showToast: (message) => calls.push(message),
   readableError: (error) => error.message };
   await installDroppedModpack(context, 'pack.mrpack');
-  assert.deepEqual(calls[0], ['pack.mrpack', { installOptionalFiles: false }]);
+  assert.equal(calls[0][0], 'pack.mrpack');
+  assert.equal(calls[0][1].installOptionalFiles, false);
+  assert.equal(typeof calls[0][1].taskId, 'string');
   assert.deepEqual(calls[1], ['instance-pack', 'Pack']);
   assert.equal(state.modpackInstallActive, false);
   assert.equal(context.cancelDownloadButton.hidden, true);
@@ -160,7 +162,7 @@ test('modpack inspection excludes a second drop and cancellation never installs 
     inspectModpack: () => { inspected++; return new Promise(resolve => { finish = resolve; }); },
     installModpack: () => { installed++; }
   }, loaderNames: {}, cancelDownloadButton: {}, downloadStatus: {}, gameStatus: {}, statusBadge: {},
-  updateVersionAction() {}, showToast() {}, readableError: error => error.message };
+  updateDownloadProgress() {}, updateVersionAction() {}, showToast() {}, readableError: error => error.message };
   const pending = installDroppedModpack(context, 'a.mrpack');
   await installDroppedModpack(context, 'b.zip');
   assert.equal(inspected, 1);
@@ -226,7 +228,9 @@ test('update UI renders release text safely and reports a failed download only o
   const failure = { status: 'error', message: 'checksum mismatch' };
   ui.render(failure);
   ui.render(failure);
-  assert.deepEqual(calls, [['toast', '下载失败：checksum mismatch', true]]);
+  assert.deepEqual(calls[0], ['toast', '下载失败：checksum mismatch', true]);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].message, 'checksum mismatch');
   assert.equal(elements.updateBadgeError.hidden, false);
   assert.equal(elements.launcherUpdateNotesSetting.hidden, true);
   const apiFailure = new Error('update server unavailable');

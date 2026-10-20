@@ -644,7 +644,7 @@ test('唯一地址停滞时结束下载并清理临时文件', { timeout: 5000 }
   await assert.rejects(fs.stat(`${destination}.part`), { code: 'ENOENT' });
 });
 
-test('持续有数据的慢速连接可以超过无数据超时完成下载', { timeout: 8000 }, async (t) => {
+test('持续有数据的慢速连接可以超过无数据超时完成下载', { timeout: 15000 }, async (t) => {
   // Leave scheduling room for parallel suites while the entire transfer still
   // lasts longer than the idle deadline, so a fixed total timeout would fail.
   const content = Buffer.alloc(64 * 1024, 0x31);
@@ -659,7 +659,7 @@ test('持续有数据的慢速连接可以超过无数据超时完成下载', { 
         clearInterval(timer);
         response.end();
       }
-    }, 20);
+    }, 40);
     response.once('close', () => clearInterval(timer));
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -678,11 +678,11 @@ test('持续有数据的慢速连接可以超过无数据超时完成下载', { 
     urls: [`http://127.0.0.1:${address.port}/slow`],
     size: content.length,
     sha1: crypto.createHash('sha1').update(content).digest('hex'),
-    idleTimeoutMs: 500,
-    signal: AbortSignal.timeout(6000)
+    idleTimeoutMs: 1500,
+    signal: AbortSignal.timeout(12000)
   });
 
-  assert.ok(Date.now() - startedAt > 500);
+  assert.ok(Date.now() - startedAt > 1500);
   assert.equal(result.bytes, content.length);
   assert.deepEqual(await fs.readFile(destination), content);
 });

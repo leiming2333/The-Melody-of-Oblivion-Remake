@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const zlib = require('node:zlib');
 const { promisify } = require('node:util');
+const { safePath, throwIfAborted } = require('./downloader');
 
 const inflateRaw = promisify(zlib.inflateRaw);
 const DEFAULT_LIMITS = Object.freeze({
@@ -17,12 +18,14 @@ function invalidArchive() {
   return new Error('整合包压缩目录或文件头已损坏');
 }
 
-async function readRange(handle, offset, length, archiveSize) {
+async function readRange(handle, offset, length, archiveSize, signal) {
+  throwIfAborted(signal);
   if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length)
     || offset < 0 || length < 0 || offset + length > archiveSize) throw invalidArchive();
   const buffer = Buffer.alloc(length);
   let read = 0;
   while (read < length) {
+    throwIfAborted(signal);
     const { bytesRead } = await handle.read(buffer, read, length - read, offset + read);
     if (!bytesRead) throw invalidArchive();
     read += bytesRead;
@@ -34,6 +37,8 @@ function archiveEntryPath(name) {
   const normalized = name.replaceAll('\\', '/').replace(/^\/+/, '');
   const segments = normalized.split('/').filter((segment) => segment && segment !== '.');
   if (normalized.includes('\0') || /^[A-Za-z]:/.test(normalized)
+    || segments.some((segment) => /[<>:"|?*]/.test(segment)
+      || /[. ]$/.test(segment) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(segment))
     || segments.some((segment) => segment === '..')) {
     throw new Error('整合包包含不安全的文件路径');
   }
@@ -46,13 +51,15 @@ function selectManifest(entries) {
   const root = findAt('');
   if (root) return root;
   // Match the installer: a pack may wrap its contents in one top-level directory.
-  const directories = new Set(entries.filter((entry) => entry.name.includes('/'))
+  const directories = new Set(entries.filter((entry) => entry.name.includes('/')
+    && !entry.name.startsWith('__MACOSX/'))
     .map((entry) => entry.name.split('/', 1)[0]));
   if (directories.size === 1) return findAt(`${[...directories][0]}/`);
   return undefined;
 }
 
-async function readModpackManifest(archivePath, limits = {}) {
+async function withValidatedArchive(archivePath, limits, signal, operation) {
+  throwIfAborted(signal);
   const bounds = { ...DEFAULT_LIMITS, ...limits };
   const handle = await fs.open(archivePath, 'r');
   try {
@@ -61,7 +68,7 @@ async function readModpackManifest(archivePath, limits = {}) {
     if (stat.size > bounds.maxArchiveBytes) throw new Error('压缩包过大，无法安全读取');
     if (stat.size < 22) throw invalidArchive();
     const tailOffset = Math.max(0, stat.size - 65557);
-    const tail = await readRange(handle, tailOffset, stat.size - tailOffset, stat.size);
+    const tail = await readRange(handle, tailOffset, stat.size - tailOffset, stat.size, signal);
     let end = -1;
     for (let offset = tail.length - 22; offset >= 0; offset -= 1) {
       if (tail.readUInt32LE(offset) === 0x06054b50
@@ -82,12 +89,13 @@ async function readModpackManifest(archivePath, limits = {}) {
     if (entryCount > bounds.maxEntries) throw new Error('压缩包包含过多文件');
     if (directorySize > bounds.maxDirectoryBytes) throw new Error('整合包压缩目录过大');
     if (directoryOffset + directorySize !== tailOffset + end) throw invalidArchive();
-    const directory = await readRange(handle, directoryOffset, directorySize, stat.size);
+    const directory = await readRange(handle, directoryOffset, directorySize, stat.size, signal);
     const entries = [];
     const seen = new Set();
     let cursor = 0;
     let totalBytes = 0;
     for (let index = 0; index < entryCount; index += 1) {
+      throwIfAborted(signal);
       if (cursor + 46 > directory.length || directory.readUInt32LE(cursor) !== 0x02014b50) {
         throw invalidArchive();
       }
@@ -108,41 +116,90 @@ async function readModpackManifest(archivePath, limits = {}) {
       const name = archiveEntryPath(rawName);
       cursor += recordSize;
       if (rawName.replaceAll('\\', '/').endsWith('/') || !name) continue;
-      if (seen.has(name)) throw new Error('整合包包含重复文件路径');
-      seen.add(name);
+      // Use the same collision rules on case-sensitive and insensitive hosts.
+      const identity = name.toLowerCase();
+      if (seen.has(identity)) throw new Error('整合包包含重复文件路径');
+      seen.add(identity);
       if (uncompressedSize > bounds.maxEntryBytes) throw new Error('压缩包中的单个文件过大');
       totalBytes += uncompressedSize;
       if (totalBytes > bounds.maxTotalBytes) throw new Error('压缩包解压后的总大小过大');
       entries.push({ name, rawName, flags, method, compressedSize, uncompressedSize, localOffset });
     }
     if (cursor !== directory.length) throw invalidArchive();
+    for (const entry of entries) {
+      const parts = entry.name.toLowerCase().split('/');
+      for (let length = 1; length < parts.length; length += 1) {
+        if (seen.has(parts.slice(0, length).join('/'))) throw new Error('整合包文件路径与目录冲突');
+      }
+    }
+    const manifest = selectManifest(entries);
+    if (manifest && (manifest.compressedSize > bounds.maxManifestBytes
+      || manifest.uncompressedSize > bounds.maxManifestBytes)) throw new Error('整合包清单过大');
+    return await operation({ handle, entries, directoryOffset, bounds });
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readEntry({ handle, directoryOffset }, entry, maximumBytes, signal) {
+    throwIfAborted(signal);
+    const header = await readRange(handle, entry.localOffset, 30, directoryOffset, signal);
+    if (header.readUInt32LE(0) !== 0x04034b50
+      || header.readUInt16LE(6) !== entry.flags
+      || header.readUInt16LE(8) !== entry.method) throw invalidArchive();
+    const localNameLength = header.readUInt16LE(26);
+    const extraLength = header.readUInt16LE(28);
+    const localName = await readRange(handle, entry.localOffset + 30, localNameLength, directoryOffset, signal);
+    if (localName.toString('utf8') !== entry.rawName) throw invalidArchive();
+    const dataOffset = entry.localOffset + 30 + localNameLength + extraLength;
+    const compressed = await readRange(handle, dataOffset, entry.compressedSize, directoryOffset, signal);
+    const content = entry.method === 0 ? compressed : await inflateRaw(compressed, {
+      maxOutputLength: maximumBytes, signal
+    });
+    throwIfAborted(signal);
+    if (content.length !== entry.uncompressedSize || content.length > maximumBytes) throw invalidArchive();
+    return content;
+}
+
+async function readModpackManifest(archivePath, limits = {}, { signal } = {}) {
+  return withValidatedArchive(archivePath, limits, signal, async (archive) => {
+    const { entries, bounds } = archive;
     const manifest = selectManifest(entries);
     if (!manifest) throw new Error('未找到 modrinth.index.json 或 CurseForge manifest.json');
     if (manifest.compressedSize > bounds.maxManifestBytes
       || manifest.uncompressedSize > bounds.maxManifestBytes) throw new Error('整合包清单过大');
-    const header = await readRange(handle, manifest.localOffset, 30, directoryOffset);
-    if (header.readUInt32LE(0) !== 0x04034b50
-      || header.readUInt16LE(6) !== manifest.flags
-      || header.readUInt16LE(8) !== manifest.method) throw invalidArchive();
-    const localNameLength = header.readUInt16LE(26);
-    const extraLength = header.readUInt16LE(28);
-    const localName = await readRange(handle, manifest.localOffset + 30, localNameLength, directoryOffset);
-    if (localName.toString('utf8') !== manifest.rawName) throw invalidArchive();
-    const dataOffset = manifest.localOffset + 30 + localNameLength + extraLength;
-    const compressed = await readRange(handle, dataOffset, manifest.compressedSize, directoryOffset);
-    const content = manifest.method === 0 ? compressed : await inflateRaw(compressed, {
-      maxOutputLength: bounds.maxManifestBytes
-    });
-    if (content.length !== manifest.uncompressedSize) throw invalidArchive();
+    const content = await readEntry(archive, manifest, bounds.maxManifestBytes, signal);
     try {
       return { name: path.posix.basename(manifest.name), value: JSON.parse(content.toString('utf8')) };
     } catch (error) {
       if (error instanceof SyntaxError) throw new Error(`整合包清单已损坏：${path.posix.basename(manifest.name)}`);
       throw error;
     }
-  } finally {
-    await handle.close();
-  }
+  });
 }
 
-module.exports = { readModpackManifest };
+async function extractModpackArchive(archivePath, destination, { signal, limits = {}, onProgress = () => {} } = {}) {
+  return withValidatedArchive(archivePath, limits, signal, async (archive) => {
+    const manifest = selectManifest(archive.entries);
+    if (!manifest) throw new Error('未找到 modrinth.index.json 或 CurseForge manifest.json');
+    let completed = 0;
+    let totalBytes = 0;
+    for (const entry of archive.entries) {
+      throwIfAborted(signal);
+      const content = await readEntry(archive, entry, entry === manifest
+        ? archive.bounds.maxManifestBytes : archive.bounds.maxEntryBytes, signal);
+      totalBytes += content.length;
+      if (totalBytes > archive.bounds.maxTotalBytes) throw new Error('压缩包解压后的总大小过大');
+      const target = safePath(destination, ...entry.name.split('/'));
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, content, { signal });
+      completed += 1;
+      if (completed === 1 || completed % 16 === 0 || completed === archive.entries.length) {
+        onProgress({ phase: 'extracting', message: `正在解压整合包 ${completed}/${archive.entries.length}`,
+          completedFiles: completed, totalFiles: archive.entries.length, cancellable: true });
+      }
+    }
+  });
+}
+
+module.exports = { readModpackManifest, extractModpackArchive };
