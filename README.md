@@ -71,6 +71,7 @@
 
 - Windows 10/11、macOS 或 Linux，安装包架构需与设备匹配
 - 源码开发与构建固定使用 Node.js `26.10.0`、npm `11.13.0`
+- Vercel 网站使用 Node.js `24.x`。`engines.node` 兼容网站与启动器两个环境；启动器构建仍由 `.node-version` 和工具链检查固定为 `26.10.0`。
 - 用于元数据、游戏文件、账户验证及托管 Java 下载的网络连接
 - 进行正版在线游戏时，需要合法拥有的 Minecraft Java 版账户
 
