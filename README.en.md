@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
-[![Source](https://img.shields.io/badge/Source-v1.6.6-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.7.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> The current source version is `1.6.6`, with Microsoft, offline, and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
+> The current source version is `1.7.0`, with Microsoft, offline, and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://the-melody-of-o-r.ccwu.cc/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
 
 ## About this project
 
@@ -40,7 +40,7 @@ The current repository starts a new implementation; its version numbers and code
 - **Accounts** — create offline profiles, sign in with a Microsoft device code, or use LittleSkin Yggdrasil; sync skin avatars, refresh online credentials before launch, and keep tokens out of the renderer process.
 - **Java management** — match the Java major version required by the selected game; scan system installations and managed runtimes. Download Java 8, 16, 17, 21, or 25 from the button next to the Java path setting, with progress and cancellation. Downloads prefer Azul JRE and fall back to Adoptium, use parallel transfers, and verify SHA-256. Launching without the required Java opens settings instead of starting a download.
 - **Launch core** — resolve inherited version metadata, apply platform rules, assemble arguments and classpaths, extract native libraries safely, launch the Java process, and report its status. LittleSkin accounts automatically provision a SHA-256-verified authlib-injector.
-- **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instances with overrides, Fabric, Forge, NeoForge, and Quilt. A single confirmation shows the game, loader, and file counts; optional files are unchecked by default. Optional failures produce warnings, while required failures support retry. Restricted CurseForge files can be downloaded from their official pages, selected locally, and verified against trusted hashes before installation continues.
+- **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instances with overrides, Fabric, Forge, NeoForge, and Quilt. A single confirmation shows the game, loader, and file counts; optional files are unchecked by default. Only remote resolution or download failures allow optional files to be skipped with a warning. Disk, permission, and security errors stop installation; required-file failures support retry. Restricted CurseForge files can be downloaded from their official pages, selected locally, and verified against trusted hashes before installation continues.
 - **Launcher updates** — checks GitHub Releases on startup with a three-level policy (auto-download / notify only / never); system notifications announce new versions and ready updates; release notes are shown in settings; update downloads fall back across GitHub mirrors with slow-speed detection and are SHA-256 verified before install. Legacy boolean update settings migrate automatically.
 - **Desktop UI** — a compact fixed-size frameless Electron window with version, account, download, launch, and settings flows. Reopen background tasks from home; retry failures or copy redacted details from the problem dialog. Closing a dialog keeps the task running. Cancel stops it and becomes unavailable during final commit.
 

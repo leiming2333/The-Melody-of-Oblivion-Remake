@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
-[![Source](https://img.shields.io/badge/Source-v1.6.6-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.7.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.6.6`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.7.0`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -40,7 +40,7 @@
 - **账户系统**：支持离线账户、Microsoft 设备代码登录及 LittleSkin Yggdrasil；可同步皮肤头像、启动前刷新在线凭据，并阻止令牌进入渲染进程。
 - **Java 管理**：匹配游戏所需的 Java 主版本，检测系统安装与启动器托管环境。在 Java 路径设置旁手动下载 Java 8、16、17、21 或 25，支持进度与取消；优先 Azul JRE，失败后切换 Adoptium，使用并行下载与 SHA-256 校验。启动时缺少所需 Java 会打开设置，不再自动下载。
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
-- **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides、Fabric、Forge、NeoForge 与 Quilt。导入确认显示游戏、加载器和文件数，可选文件默认不安装；可选文件失败仅警告，必需文件失败可重试。CurseForge 受限文件可从官方页面下载后选择本地文件，通过可信摘要校验再继续安装。
+- **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides、Fabric、Forge、NeoForge 与 Quilt。导入确认显示游戏、加载器和文件数，可选文件默认不安装；可选文件的远端解析或下载失败仅警告，必需文件失败可重试；磁盘、权限或安全检查错误会中止安装。CurseForge 受限文件可从官方页面下载后选择本地文件，通过可信摘要校验再继续安装。
 - **启动器更新**：启动时检测 GitHub Releases 新版本；提供三档更新策略（自动下载 / 仅提示 / 从不检查），发现新版本与更新就绪时发送系统通知，设置页可查看 Release 更新日志；更新包下载支持 GitHub 镜像多源自动切换与低速检测，完成后经 SHA-256 校验再安装。旧版布尔更新设置会自动迁移为新策略。
 - **桌面界面**：紧凑的固定尺寸无边框 Electron 窗口，覆盖版本、账户、下载、启动及设置流程。首页可重新打开后台任务，问题对话框提供重试和复制脱敏详情；关闭弹窗继续任务，取消按钮停止任务，最终提交期间禁用取消。
 
