@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { hasInstallationMarker, safePath } = require('./installation-files');
+const { cleanupStaleStaging } = require('./modpack-staging');
 
 const PROFILE_ID_PATTERN = /^[0-9A-Za-z._+-]{1,120}$/;
 
@@ -42,6 +43,7 @@ class MinecraftVersionManager {
   }
 
   async listLocalProfiles() {
+    await cleanupStaleStaging(this.gameDirectory);
     const versionsRoot = safePath(this.gameDirectory, 'versions');
     let entries;
     try {
@@ -100,7 +102,7 @@ class MinecraftVersionManager {
       if (error.code !== 'ENOENT') throw error;
     }
     const instances = (await Promise.all(instanceEntries
-      .filter((entry) => entry.isDirectory() && PROFILE_ID_PATTERN.test(entry.name))
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.installing-') && PROFILE_ID_PATTERN.test(entry.name))
       .map(async (entry) => {
         try {
           const metadata = JSON.parse(await fs.readFile(
@@ -181,7 +183,7 @@ class MinecraftVersionManager {
       if (error.code !== 'ENOENT') throw error;
     }
     const instances = await Promise.all(instanceEntries
-      .filter((entry) => entry.isDirectory() && PROFILE_ID_PATTERN.test(entry.name))
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.installing-') && PROFILE_ID_PATTERN.test(entry.name))
       .map(async (entry) => {
         let metadata;
         try {

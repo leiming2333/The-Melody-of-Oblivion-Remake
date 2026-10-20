@@ -1,27 +1,48 @@
-﻿param([string]$Executable = 'release/The-Melody-of-Oblivion-Remake-Windows-x64.exe')
+﻿param(
+  [string]$Executable = 'release/build/windows-x64/The-Melody-of-Oblivion-Remake-Windows-x64.exe',
+  [ValidateSet('x64', 'ia32', 'arm64')][string]$ExpectedArch = 'x64'
+)
 $ErrorActionPreference = 'Stop'
 $exePath = (Resolve-Path -LiteralPath $Executable).Path
 $parent = Split-Path -Parent $exePath
 $runtimeRoot = Join-Path $parent 'Melody/runtime'
+$cachePrefix = @{ x64 = '64'; ia32 = '32'; arm64 = 'ARM64' }[$ExpectedArch]
+$expectedVersion = (Get-Content -Raw (Join-Path $PSScriptRoot '../package.json') | ConvertFrom-Json).version
 
 function Start-Smoke([string]$PathToExe) {
-  Start-Process -FilePath $PathToExe -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
+  $reportFile = [IO.Path]::GetTempFileName()
+  $oldReport = $env:MELODY_SMOKE_RESULT
+  try {
+    $env:MELODY_SMOKE_RESULT = $reportFile
+    $child = Start-Process -FilePath $PathToExe -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
+    $child | Add-Member -NotePropertyName ReportFile -NotePropertyValue $reportFile
+    return $child
+  } finally { $env:MELODY_SMOKE_RESULT = $oldReport }
 }
 
-function Wait-Smoke($SmokeProcess) {
+function Wait-Smoke($SmokeProcess, [switch]$AllowForwarded) {
   if (-not $SmokeProcess.WaitForExit(60000)) {
     Stop-Process -Id $SmokeProcess.Id -Force
     throw 'Portable smoke test timed out'
   }
   $SmokeProcess.Refresh()
   if ($SmokeProcess.ExitCode -ne 0) { throw "Portable smoke test failed: $($SmokeProcess.ExitCode)" }
+  try {
+    $contents = Get-Content -Raw -LiteralPath $SmokeProcess.ReportFile
+    if (-not $contents -and $AllowForwarded) { return }
+    $report = $contents | ConvertFrom-Json
+    if (-not $report.ok -or -not $report.packaged -or $report.arch -ne $ExpectedArch -or $report.version -ne $expectedVersion) {
+      throw 'Portable smoke report does not match the target package'
+    }
+    $SmokeProcess | Add-Member -NotePropertyName HasReport -NotePropertyValue $true
+  } finally { Remove-Item -LiteralPath $SmokeProcess.ReportFile -Force -ErrorAction SilentlyContinue }
 }
 
 $timer = [System.Diagnostics.Stopwatch]::StartNew()
 Wait-Smoke (Start-Smoke $exePath)
 $firstMs = $timer.ElapsedMilliseconds
 $cache = Get-ChildItem -LiteralPath $runtimeRoot -Directory |
-  Where-Object { $_.Name -match '^64-[a-f0-9]{64}$' -and (Test-Path -LiteralPath (Join-Path $_.FullName '.complete')) } |
+  Where-Object { $_.Name -match ('^' + $cachePrefix + '-[a-f0-9]{64}$') -and (Test-Path -LiteralPath (Join-Path $_.FullName '.complete')) } |
   Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
 if (-not $cache) { throw 'Portable EXE did not create a complete runtime beside itself' }
 $markerPath = Join-Path $cache.FullName '.complete'
@@ -38,8 +59,9 @@ Write-Output "Adjacent runtime reuse passed: first=$firstMs ms, warm=$warmMs ms"
 Move-Item -LiteralPath $markerPath -Destination ($markerPath + '.smoke-incomplete')
 $first = Start-Smoke $exePath
 $second = Start-Smoke $exePath
-Wait-Smoke $first
-Wait-Smoke $second
+Wait-Smoke $first -AllowForwarded
+Wait-Smoke $second -AllowForwarded
+if (-not $first.HasReport -and -not $second.HasReport) { throw 'Concurrent startup produced no packaged smoke report' }
 if (-not (Test-Path -LiteralPath $markerPath)) { throw 'Incomplete runtime was not repaired' }
 if (-not (Get-ChildItem -LiteralPath $runtimeRoot -Directory |
   Where-Object Name -Like ($cache.Name + '.incomplete-*'))) {

@@ -8,8 +8,8 @@
 [English](README.en.md) · 简体中文
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Node.js](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
-[![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-26.10.0-green.svg)](https://nodejs.org/)
+[![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
 [![Source](https://img.shields.io/badge/Source-v1.6.6-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
@@ -40,9 +40,9 @@
 - **账户系统**：支持离线账户、Microsoft 设备代码登录及 LittleSkin Yggdrasil；可同步皮肤头像、启动前刷新在线凭据，并阻止令牌进入渲染进程。
 - **Java 管理**：匹配游戏所需的 Java 主版本，检测系统安装与启动器托管环境。在 Java 路径设置旁手动下载 Java 8、16、17、21 或 25，支持进度与取消；优先 Azul JRE，失败后切换 Adoptium，使用并行下载与 SHA-256 校验。启动时缺少所需 Java 会打开设置，不再自动下载。
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
-- **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides 和已兼容的加载器。
+- **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides、Fabric、Forge、NeoForge 与 Quilt。导入确认显示游戏、加载器和文件数，可选文件默认不安装；可选文件失败仅警告，必需文件失败可重试。CurseForge 受限文件可从官方页面下载后选择本地文件，通过可信摘要校验再继续安装。
 - **启动器更新**：启动时检测 GitHub Releases 新版本；提供三档更新策略（自动下载 / 仅提示 / 从不检查），发现新版本与更新就绪时发送系统通知，设置页可查看 Release 更新日志；更新包下载支持 GitHub 镜像多源自动切换与低速检测，完成后经 SHA-256 校验再安装。旧版布尔更新设置会自动迁移为新策略。
-- **桌面界面**：紧凑的固定尺寸无边框 Electron 窗口，覆盖版本、账户、下载、启动及设置流程。
+- **桌面界面**：紧凑的固定尺寸无边框 Electron 窗口，覆盖版本、账户、下载、启动及设置流程。首页可重新打开后台任务，问题对话框提供重试和复制脱敏详情；关闭弹窗继续任务，取消按钮停止任务，最终提交期间禁用取消。
 
 自动化测试覆盖账户、身份验证、下载、Java 选择、游戏启动、加载器、整合包、设置、本地版本管理及启动器更新等领域。
 
@@ -59,18 +59,18 @@
 ## 当前限制
 
 - 提供 Windows、macOS 与 Linux 的多架构公开构建，不同平台的细节表现仍可能存在差异。
-- 更新行为因平台而异：Linux AppImage 自动替换并重启；Windows 便携版遇到同名 EXE 时先暂存下载，退出后替换并保留 `.old` 备份，旧版带版本号的 EXE 则保留原有并排更新行为；macOS 下载压缩包后需手动解压替换。
+- 更新下载完成后点击「重启并安装」才替换程序。Windows 保留当前 EXE 名称；macOS 使用系统 `ditto` 校验并替换 `.app`，在只读介质、目录不可写或 App Translocation 环境下提供 ZIP 手动替换入口；Linux 替换 AppImage。辅助进程握手成功后才退出旧程序，新版窗口、预加载桥接和本地界面加载完成才确认更新；未确认时保留备份并提供重试或恢复入口。
+- 每个安装路径独立记录更新状态，确认成功后保留最近一份回退版本，只清理该记录拥有的旧文件。无记录的 Windows 历史 EXE 和 `.old` 可在设置中勾选后移入回收站。游戏数据不在更新清理范围内。
 - Microsoft 登录依赖启动器的 Azure 应用注册获得 Minecraft Services 接受。服务方策略或注册状态改变可能导致登录暂时不可用。
 - LittleSkin Yggdrasil 仅在客户端和服务端使用相同验证服务时生效；它不能代替正版账户，也不会授予进入正版验证服务器的权限。参见 [LittleSkin 用户使用手册](https://manual.littlesk.in/yggdrasil/)。
-- CurseForge 安装依赖 CurseTools 提供的可下载文件元数据，或配置 `CURSEFORGE_API_KEY`。包含受限或已下架文件的整合包可能安装失败。
+- CurseForge 安装依赖 CurseTools 提供的文件元数据，或配置 `CURSEFORGE_API_KEY`。缺少可信摘要时需先重新查询，不能直接导入用户文件；已下架文件仍可能无法补齐。
 - 支持 Quilt 整合包，实际兼容性取决于游戏版本与 Mod。
-- 整合包处理和面向用户的失败恢复流程仍在持续完善。
+- 整合包补齐会话只在当前窗口内保留；切换游戏目录、归档变化或重启后需重新选择整合包。Linux ARMv7 产物尚未经过原生启动验收。
 
 ## 运行要求
 
 - Windows 10/11、macOS 或 Linux，安装包架构需与设备匹配
-- Node.js 22 或更高版本
-- 与已提交锁文件兼容的 npm
+- 源码开发与构建固定使用 Node.js `26.10.0`、npm `11.13.0`
 - 用于元数据、游戏文件、账户验证及托管 Java 下载的网络连接
 - 进行正版在线游戏时，需要合法拥有的 Minecraft Java 版账户
 
@@ -103,6 +103,8 @@ Java 检测结果保存在用户数据目录的 `java-cache.json`，可执行文
 | `npm run check` | 检查主进程、预加载脚本与渲染脚本语法 |
 | `npm test` | 运行 Node.js 自动化测试 |
 | `npm run smoke` | 使用临时用户数据加载 Electron 窗口并退出 |
+| `npm run verify:toolchain` | 验证固定 Node、npm、Electron 和 electron-builder 版本 |
+| `npm run build -- --target windows-x64` | 使用统一入口构建单一目标，默认不发布 |
 | `npm run build:win` | 构建 Windows 持久运行目录便携 EXE |
 | `npm run build:linux` | 构建 Linux AppImage |
 | `npm run build:mac` | 构建 macOS zip 包 |
@@ -144,14 +146,11 @@ styles.css                落地页样式
 
 Java 的标准输出和错误输出保存到游戏根目录的 `launcher-cache/game-logs`，单个日志最多 2 MiB，默认保留最近 5 次；正在运行游戏的日志不会被清理。日志隐藏已知账户令牌和常见凭据字段，不记录完整启动命令。异常退出提示提供日志路径；分享前仍应检查日志中的用户名、服务器地址等个人信息。
 
-整合包预览只读取清单。经过 SHA-1 校验的下载缓存在游戏根目录的 `launcher-cache/modpack-files`，安装失败或取消后可供重试复用；每次复用都会重新校验。没有有效哈希的文件不进入此缓存。需要释放空间时可在关闭游戏、停止安装后删除该缓存目录。
+整合包预览和安装共用归档安全校验。经过摘要校验的下载缓存在游戏根目录的 `launcher-cache/modpack-files`，安装失败或取消后可供重试复用；每次复用都会重新校验。没有可信摘要的文件不进入此缓存。手动补齐先复制至临时文件再校验，文件名不同但摘要匹配的文件也可使用。等待补齐前会结束下载并清理半成品。
 
-## 后续计划
+实例列表隐藏内部暂存目录。下次启动扫描或安装时仅回收带有本启动器归属标记、路径安全且非活跃的崩溃残留，保留已校验缓存；清理失败可在下次重试。需要释放缓存空间时，可在关闭游戏、停止安装后删除缓存目录。
 
-- 继续完善整合包兼容性和错误恢复流程。
-- 改进界面中的错误提示及取消操作。
-- 完善多平台的可重复构建与发布产物。
-- 优化各平台更新安装体验（尤其是 Windows 旧文件清理与 macOS 自动替换）。
+构建使用固定工具链、锁文件与单一平台目标定义，产物写入独立的干净目录。手动 CI 生成八类安装包、校验侧文件、`SHA256SUMS`、构建清单和七类原生启动/升级报告，不公开发布；版本标签验证通过后才发布。可重复构建在此指输入固定且产物可追溯，不承诺字节完全一致。详见[发布验证说明](docs/ci-release-validation.md)。
 
 ## 历史资料
 

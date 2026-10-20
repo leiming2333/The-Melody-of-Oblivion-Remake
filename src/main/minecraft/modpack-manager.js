@@ -3,6 +3,9 @@ const os = require('node:os');
 const path = require('node:path');
 const dns = require('node:dns/promises');
 const net = require('node:net');
+const crypto = require('node:crypto');
+const streamFs = require('node:fs');
+const { pipeline } = require('node:stream/promises');
 const {
   createDownloadProgressTracker,
   runPool,
@@ -10,10 +13,11 @@ const {
   throwIfAborted,
   writeJsonAtomic
 } = require('./downloader');
-const { extractNativeArchive } = require('./launch-core');
 const { fetchWithTimeout } = require('./source-manager');
-const { readModpackManifest } = require('./modpack-archive');
-const { downloadModpackFile } = require('./modpack-download-cache');
+const { readModpackManifest, extractModpackArchive } = require('./modpack-archive');
+const { downloadModpackFile, hasCachedModpackFile, importModpackFile } = require('./modpack-download-cache');
+const { STAGING_MARKER, createStagingDirectory, removeStagingDirectory,
+  releaseStagingDirectory, cleanupStaleStaging } = require('./modpack-staging');
 
 const MODPACK_EXTENSIONS = Object.freeze(['.mrpack', '.zip']);
 const INSTANCE_ID_PATTERN = /^[0-9A-Za-z._-]{1,100}$/;
@@ -43,11 +47,12 @@ function requireVersion(value, label = 'Minecraft') {
 
 function safeRelativePath(value) {
   const normalized = String(value ?? '').replaceAll('\\', '/').replace(/^\/+/, '');
-  const segments = normalized.split('/').filter(Boolean);
+  const segments = normalized.split('/').filter((segment) => segment && segment !== '.');
   if (
-    !normalized
+    !normalized || segments.length === 0
     || /^[A-Za-z]:/.test(normalized)
-    || segments.some((segment) => segment === '..')
+    || segments.some((segment) => segment === '..' || segment.includes('\0') || /[<>:"|?*]/.test(segment)
+      || /[. ]$/.test(segment) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(segment))
   ) {
     throw new Error(`整合包包含不安全的文件路径：${value}`);
   }
@@ -115,13 +120,21 @@ function parseModrinthIndex(index) {
   const loader = loaderFromModrinthDependencies(index.dependencies);
   const files = Array.isArray(index.files) ? index.files
     .filter((file) => file?.env?.client !== 'unsupported')
-    .map((file) => ({
-      path: safeRelativePath(file.path),
-      urls: (file.downloads ?? []).map(safeDownloadUrl),
-      sha1: file.hashes?.sha1,
-      size: Number.isFinite(file.fileSize) ? file.fileSize : undefined,
-      required: file.env?.client !== 'optional'
-    })) : [];
+    .map((file) => {
+      if (!file || typeof file.path !== 'string' || !Array.isArray(file.downloads)) {
+        throw new Error('Modrinth 整合包包含无效的文件记录');
+      }
+      if (file.hashes?.sha1 !== undefined && !/^[0-9a-f]{40}$/i.test(file.hashes.sha1)) {
+        throw new Error('Modrinth 整合包包含无效的文件校验信息');
+      }
+      return {
+        path: safeRelativePath(file.path),
+        urls: file.downloads.map(safeDownloadUrl),
+        sha1: file.hashes?.sha1?.toLowerCase(),
+        size: Number.isSafeInteger(file.fileSize) && file.fileSize >= 0 ? file.fileSize : undefined,
+        required: file.env?.client !== 'optional'
+      };
+    }) : [];
   if (files.some((file) => file.urls.length === 0)) {
     throw new Error('Modrinth 整合包中存在没有下载地址的文件');
   }
@@ -152,9 +165,9 @@ function parseCurseForgeManifest(manifest) {
     loaderVersion = requireVersion(match[2], loaderType);
   }
   const files = Array.isArray(manifest.files) ? manifest.files.map((file) => {
-    const projectId = Number(file.projectID);
-    const fileId = Number(file.fileID);
-    if (!Number.isInteger(projectId) || !Number.isInteger(fileId)) {
+    const projectId = Number(file?.projectID);
+    const fileId = Number(file?.fileID);
+    if (!Number.isSafeInteger(projectId) || projectId < 1 || !Number.isSafeInteger(fileId) || fileId < 1) {
       throw new Error('CurseForge 整合包包含无效的模组编号');
     }
     return { projectId, fileId, required: file.required !== false };
@@ -188,7 +201,7 @@ async function findPackRoot(extractedRoot) {
     || await readJson(path.join(extractedRoot, 'manifest.json'))
   ) return extractedRoot;
   const entries = await fs.readdir(extractedRoot, { withFileTypes: true });
-  const directories = entries.filter((entry) => entry.isDirectory());
+  const directories = entries.filter((entry) => entry.isDirectory() && entry.name !== '__MACOSX');
   if (directories.length !== 1) return extractedRoot;
   return path.join(extractedRoot, directories[0].name);
 }
@@ -234,7 +247,8 @@ function createInstanceId(name, now = Date.now()) {
   return `${slug}-${now.toString(36)}`;
 }
 
-async function copyDirectoryContents(source, destination) {
+async function copyDirectoryContents(source, destination, { signal } = {}) {
+  throwIfAborted(signal);
   let entries;
   try {
     entries = await fs.readdir(source, { withFileTypes: true });
@@ -244,45 +258,90 @@ async function copyDirectoryContents(source, destination) {
   }
   await fs.mkdir(destination, { recursive: true });
   for (const entry of entries) {
-    await fs.cp(
-      path.join(source, entry.name),
-      safePath(destination, entry.name),
-      { recursive: true, force: true }
-    );
+    throwIfAborted(signal);
+    if (entry.name === STAGING_MARKER || entry.name === '.melody-instance.json') {
+      throw modpackError('整合包覆盖文件包含启动器保留的配置名称', 'MODPACK_INVALID_METADATA', 'copying-overrides', false);
+    }
+    if (entry.isSymbolicLink()) throw new Error('整合包覆盖文件不能是链接');
+    const target = safePath(destination, entry.name);
+    const original = path.join(source, entry.name);
+    if (entry.isDirectory()) await copyDirectoryContents(original, target, { signal });
+    else if (entry.isFile()) {
+      await pipeline(streamFs.createReadStream(original), streamFs.createWriteStream(target), { signal });
+    } else throw new Error('整合包包含不支持的覆盖文件类型');
   }
 }
 
-async function resolveCurseForgeFile(entry, signal) {
+function modpackError(message, code, phase, retryable = true, cause) {
+  return Object.assign(new Error(message, cause ? { cause } : undefined), { code, phase, retryable });
+}
+
+function isRemoteFailure(error) {
+  if (error.name === 'AbortError' || error.retryable === false) return false;
+  const diagnostic = `${error.code ?? ''} ${error.message}`;
+  if (/EACCES|EPERM|ENOSPC|EDQUOT|EROFS|EISDIR|ENOTDIR|ENOENT|EBUSY|EMFILE|ENFILE|EIO|EEXIST|EINVAL|EFBIG|ENAMETOOLONG|ETXTBSY|ENOTEMPTY|不安全|无效的.*路径|目标路径|链接/i
+    .test(diagnostic)) return false;
+  return /下载失败|HTTP \d{3}|fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|UND_ERR|连接|校验失败|network|timeout/i
+    .test(diagnostic);
+}
+
+async function archiveFingerprint(filePath, signal) {
+  throwIfAborted(signal);
+  const stat = await fs.stat(filePath);
+  if (!stat.isFile() || stat.size > 512 * 1024 * 1024) throw new Error('整合包归档无效或过大');
+  const hash = crypto.createHash('sha256');
+  const input = streamFs.createReadStream(filePath, { signal });
+  for await (const chunk of input) { throwIfAborted(signal); hash.update(chunk); }
+  throwIfAborted(signal);
+  return hash.digest('hex');
+}
+
+async function resolveCurseForgeMetadata(entry, signal) {
   const communityUrl = `https://api.curse.tools/v1/cf/mods/${entry.projectId}/files/${entry.fileId}`;
   let metadata;
   try {
-    const response = await fetchWithTimeout(communityUrl, { signal }, 12000);
-    if (response.ok) metadata = (await response.json()).data;
+    metadata = await fetchWithTimeout(communityUrl, { signal }, 12000,
+      async (response) => response.ok ? (await response.json()).data : undefined);
   } catch (error) {
     if (signal?.aborted) throw error;
   }
 
   if (!metadata && process.env.CURSEFORGE_API_KEY) {
-    const response = await fetchWithTimeout(
+    metadata = await fetchWithTimeout(
       `https://api.curseforge.com/v1/mods/${entry.projectId}/files/${entry.fileId}`,
       { headers: { 'x-api-key': process.env.CURSEFORGE_API_KEY }, signal },
-      12000
+      12000,
+      async (response) => response.ok ? (await response.json()).data : undefined
     );
-    if (response.ok) metadata = (await response.json()).data;
   }
   if (!metadata?.fileName) {
-    throw new Error(`无法获取 CurseForge 文件信息（项目 ${entry.projectId}，文件 ${entry.fileId}），文件可能已下架或接口暂时不可用`);
+    throw modpackError(`无法获取 CurseForge 文件信息（项目 ${entry.projectId}，文件 ${entry.fileId}），请重试查询`,
+      'MODPACK_METADATA_UNAVAILABLE', 'resolving-files');
   }
-  if (!metadata.downloadUrl) {
-    throw new Error(`CurseForge 文件禁止第三方自动下载（项目 ${entry.projectId}，文件 ${entry.fileId}），请从整合包发布页手动获取`);
+  if ((metadata.id !== undefined && Number(metadata.id) !== entry.fileId)
+    || (metadata.modId !== undefined && Number(metadata.modId) !== entry.projectId)
+    || typeof metadata.fileName !== 'string' || safeRelativePath(metadata.fileName) !== metadata.fileName
+    || metadata.fileName.includes('/')) {
+    throw modpackError('CurseForge 返回了不匹配或不安全的文件信息', 'MODPACK_INVALID_METADATA', 'resolving-files', false);
   }
   const sha1 = metadata.hashes?.find((hash) => Number(hash.algo) === 1)?.value;
   return {
+    ...entry,
+    fileName: metadata.fileName,
     path: `mods/${metadata.fileName}`,
-    urls: [safeDownloadUrl(metadata.downloadUrl)],
-    sha1,
-    size: Number.isFinite(metadata.fileLength) ? metadata.fileLength : undefined
+    urls: metadata.downloadUrl ? [safeDownloadUrl(metadata.downloadUrl)] : [],
+    sha1: /^[0-9a-f]{40}$/i.test(sha1 ?? '') ? sha1.toLowerCase() : undefined,
+    size: Number.isSafeInteger(metadata.fileLength) && metadata.fileLength >= 0 ? metadata.fileLength : undefined,
+    officialUrl: `https://www.curseforge.com/projects/${entry.projectId}/files/${entry.fileId}`
   };
+}
+
+async function resolveCurseForgeFile(entry, signal) {
+  const file = await resolveCurseForgeMetadata(entry, signal);
+  if (!file.urls.length) throw modpackError(
+    `CurseForge 文件禁止第三方自动下载（项目 ${entry.projectId}，文件 ${entry.fileId}），请从整合包发布页手动获取`,
+    'MODPACK_FILE_RESTRICTED', 'resolving-files');
+  return file;
 }
 
 class ModpackManager {
@@ -292,32 +351,158 @@ class ModpackManager {
     this.concurrency = concurrency;
     this.segmentConcurrency = segmentConcurrency;
     this.lookupHost = lookupHost;
+    this.sessions = new Map();
   }
 
-  async withExtractedPack(filePath, operation) {
+  async withExtractedPack(filePath, operation, { signal, onProgress } = {}) {
+    throwIfAborted(signal);
     const archivePath = validateModpackFile(filePath);
     const stat = await fs.stat(archivePath);
     if (!stat.isFile()) throw new Error('拖入的整合包文件无效');
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-'));
     try {
-      await extractNativeArchive(archivePath, temporaryRoot);
+      onProgress?.({ phase: 'extracting', message: '正在检查并解压整合包…', cancellable: true });
+      await extractModpackArchive(archivePath, temporaryRoot, { signal, onProgress });
+      throwIfAborted(signal);
       const parsed = await parseExtractedPack(temporaryRoot);
       return await operation({ archivePath, ...parsed });
     } finally {
-      await fs.rm(temporaryRoot, { recursive: true, force: true });
+      await fs.rm(temporaryRoot, { recursive: true, force: true }).catch(() => {});
     }
   }
 
-  async inspect(filePath) {
-    const manifest = await readModpackManifest(validateModpackFile(filePath));
+  async inspect(filePath, { signal } = {}) {
+    const manifest = await readModpackManifest(validateModpackFile(filePath), {}, { signal });
     const pack = manifest.name === 'modrinth.index.json'
       ? parseModrinthIndex(manifest.value)
       : parseCurseForgeManifest(manifest.value);
     return publicPackInfo(pack);
   }
 
-  async install(filePath, onProgress = () => {}, { signal, installOptionalFiles = false } = {}) {
-    return this.withExtractedPack(filePath, async ({ archivePath, packRoot, pack }) => {
+  getSession(sessionId, ownerId) {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.ownerId !== (ownerId ?? null)
+      || session.gameDirectory !== path.resolve(this.gameDirectory)) {
+      throw modpackError('整合包恢复会话已失效，请重新选择归档', 'MODPACK_SESSION_EXPIRED', 'preparing', false);
+    }
+    return session;
+  }
+
+  getRecoveryState(sessionId, { ownerId } = {}) {
+    const session = this.getSession(sessionId, ownerId);
+    return { status: 'waiting-for-files', sessionId, name: session.name,
+      canResume: session.missing.size === 0,
+      files: [...session.missing.values()].map((file) => ({
+        projectId: file.projectId, fileId: file.fileId, fileName: file.fileName,
+        reason: file.reason, canImport: /^[0-9a-f]{40}$/i.test(file.sha1 ?? ''),
+        officialUrl: file.officialUrl
+          ?? `https://www.curseforge.com/projects/${file.projectId}/files/${file.fileId}`
+      })) };
+  }
+
+  async importMissingFile(sessionId, { projectId, fileId, filePath }, { ownerId, signal } = {}) {
+    const session = this.getSession(sessionId, ownerId);
+    if (session.busy) throw modpackError('整合包任务正在处理中', 'TASK_BUSY', 'importing-files');
+    const entry = session.missing.get(`${projectId}:${fileId}`);
+    if (!entry || !/^[0-9a-f]{40}$/i.test(entry.sha1 ?? '')) {
+      throw modpackError('该文件尚无可信校验信息，请先重新查询', 'MODPACK_METADATA_UNAVAILABLE', 'resolving-files');
+    }
+    if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) {
+      throw modpackError('请选择有效的本地文件', 'MODPACK_FILE_MISMATCH', 'importing-files');
+    }
+    session.busy = true;
+    session.controller = new AbortController();
+    const importSignal = signal ? AbortSignal.any([signal, session.controller.signal]) : session.controller.signal;
+    try {
+      await this.verifySessionArchive(session, importSignal);
+      await importModpackFile({ ...entry, signal: importSignal }, filePath,
+        safePath(session.gameDirectory, 'launcher-cache', 'modpack-files'));
+      for (const [key, missing] of session.missing) {
+        if (missing.sha1 === entry.sha1 && missing.size === entry.size) session.missing.delete(key);
+      }
+      return this.getRecoveryState(sessionId, { ownerId });
+    } finally { session.busy = false; }
+  }
+
+  discardSession(sessionId, { ownerId } = {}) {
+    const session = this.getSession(sessionId, ownerId);
+    if (session.busy && session.cancellable === false) return { cancelled: false };
+    session.controller?.abort();
+    this.sessions.delete(sessionId);
+    return { cancelled: true };
+  }
+
+  discardOwnerSessions(ownerId) {
+    for (const [sessionId, session] of this.sessions) {
+      if (session.ownerId !== (ownerId ?? null)) continue;
+      if (session.cancellable !== false) session.controller?.abort();
+      this.sessions.delete(sessionId);
+    }
+  }
+
+  async verifySessionArchive(session, signal) {
+    let fingerprint;
+    try { fingerprint = await archiveFingerprint(session.archivePath, signal); }
+    catch (error) {
+      throwIfAborted(signal);
+      this.sessions.delete(session.sessionId);
+      throw modpackError('原整合包已移动或无法读取，请重新选择归档', 'MODPACK_ARCHIVE_CHANGED', 'preparing', false, error);
+    }
+    if (fingerprint !== session.fingerprint) {
+      this.sessions.delete(session.sessionId);
+      throw modpackError('整合包归档已更改，请重新选择归档', 'MODPACK_ARCHIVE_CHANGED', 'preparing', false);
+    }
+  }
+
+  async install(filePath, onProgress = () => {}, { signal, installOptionalFiles = false, ownerId } = {}) {
+    throwIfAborted(signal);
+    const archivePath = validateModpackFile(filePath);
+    const session = { sessionId: crypto.randomUUID(), archivePath, ownerId: ownerId ?? null,
+      gameDirectory: path.resolve(this.gameDirectory), fingerprint: await archiveFingerprint(archivePath, signal),
+      installOptionalFiles, metadata: new Map(), missing: new Map(), busy: false, cancellable: true };
+    for (const [id, previous] of this.sessions) {
+      if (previous.ownerId === session.ownerId && !previous.busy) this.sessions.delete(id);
+    }
+    this.sessions.set(session.sessionId, session);
+    return this.runSession(session, onProgress, signal, true);
+  }
+
+  async resume(sessionId, onProgress = () => {}, { signal, ownerId } = {}) {
+    const session = this.getSession(sessionId, ownerId);
+    return this.runSession(session, onProgress, signal);
+  }
+
+  async runSession(session, onProgress, signal, initial = false) {
+    if (session.busy) throw modpackError('整合包任务正在处理中', 'TASK_BUSY', 'preparing');
+    session.busy = true;
+    session.cancellable = true;
+    session.controller = new AbortController();
+    const taskSignal = signal ? AbortSignal.any([signal, session.controller.signal]) : session.controller.signal;
+    let phase = 'preparing';
+    const progress = (value) => { phase = value.phase ?? phase; onProgress({ cancellable: session.cancellable, ...value }); };
+    try {
+      if (!initial) await this.verifySessionArchive(session, taskSignal);
+      const cleanupWarnings = await cleanupStaleStaging(session.gameDirectory);
+      const result = await this.performInstall(session, progress, taskSignal, cleanupWarnings);
+      if (session.cancellable) throwIfAborted(taskSignal);
+      return result;
+    } catch (error) {
+      // A resumed task can fail or be cancelled after a manual file was
+      // verified. Keep that recovery handle until explicitly discarded, unless
+      // the archive/session is no longer trustworthy.
+      if (initial || error.retryable === false) this.sessions.delete(session.sessionId);
+      error.phase ??= phase;
+      throw error;
+    } finally { session.busy = false; }
+  }
+
+  async performInstall(session, onProgress, signal, cleanupWarnings) {
+    const { installOptionalFiles } = session;
+    return this.withExtractedPack(session.archivePath, async ({ archivePath, packRoot, pack }) => {
+      session.name = pack.name;
+      const refreshMetadata = new Set([...session.missing.entries()]
+        .filter(([, missing]) => missing.reason !== 'restricted').map(([key]) => key));
+      session.missing.clear();
       throwIfAborted(signal);
       onProgress({ phase: 'installing-base', message: `正在准备 Minecraft ${pack.gameVersion} 与加载器…` });
       let loaderResult;
@@ -333,15 +518,18 @@ class ModpackManager {
           modpackName: pack.name
         }), { signal });
       } catch (error) {
-        throw new Error(`基础游戏或加载器安装失败：${error.message}`);
+        throwIfAborted(signal);
+        throw modpackError(`基础游戏或加载器安装失败：${error.message}`,
+          error.code ?? 'MODPACK_BASE_FAILED', 'installing-base', error.retryable !== false, error);
       }
 
-      const instanceId = createInstanceId(pack.name);
+      const instanceId = `${createInstanceId(pack.name)}-${crypto.randomBytes(4).toString('hex')}`;
       const instancesRoot = safePath(this.gameDirectory, 'melody-instances');
       const instanceDirectory = safePath(instancesRoot, instanceId);
-      const stagingDirectory = safePath(instancesRoot, `.installing-${instanceId}`);
-      await fs.mkdir(stagingDirectory, { recursive: true });
-      const warnings = [];
+      const stagingDirectory = await createStagingDirectory(session.gameDirectory, instanceId);
+      const warnings = [...cleanupWarnings];
+      let committed = false;
+      let primaryError;
       try {
         throwIfAborted(signal);
 
@@ -357,14 +545,19 @@ class ModpackManager {
             totalFiles: selectedFiles.length
           });
           await runPool(selectedFiles, Math.min(this.concurrency, 8), async (entry, index, poolSignal) => {
+            const key = `${entry.projectId}:${entry.fileId}`;
             try {
-              resolved[index] = await resolveCurseForgeFile(entry, poolSignal);
+              let metadata = session.metadata.get(key);
+              if (!metadata || !metadata.sha1 || refreshMetadata.has(key)) {
+                metadata = await resolveCurseForgeMetadata(entry, poolSignal);
+                session.metadata.set(key, metadata);
+              }
+              resolved[index] = metadata;
             } catch (error) {
               throwIfAborted(poolSignal);
-              if (entry.required !== false) {
-                throw new Error(`必需文件解析失败：${error.message}`);
-              }
-              warnings.push(error.message);
+              if (error.code !== 'MODPACK_METADATA_UNAVAILABLE' && !isRemoteFailure(error)) throw error;
+              if (entry.required !== false) session.missing.set(key, { ...entry, reason: 'metadata-unavailable' });
+              else warnings.push(error.message);
             }
             completed += 1;
             onProgress({
@@ -377,7 +570,19 @@ class ModpackManager {
           files = resolved.filter(Boolean);
         }
 
+        const destinations = new Map();
+        files = files.filter((file) => {
+          const destinationKey = safeRelativePath(file.path).toLowerCase();
+          const previous = destinations.get(destinationKey);
+          if (!previous) { destinations.set(destinationKey, file); return true; }
+          if (previous.sha1 && previous.sha1 === file.sha1) {
+            previous.required = previous.required !== false || file.required !== false;
+            return false;
+          }
+          throw modpackError('整合包有多个不同文件使用相同安装路径', 'MODPACK_INVALID_METADATA', 'resolving-files', false);
+        });
         const tasks = files.map((file) => ({
+          ...file,
           label: `整合包文件 ${file.path}`,
           destination: safePath(stagingDirectory, ...safeRelativePath(file.path).split('/')),
           urls: file.urls,
@@ -394,14 +599,32 @@ class ModpackManager {
         progressTracker.start(`准备下载 ${tasks.length} 个整合包文件`);
         const cacheRoot = safePath(this.gameDirectory, 'launcher-cache', 'modpack-files');
         await runPool(tasks, this.concurrency, async (task, _index, poolSignal) => {
-          const result = await downloadModpackFile({
-            ...task,
-            signal: poolSignal,
-            segmentConcurrency: this.segmentConcurrency,
-            ...progressTracker.hooks(task)
-          }, cacheRoot);
-          progressTracker.complete(task, result);
+          try {
+            if (!task.urls.length && !(await hasCachedModpackFile({ ...task, signal: poolSignal }, cacheRoot))) {
+              if (task.required === false) { warnings.push(`可选文件 ${task.fileName} 禁止自动下载，已跳过`); return; }
+              session.missing.set(`${task.projectId}:${task.fileId}`, { ...task,
+                reason: task.sha1 ? 'restricted' : 'metadata-unavailable' });
+              return;
+            }
+            const result = await downloadModpackFile({
+              ...task, signal: poolSignal, segmentConcurrency: this.segmentConcurrency,
+              ...progressTracker.hooks(task)
+            }, cacheRoot);
+            progressTracker.complete(task, result);
+          } catch (error) {
+            throwIfAborted(poolSignal);
+            if (!isRemoteFailure(error)) throw error;
+            if (task.required === false) { warnings.push(`可选文件 ${task.path} 未能下载：${error.message}`); return; }
+            if (pack.format !== 'curseforge') throw error;
+            session.missing.set(`${task.projectId}:${task.fileId}`, { ...task, reason: 'download-failed' });
+          }
         }, signal);
+
+        throwIfAborted(signal);
+        if (session.missing.size > 0) {
+          onProgress({ phase: 'waiting-for-files', message: '请补齐缺失文件或重新查询后继续安装' });
+          return this.getRecoveryState(session.sessionId, { ownerId: session.ownerId });
+        }
 
         onProgress({ phase: 'copying-overrides', message: '正在复制整合包配置与覆盖文件…' });
         try {
@@ -409,11 +632,13 @@ class ModpackManager {
             throwIfAborted(signal);
             await copyDirectoryContents(
               safePath(packRoot, ...safeRelativePath(overrideDirectory).split('/')),
-              stagingDirectory
+              stagingDirectory,
+              { signal }
             );
           }
         } catch (error) {
-          throw new Error(`覆盖文件复制失败：${error.message}`);
+          throwIfAborted(signal);
+          throw modpackError(`覆盖文件复制失败：${error.message}`, error.code ?? 'MODPACK_COPY_FAILED', 'copying-overrides', true, error);
         }
         throwIfAborted(signal);
 
@@ -433,18 +658,26 @@ class ModpackManager {
           warnings,
           installedAt: new Date().toISOString()
         };
-        onProgress({ phase: 'committing-instance', message: '正在保存实例配置…' });
         try {
           await writeJsonAtomic(
             safePath(stagingDirectory, '.melody-instance.json'),
             metadata
           );
-          await fs.mkdir(instancesRoot, { recursive: true });
+          throwIfAborted(signal);
+          // From this synchronous boundary onward cancellation cannot undo the
+          // atomic commit. Report the boundary before invoking renderer callbacks.
+          session.cancellable = false;
+          onProgress({ phase: 'committing-instance', message: '正在保存实例配置…', cancellable: false });
           await fs.rename(stagingDirectory, instanceDirectory);
+          committed = true;
+          releaseStagingDirectory(stagingDirectory);
+          await fs.rm(path.join(instanceDirectory, STAGING_MARKER), { force: true }).catch(() => {});
         } catch (error) {
-          throw new Error(`实例配置保存失败：${error.message}`);
+          if (session.cancellable !== false) throwIfAborted(signal);
+          throw modpackError(`实例配置保存失败：${error.message}`, error.code ?? 'MODPACK_COMMIT_FAILED', 'committing-instance', true, error);
         }
         const result = {
+          status: 'complete',
           ...publicPackInfo(pack),
           instanceId,
           targetId: `instance-${instanceId}`,
@@ -459,12 +692,25 @@ class ModpackManager {
           warnings,
           ...result
         });
+        this.sessions.delete(session.sessionId);
         return result;
       } catch (error) {
-        await fs.rm(stagingDirectory, { recursive: true, force: true });
+        primaryError = error;
         throw error;
+      } finally {
+        if (!committed) {
+          try { await removeStagingDirectory(session.gameDirectory, stagingDirectory); }
+          catch (cleanupError) {
+            if (primaryError) {
+              primaryError.details = { ...primaryError.details,
+                cleanupMessage: `临时文件清理失败，将在下次启动时重试：${cleanupError.message}` };
+            }
+            else throw modpackError(`临时文件清理失败，将在下次启动时重试：${cleanupError.message}`,
+              'MODPACK_CLEANUP_FAILED', 'cleanup', true, cleanupError);
+          }
+        }
       }
-    });
+    }, { signal, onProgress });
   }
 
   async resolveLaunchTarget(targetId) {
@@ -483,6 +729,8 @@ module.exports = {
   parseModrinthIndex,
   publicPackInfo,
   resolveCurseForgeFile,
+  resolveCurseForgeMetadata,
+  copyDirectoryContents,
   safeRelativePath,
   validatePublicDownloadUrl,
   validateModpackFile

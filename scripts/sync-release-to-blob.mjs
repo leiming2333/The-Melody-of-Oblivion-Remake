@@ -1,71 +1,78 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { put } from '@vercel/blob';
+import { pathToFileURL } from 'node:url';
+import { put, list } from '@vercel/blob';
+import releaseAssets from './release-assets.cjs';
 
-const [assetDirectory, tag, metadataPath] = process.argv.slice(2);
-const token = process.env.BLOB_READ_WRITE_TOKEN;
-const repository = process.env.GITHUB_REPOSITORY || 'leiming2333/The-Melody-of-Oblivion-Remake';
+const { verifyManifest, assertTag } = releaseAssets;
 
-if (!token) throw new Error('BLOB_READ_WRITE_TOKEN is required to sync a GitHub Release.');
-if (!assetDirectory || !/^v\d+\.\d+\.\d+$/.test(tag ?? '') || !metadataPath) {
-  throw new Error('Usage: node scripts/sync-release-to-blob.mjs <asset-directory> <tag> <release-metadata.json>');
+function newerVersion(left, right) {
+  const a = String(left).replace(/^v/, '').split('.').map(Number);
+  const b = String(right).replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return false;
 }
 
-const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
-const files = (await readdir(assetDirectory, { withFileTypes: true }))
-  .filter((entry) => entry.isFile() && /\.(?:exe|zip|AppImage)$/i.test(entry.name))
-  .map((entry) => entry.name)
-  .sort();
-
-if (!files.length) throw new Error(`No installer assets found for ${tag}.`);
-
-const assets = [];
-for (const name of files) {
-  const version = name.match(/-v(\d+\.\d+\.\d+)-/i)?.[1];
-  if (version && `v${version}` !== tag) throw new Error(`Asset ${name} does not match release ${tag}.`);
-  if (!/^The-Melody-of-Oblivion-Remake-(?:v\d+\.\d+\.\d+-)?(?:Windows-(?:Setup-)?(?:x64|ia32|arm64)\.exe|Windows-(?:x64|ia32|arm64)\.zip|macOS-(?:x64|arm64)\.zip|Linux-(?:x64|arm64|armv7l)\.AppImage)$/i.test(name)) {
-    throw new Error(`Unexpected release asset name: ${name}`);
+export async function syncRelease(assetDirectory, tag, metadataPath, {
+  token = process.env.BLOB_READ_WRITE_TOKEN,
+  repository = process.env.GITHUB_REPOSITORY || 'leiming2333/The-Melody-of-Oblivion-Remake',
+  putBlob = put, listBlobs = list, fetchUrl = fetch
+} = {}) {
+  if (!token) throw new Error('BLOB_READ_WRITE_TOKEN is required to sync a GitHub Release.');
+  const manifest = JSON.parse(await readFile(path.join(assetDirectory, 'release-manifest.json'), 'utf8'));
+  assertTag(tag, manifest.version);
+  const packages = await verifyManifest(assetDirectory, manifest);
+  const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+  if (metadata.tagName !== tag) throw new Error('GitHub release metadata does not match the requested tag');
+  async function existingJson(pathname) {
+    const entries = await listBlobs({ prefix: pathname, limit: 2, token });
+    const entry = entries.blobs.find(blob => blob.pathname === pathname);
+    if (!entry) return null;
+    const response = await fetchUrl(entry.url, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
+    if (!response.ok) throw new Error(`Cannot verify existing Blob metadata: ${pathname}`);
+    return response.json();
   }
-
-  const contents = await readFile(path.join(assetDirectory, name));
-  const sha256 = createHash('sha256').update(contents).digest('hex');
-  const pathname = `releases/${tag}/${name}`;
-  const blob = await put(pathname, contents, {
-    access: 'public',
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    cacheControlMaxAge: 31536000,
-    token
+  const previous = await existingJson(`releases/${tag}/manifest.json`);
+  if (previous && JSON.stringify(previous) !== JSON.stringify(manifest)) throw new Error('Published Blob tag is immutable; use a new version');
+  const latest = await existingJson('releases/latest.json');
+  const assets = [];
+  for (const item of packages) {
+    const contents = await readFile(item.file);
+    const pathname = `releases/${tag}/${item.name}`;
+    const blob = await putBlob(pathname, contents, {
+      access: 'public', addRandomSuffix: false, allowOverwrite: true,
+      cacheControlMaxAge: 31536000, token
+    });
+    const response = await fetchUrl(blob.url, { cache: 'no-store', signal: AbortSignal.timeout(120000) });
+    if (!response.ok) throw new Error(`Blob verification failed: ${item.name}`);
+    const hash = createHash('sha256');
+    let size = 0;
+    for await (const chunk of response.body) { hash.update(chunk); size += chunk.length; }
+    if (size !== item.size || hash.digest('hex') !== item.sha256) throw new Error(`Blob digest mismatch: ${item.name}`);
+    assets.push({ name: item.name, size: item.size,
+      platform: item.name.match(/(Windows-(?:x64|ia32|arm64)|macOS-(?:x64|arm64)|Linux-(?:x64|arm64|armv7l))/i)?.[1],
+      digest: `sha256:${item.sha256}`, browser_download_url: blob.url,
+      github_download_url: `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(item.name)}` });
+  }
+  await putBlob(`releases/${tag}/manifest.json`, JSON.stringify(manifest), {
+    access: 'public', addRandomSuffix: false, allowOverwrite: true,
+    cacheControlMaxAge: 31536000, contentType: 'application/json; charset=utf-8', token
   });
-
-  assets.push({
-    name,
-    size: contents.length,
-    platform: name.match(/(Windows-(?:Setup-)?(?:x64|ia32|arm64)|macOS-(?:x64|arm64)|Linux-(?:x64|arm64|armv7l))/i)?.[1],
-    digest: `sha256:${sha256}`,
-    browser_download_url: blob.url,
-    github_download_url: `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(name)}`
+  if (latest?.tag_name && newerVersion(latest.tag_name, tag)) return { tag, assets, latestUpdated: false };
+  const release = { tag_name: tag, name: metadata.name || tag,
+    html_url: metadata.url || `https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`,
+    body: metadata.body || '', published_at: metadata.publishedAt || null, assets };
+  await putBlob('releases/latest.json', JSON.stringify(release), {
+    access: 'public', addRandomSuffix: false, allowOverwrite: true,
+    cacheControlMaxAge: 60, contentType: 'application/json; charset=utf-8', token
   });
-  console.log(`Uploaded ${name} (${contents.length} bytes)`);
+  return { ...release, latestUpdated: true };
 }
 
-const release = {
-  tag_name: tag,
-  name: metadata.name || tag,
-  html_url: metadata.url || `https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`,
-  body: metadata.body || '',
-  published_at: metadata.publishedAt || null,
-  assets
-};
-
-await put('releases/latest.json', JSON.stringify(release), {
-  access: 'public',
-  addRandomSuffix: false,
-  allowOverwrite: true,
-  cacheControlMaxAge: 60,
-  contentType: 'application/json; charset=utf-8',
-  token
-});
-
-console.log(`Published Blob manifest for ${tag} with ${assets.length} assets.`);
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const [assetDirectory, tag, metadataPath] = process.argv.slice(2);
+  syncRelease(assetDirectory, tag, metadataPath)
+    .then(result => console.log(`Verified ${result.assets.length} Blob packages for ${tag}; latest updated: ${result.latestUpdated}.`))
+    .catch(error => { console.error(error); process.exitCode = 1; });
+}

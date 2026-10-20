@@ -2,10 +2,15 @@ const { StartupMetrics } = require('./startup-metrics');
 const startupMetrics = new StartupMetrics();
 startupMetrics.mark('main-entry');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, safeStorage, shell } = require('electron');
 const { createLazyServices } = require('./lazy-services');
 
 const isSmokeTest = process.argv.includes('--smoke-test');
+const smokeResultArgument = isSmokeTest && process.argv.find((argument) => argument.startsWith('--smoke-result='));
+const smokeResultPath = isSmokeTest ? (smokeResultArgument
+  ? smokeResultArgument.slice('--smoke-result='.length) : process.env.MELODY_SMOKE_RESULT) : undefined;
+if (smokeResultPath && !path.isAbsolute(smokeResultPath)) throw new Error('Smoke result path must be absolute');
 const iconFile = process.platform === 'win32' ? 'app-icon.ico'
   : process.platform === 'darwin' ? 'app-icon.icns'
   : 'app-icon.png';
@@ -14,13 +19,25 @@ const windowReadiness = new WeakMap();
 let backgroundInitialized = false;
 if (isSmokeTest) {
   app.disableHardwareAcceleration();
-  app.setPath('userData', path.join(app.getPath('temp'), 'melody-of-oblivion-smoke'));
+  const suffix = smokeResultPath ? require('node:crypto').createHash('sha256').update(smokeResultPath).digest('hex').slice(0, 16) : 'default';
+  app.setPath('userData', path.join(app.getPath('temp'), `melody-of-oblivion-smoke-${suffix}`));
 }
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.melodyofoblivion.launcher');
 }
 const hasSingleInstanceLock = require('./single-instance').acquireSingleInstance(app, BrowserWindow, createWindow);
 if (!hasSingleInstanceLock) app.quit();
+const windowHealth = require('./window-health').createWindowHealth({
+  BrowserWindow,
+  expectedUrl: pathToFileURL(path.join(__dirname, '../renderer/index.html')).href,
+  isEligible: () => app.isPackaged && !isSmokeTest && hasSingleInstanceLock,
+  onHealthy: async () => {
+    const manager = getUpdateManager();
+    await manager.initialize?.();
+    await manager.confirmHealthy();
+  },
+  onError: (error) => { void services.errorLog.record(`更新启动确认失败：${error.message}`); }
+});
 
 ipcMain.on('window:minimize', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize();
@@ -40,6 +57,11 @@ ipcMain.on('startup:stage', (_event, stage) => {
 
 ipcMain.handle('startup:when-window-shown', (event) => {
   return windowReadiness.get(BrowserWindow.fromWebContents(event.sender)) ?? Promise.resolve();
+});
+ipcMain.handle('startup:renderer-ready', (event) => windowHealth.ready(event));
+ipcMain.handle('diagnostics:copy-error', (_event, message) => {
+  clipboard.writeText(require('./error-log').redactError(String(message)));
+  return true;
 });
 
 ipcMain.handle('shell:open-external', async (_event, url) => {
@@ -98,6 +120,7 @@ function createWindow() {
   });
 
   let resolveShown;
+  windowHealth.track(mainWindow);
   windowReadiness.set(mainWindow, new Promise((resolve) => { resolveShown = resolve; }));
   if (process.platform !== 'darwin') {
     // Reapply after the native window appears so Windows refreshes its taskbar button.
@@ -138,8 +161,8 @@ function createWindow() {
           import('./modules/modpack-ui.mjs').then(m => typeof m.installDroppedModpack === 'function'),
           import('./modules/launcher-update-ui.mjs').then(m => typeof m.createLauncherUpdateUi === 'function')
         ]).then(values => { if (!values.every(Boolean)) throw new Error('Missing renderer module'); })`);
-        if (process.env.MELODY_SMOKE_RESULT) {
-          await require('node:fs/promises').writeFile(process.env.MELODY_SMOKE_RESULT, JSON.stringify({
+        if (smokeResultPath) {
+          await require('node:fs/promises').writeFile(smokeResultPath, JSON.stringify({
             ok: true, packaged: app.isPackaged, platform: process.platform, arch: process.arch, version: app.getVersion()
           }));
         }

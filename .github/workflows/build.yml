@@ -1,158 +1,124 @@
 name: Build & Release
-
 permissions:
-  contents: write
-
+  contents: read
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
-
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
+  targets:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.matrix.outputs.build }}
+      smoke: ${{ steps.matrix.outputs.smoke }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.10.0
+      - id: matrix
+        run: node scripts/ci-matrix.cjs
+      - name: Verify release tag
+        if: github.ref_type == 'tag'
+        run: node -e "require('./scripts/release-assets.cjs').assertTag(process.env.GITHUB_REF_NAME, require('./package.json').version)"
   build:
-    name: ${{ matrix.os }} (${{ matrix.arch }})
-    runs-on: ${{ matrix.os }}
+    needs: targets
+    name: Build ${{ matrix.id }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            script: build:win
-            arch: x64
-            pattern: release/*.exe
-          - os: windows-latest
-            script: build:win
-            arch: ia32
-            pattern: release/*.exe
-          - os: windows-latest
-            script: build:win
-            arch: arm64
-            pattern: release/*.exe
-          - os: ubuntu-latest
-            script: build:linux
-            arch: x64
-            pattern: release/*.AppImage
-          - os: ubuntu-latest
-            script: build:linux
-            arch: arm64
-            pattern: release/*.AppImage
-          - os: ubuntu-latest
-            script: build:linux
-            arch: armv7l
-            pattern: release/*.AppImage
-          - os: macos-latest
-            script: build:mac
-            arch: x64
-            pattern: release/*.zip
-          - os: macos-latest
-            script: build:mac
-            arch: arm64
-            pattern: release/*.zip
+      matrix: ${{ fromJSON(needs.targets.outputs.build) }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Validate source
-        run: npm run check
-
-      - name: Run tests
-        run: npm test
-
-      - name: Build (${{ matrix.arch }})
-        run: npm run ${{ matrix.script }} -- --${{ matrix.arch }}
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-toolchain
+      - run: npm run check
+      - run: npm test
+      - name: Build isolated package
+        run: npm run build -- --target ${{ matrix.id }}
         env:
           MELODY_MICROSOFT_CLIENT_ID: ${{ secrets.MELODY_MICROSOFT_CLIENT_ID || '72867f11-f8bf-4086-a502-39039a08970c' }}
-
-      - name: Normalize Linux x64 artifact name
-        if: matrix.script == 'build:linux' && matrix.arch == 'x64'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.output }}/${{ matrix.filename }}
+            ${{ matrix.output }}/build-metadata.json
+          if-no-files-found: error
+          compression-level: 0
+  smoke:
+    name: Verify final packages and upgrades
+    needs: [targets, build]
+    uses: ./.github/workflows/release-smoke.yml
+    with:
+      matrix: ${{ needs.targets.outputs.smoke }}
+  assemble:
+    needs: [build, smoke]
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.10.0
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-input
+          pattern: dist-*
+      - uses: actions/download-artifact@v4
+        with:
+          path: smoke-input
+          pattern: smoke-*
+      - name: Verify complete asset set and build manifest
         shell: bash
         run: |
-          mv "release/The-Melody-of-Oblivion-Remake-Linux-x86_64.AppImage" \
-             "release/The-Melody-of-Oblivion-Remake-Linux-x64.AppImage"
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-${{ matrix.os }}-${{ matrix.arch }}
-          path: ${{ matrix.pattern }}
-          if-no-files-found: error
-
-  smoke:
-    name: Verify final packages
-    needs: build
-    uses: ./.github/workflows/release-smoke.yml
-    permissions:
-      contents: read
-
-  release:
-    name: Release
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: [build, smoke]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install upload dependency
-        run: npm ci --omit=dev
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-          pattern: dist-*
-
-      - name: Publish to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
           set -euo pipefail
-          while IFS= read -r -d '' artifact; do
-            sha256sum "$artifact" > "$artifact.sha256"
-          done < <(find release-assets -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.AppImage' \) -print0)
-          if ! gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
-            notes_file=".github/notes/${{ github.ref_name }}.md"
-            if [ -f "$notes_file" ]; then
-              gh release create "${{ github.ref_name }}" --draft --notes-file "$notes_file"
-            else
-              gh release create "${{ github.ref_name }}" --draft --generate-notes
-            fi
-          fi
-          find release-assets -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.sha256' \) -print0 \
-            | xargs -0 -r -n1 gh release upload "${{ github.ref_name }}" --clobber
-          gh release edit "${{ github.ref_name }}" --draft=false
-
-      - name: Sync published assets to Vercel Blob
+          if [ -z "$RELEASE_TAG" ]; then export RELEASE_TAG=$(node -p "'v' + require('./package.json').version"); fi
+          node scripts/release-assets.cjs release-input release-verified smoke-input
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-release-bundle
+          path: release-verified/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+  release:
+    if: github.ref_type == 'tag'
+    needs: assemble
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: blob-release-sync
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-toolchain
+        with:
+          omit-dev: 'true'
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-release-bundle
+          path: release-published
+      - name: Publish verified draft or verify immutable existing release
+        run: node scripts/publish-release.cjs release-published
+      - name: Sync all verified packages before changing Blob latest
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+        shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "$BLOB_READ_WRITE_TOKEN" ]]; then
-            echo "::warning title=Blob sync skipped::Add the BLOB_READ_WRITE_TOKEN repository Actions secret to enable automatic Blob downloads."
+          if [ -z "$BLOB_READ_WRITE_TOKEN" ]; then
+            echo '::notice::Blob synchronization is not configured; GitHub assets are published.'
             exit 0
           fi
-          mkdir -p release-published
-          gh release download "${{ github.ref_name }}" --repo "$GH_REPO" --dir release-published \
-            --pattern '*.exe' --pattern '*.zip' --pattern '*.AppImage'
-          gh release view "${{ github.ref_name }}" --repo "$GH_REPO" \
-            --json tagName,name,url,body,publishedAt > release-published/release.json
-          node scripts/sync-release-to-blob.mjs release-published "${{ github.ref_name }}" release-published/release.json
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json tagName,name,url,body,publishedAt > release-published/release.json
+          node scripts/sync-release-to-blob.mjs release-published "$RELEASE_TAG" release-published/release.json

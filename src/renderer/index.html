@@ -48,6 +48,8 @@
             <span class="status-light" aria-hidden="true"></span>
             <span id="gameStatus">请选择游戏版本</span>
             <strong id="statusBadge">READY</strong>
+            <button id="taskButton" class="text-button" type="button" hidden>查看任务</button>
+            <button id="homeCancelDownloadButton" class="text-button" type="button" hidden>取消</button>
           </div>
 
           <div class="launch-actions">
@@ -257,12 +259,23 @@
             </div>
           </div>
 
+          <section id="modpackRecoveryPanel" class="modpack-recovery" aria-live="polite" hidden>
+            <strong id="modpackRecoveryTitle">需要补齐整合包文件</strong>
+            <p>已校验的文件会保留。请从官方页面下载缺失文件，选择本地文件后继续。</p>
+            <ul id="modpackMissingFiles"></ul>
+            <div class="task-actions">
+              <button id="modpackResumeButton" class="primary-dialog-button" type="button">重新查询并继续</button>
+              <button id="modpackDiscardButton" class="secondary-dialog-button" type="button">取消安装</button>
+            </div>
+          </section>
+
           <footer class="dialog-actions version-dialog-actions">
             <button id="refreshVersionsButton" class="secondary-dialog-button" type="button">刷新列表</button>
             <button id="deleteVersionButton" class="delete-version-button" type="button" disabled>删除版本</button>
             <button id="clearVersionSelectionButton" class="secondary-dialog-button" type="button" disabled>取消选择</button>
             <span class="dialog-action-spacer"></span>
             <button id="cancelDownloadButton" class="cancel-download-button" type="button" hidden>取消下载</button>
+            <button id="retryTaskButton" class="primary-dialog-button" type="button" hidden>重试整合包</button>
             <button class="secondary-dialog-button" value="cancel" type="submit">关闭</button>
             <button id="downloadVersionButton" class="primary-dialog-button" type="button" disabled>选择版本</button>
           </footer>
@@ -380,6 +393,23 @@
               <progress id="launcherUpdateProgress" max="100" value="0" hidden></progress>
             </div>
             <button id="launcherUpdateButton" type="button">检查更新</button>
+            <button id="launcherUpdateCancelButton" type="button" hidden>取消</button>
+          </div>
+
+          <div id="launcherUpdateRecovery" class="setting-group" hidden>
+            <p id="launcherUpdateRecoveryMessage"></p>
+            <div class="task-actions">
+              <button id="launcherUpdateRetryButton" class="secondary-dialog-button" type="button">重试安装</button>
+              <button id="launcherUpdateRollbackButton" class="secondary-dialog-button" type="button">恢复上一版</button>
+              <button id="launcherUpdateKeepButton" class="secondary-dialog-button" type="button">保留当前版</button>
+            </div>
+          </div>
+
+          <div id="launcherHistorySetting" class="setting-group" hidden>
+            <button id="launcherHistoryButton" class="secondary-dialog-button" type="button">查看历史更新文件</button>
+            <p>自动保留最近一份回退备份。无更新记录的旧文件由你选择后移入回收站。</p>
+            <ul id="launcherHistoryList" class="history-files" hidden></ul>
+            <button id="launcherHistoryCleanupButton" class="secondary-dialog-button" type="button" hidden>回收选中的文件</button>
           </div>
 
           <div class="setting-group launcher-update-policy-setting">
@@ -414,8 +444,27 @@
           <details id="problemDetails"><summary>查看错误信息</summary><pre id="problemError"></pre></details>
           <footer class="dialog-actions">
             <button class="secondary-dialog-button" value="cancel" type="submit">关闭</button>
+            <button id="problemCopyButton" class="secondary-dialog-button" type="button">复制错误详情</button>
+            <button id="problemRetryButton" class="primary-dialog-button" type="button" hidden>重试</button>
             <button id="problemAccountButton" class="primary-dialog-button" type="button" hidden>前往账户管理</button>
             <button id="problemSettingsButton" class="primary-dialog-button" type="button" hidden>打开启动设置</button>
+          </footer>
+        </form>
+      </dialog>
+      <dialog id="modpackConfirmDialog" class="problem-dialog" aria-labelledby="modpackConfirmTitle">
+        <form method="dialog">
+          <header class="dialog-header">
+            <div><p>导入整合包</p><h2 id="modpackConfirmTitle"></h2></div>
+            <button class="dialog-close" value="cancel" aria-label="取消导入" type="submit">×</button>
+          </header>
+          <p id="modpackConfirmSummary" class="problem-advice"></p>
+          <label id="modpackOptionalSetting" class="check-setting" hidden>
+            <input id="modpackOptionalFiles" type="checkbox" />
+            <span aria-hidden="true"></span>同时安装可选文件
+          </label>
+          <footer class="dialog-actions">
+            <button class="secondary-dialog-button" value="cancel" type="submit">取消</button>
+            <button class="primary-dialog-button" value="install" type="submit">安装整合包</button>
           </footer>
         </form>
       </dialog>

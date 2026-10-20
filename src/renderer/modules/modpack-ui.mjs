@@ -1,77 +1,204 @@
-export async function installDroppedModpack(context, filePath) {
-  const { state, showToast, minecraft, loaderNames, cancelDownloadButton, downloadStatus, gameStatus,
-    statusBadge, updateDownloadProgress, updateVersionAction, delay, loadLocalProfiles,
-    useVersion, readableError } = context;
-  if (state.versionDownloadActive || state.modpackInstallActive) {
-    showToast('请先等待当前安装任务完成或取消');
-    return;
-  }
-  state.modpackInstallActive = true;
-  state.versionDownloadActive = true;
-  updateVersionAction();
-  try {
-    const info = minecraft?.inspectModpack
-      ? await minecraft.inspectModpack(filePath)
-      : {
-          format: filePath.toLowerCase().endsWith('.mrpack') ? 'modrinth' : 'curseforge',
-          name: filePath.split(/[\\/]/).at(-1),
-          gameVersion: '1.21.1',
-          loaderType: 'fabric',
-          loaderVersion: '0.16.10',
-          fileCount: 0
-        };
-    const formatName = info.format === 'modrinth' ? 'Modrinth' : 'CurseForge';
-    const optionalCount = Number(info.optionalFileCount ?? 0);
-    const requiredCount = Number(info.requiredFileCount ?? info.fileCount ?? 0);
-    const optionalLine = optionalCount > 0
-      ? `\n其中必需文件 ${requiredCount} 个，可选文件 ${optionalCount} 个。`
-      : '';
-    if (!window.confirm(
-      `安装整合包「${info.name}」？\n\n${formatName} · Minecraft ${info.gameVersion} · ${loaderNames[info.loaderType] ?? info.loaderType}\n需要下载 ${info.fileCount} 个整合包文件。${optionalLine}`
-    )) return;
-    const installOptionalFiles = optionalCount > 0 && window.confirm(
-      '是否一并安装可选文件？取消则仅安装必需文件。'
-    );
+export function createModpackUi(context) {
+  const { state, minecraft, showToast, readableError, gameStatus, statusBadge,
+    cancelDownloadButton, downloadStatus } = context;
+  const elements = context.elements ?? {};
+  let sourcePath, sourceName, selectedOptions = { installOptionalFiles: false };
+  let waiting = null;
+  let failed = false;
+  const makeId = () => context.newTaskId?.() ?? globalThis.crypto?.randomUUID?.() ?? `pack-${Date.now()}`;
 
+  function refresh() {
+    const active = Boolean(state.versionDownloadActive);
+    context.updateTaskEntry?.({ visible: active || Boolean(waiting) || failed, retry: failed && !waiting });
+    context.updateVersionAction();
+    if (elements.recoveryPanel) elements.recoveryPanel.hidden = !waiting;
+    if (elements.resumeButton) elements.resumeButton.disabled = active;
+    if (elements.discardButton) elements.discardButton.disabled = active;
+    if (elements.missingFiles) {
+      elements.missingFiles.replaceChildren();
+      for (const file of waiting?.files ?? []) {
+        const row = document.createElement('li');
+        const label = document.createElement('span');
+        const reason = file.reason === 'metadata-unavailable' ? '等待文件信息'
+          : file.reason === 'restricted' ? '需要手动下载' : '下载未完成';
+        label.textContent = `${file.fileName ?? `项目 ${file.projectId} · 文件 ${file.fileId}`} · ${reason}`;
+        row.append(label);
+        if (file.officialUrl) {
+          const link = document.createElement('button');
+          link.type = 'button'; link.className = 'secondary-dialog-button'; link.textContent = '官方页面';
+          link.addEventListener('click', () => {
+            void context.openExternal?.(file.officialUrl)?.catch((error) => context.showProblem?.(error));
+          });
+          row.append(link);
+        }
+        const select = document.createElement('button');
+        select.type = 'button'; select.className = 'secondary-dialog-button'; select.textContent = '选择文件';
+        select.disabled = active || !file.canImport;
+        if (!file.canImport) select.title = '先重新查询文件信息与摘要，再选择本地文件';
+        select.addEventListener('click', () => { void selectFile(file); });
+        row.append(select);
+        elements.missingFiles.append(row);
+      }
+    }
+  }
+
+  function begin(message) {
+    state.versionDownloadActive = true;
+    state.modpackInstallActive = true;
     state.downloadCancelRequested = false;
-    state.activeDownloadLabel = info.name;
+    state.activeTaskId = makeId();
+    state.activeDownloadLabel = sourceName ?? '整合包';
+    state.downloadCancellable = true;
+    failed = false;
     cancelDownloadButton.hidden = false;
     cancelDownloadButton.disabled = false;
     downloadStatus.hidden = false;
-    gameStatus.textContent = `正在安装整合包 ${info.name}`;
+    gameStatus.textContent = message;
     statusBadge.textContent = 'MODPACK';
-    updateDownloadProgress({ phase: 'preparing', message: `正在准备 ${info.name}…` });
-    updateVersionAction();
+    context.updateDownloadProgress({ phase: 'preparing', message, taskId: state.activeTaskId, cancellable: true });
+    refresh();
+    return state.activeTaskId;
+  }
 
-    const result = minecraft?.installModpack
-      ? await minecraft.installModpack(filePath, { installOptionalFiles })
-      : await delay(300).then(() => ({
-          name: info.name,
-          targetId: `instance-preview-${Date.now()}`,
-          warnings: []
-        }));
-    await loadLocalProfiles(true);
-    useVersion(result.targetId, result.name);
-    gameStatus.textContent = `${result.name} 安装完成`;
-    statusBadge.textContent = 'SELECTED';
-    const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
-    if (warnings.length > 0) {
-      showToast(`${result.name} 已安装，但 ${warnings.length} 个可选文件未安装：${warnings[0]}`);
-    } else {
-      showToast(`${result.name} 已安装并设为当前游戏`);
-    }
-  } catch (error) {
-    const message = readableError(error);
-    const cancelled = state.downloadCancelRequested || message.includes('下载已取消');
-    gameStatus.textContent = cancelled ? '整合包安装已取消' : '整合包安装失败，可重新拖入重试';
-    statusBadge.textContent = cancelled ? 'READY' : 'ERROR';
-    showToast(cancelled ? '整合包安装已取消' : `下载失败：${message}，可重新拖入整合包重试`, !cancelled);
-  } finally {
+  function finish() {
     state.modpackInstallActive = false;
     state.versionDownloadActive = false;
     state.downloadCancelRequested = false;
+    state.activeTaskId = '';
+    state.downloadCancellable = true;
     cancelDownloadButton.hidden = true;
     cancelDownloadButton.disabled = false;
-    updateVersionAction();
+    refresh();
   }
+
+  async function outcome(result) {
+    if (result.status === 'waiting-for-files') {
+      waiting = result;
+      gameStatus.textContent = `${result.name} 需要补齐文件`;
+      statusBadge.textContent = 'WAITING';
+      if (elements.recoveryTitle) elements.recoveryTitle.textContent = `${result.name} · ${result.files.length} 个文件待处理`;
+      context.updateDownloadProgress({ phase: 'waiting-for-files', message: '请补齐缺失文件，或重新查询后继续',
+        taskId: state.activeTaskId, cancellable: false });
+      showToast('安装已暂停，已校验的文件会保留');
+      context.openTask?.();
+      return;
+    }
+    waiting = null;
+    await context.loadLocalProfiles(true);
+    context.useVersion(result.targetId, result.name);
+    context.updateDownloadProgress({ phase: 'complete', message: `${result.name} 安装完成`, taskId: state.activeTaskId });
+    gameStatus.textContent = `${result.name} 安装完成`;
+    statusBadge.textContent = 'SELECTED';
+    const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+    showToast(warnings.length ? `${result.name} 已安装，${warnings.length} 个可选文件未安装。`
+      : `${result.name} 已安装并设为当前游戏`);
+    if (warnings.length) context.showProblem?.({ message: warnings.join('\n'), code: 'MODPACK_OPTIONAL_SKIPPED' },
+      '部分可选文件未安装', { domain: 'modpack' });
+  }
+
+  function reportFailure(error, retry, preserveWaiting = false) {
+    const message = readableError(error);
+    const cancelled = error?.code === 'TASK_CANCELLED' || error?.name === 'AbortError' || message === '下载已取消';
+    if (!preserveWaiting) waiting = null;
+    failed = !cancelled && !waiting;
+    gameStatus.textContent = cancelled ? '整合包操作已取消' : waiting ? '整合包等待补齐文件' : '整合包安装未完成，可重试';
+    statusBadge.textContent = cancelled ? 'READY' : waiting ? 'WAITING' : 'ERROR';
+    context.updateDownloadProgress({ phase: cancelled ? 'cancelled' : 'failed', message: cancelled
+      ? '操作已取消，已校验文件可在下次安装时复用' : message, taskId: state.activeTaskId, cancellable: false });
+    if (cancelled) showToast('操作已取消，已校验文件会保留');
+    else {
+      showToast(`整合包安装未完成：${message}`, true);
+      context.showProblem?.(error, '整合包安装未完成', { retry, domain: 'modpack' });
+    }
+  }
+
+  async function install(filePath) {
+    if (state.versionDownloadActive || state.modpackInstallActive) {
+      showToast('请先等待当前安装任务完成或取消'); return;
+    }
+    sourcePath = filePath; sourceName = filePath.split(/[\\/]/).at(-1); waiting = null;
+    begin(`正在检查 ${sourceName}…`);
+    try {
+      const info = minecraft?.inspectModpack ? await minecraft.inspectModpack(filePath, { taskId: state.activeTaskId })
+        : { name: sourceName, format: 'modrinth', fileCount: 0 };
+      sourceName = info.name;
+      cancelDownloadButton.hidden = true;
+      let choice;
+      if (context.confirmPack) choice = await context.confirmPack(info);
+      else choice = window.confirm(`安装整合包「${info.name}」？`) ? { installOptionalFiles: false } : null;
+      if (!choice) { failed = false; return; }
+      selectedOptions = { installOptionalFiles: choice.installOptionalFiles === true };
+      const taskId = begin(`正在安装整合包 ${info.name}`);
+      const result = minecraft?.installModpack ? await minecraft.installModpack(filePath, { ...selectedOptions, taskId })
+        : { name: info.name, targetId: 'instance-preview', warnings: [] };
+      await outcome(result);
+    } catch (error) { reportFailure(error, retry); }
+    finally { finish(); }
+  }
+
+  async function retry() {
+    if (!sourcePath || state.versionDownloadActive) return;
+    const taskId = begin(`正在重试 ${sourceName}`);
+    try { await outcome(await minecraft.installModpack(sourcePath, { ...selectedOptions, taskId })); }
+    catch (error) { reportFailure(error, retry); }
+    finally { finish(); }
+  }
+
+  async function resume() {
+    if (!waiting || state.versionDownloadActive) return;
+    const sessionId = waiting.sessionId;
+    const taskId = begin(`正在继续 ${sourceName}`);
+    try { await outcome(await minecraft.resumeModpack(sessionId, { taskId })); }
+    catch (error) {
+      if (/SESSION|SOURCE_CHANGED|ARCHIVE_CHANGED/.test(error.code ?? '')) waiting = null;
+      reportFailure(error, waiting ? resume : retry, Boolean(waiting));
+    } finally { finish(); }
+  }
+
+  async function selectFile(file) {
+    if (!waiting || state.versionDownloadActive) return;
+    const sessionId = waiting.sessionId;
+    const taskId = begin(`正在校验 ${file.fileName ?? '整合包文件'}`);
+    try {
+      const result = await minecraft.selectMissingModpackFile(sessionId,
+        { projectId: file.projectId, fileId: file.fileId }, { taskId });
+      if (!result.canceled) { waiting = result; showToast('文件校验通过，可继续安装'); }
+      gameStatus.textContent = `${sourceName} 等待继续安装`;
+      statusBadge.textContent = 'WAITING';
+    } catch (error) {
+      if (/SESSION|SOURCE_CHANGED|ARCHIVE_CHANGED/.test(error.code ?? '')) waiting = null;
+      reportFailure(error, waiting ? () => selectFile(file) : retry, Boolean(waiting));
+    }
+    finally { finish(); }
+  }
+
+  async function discard() {
+    if (!waiting || state.versionDownloadActive) return;
+    try {
+      await minecraft.discardModpackSession?.(waiting.sessionId);
+      waiting = null; failed = false;
+      gameStatus.textContent = '整合包安装已取消'; statusBadge.textContent = 'READY';
+      refresh(); showToast('安装已取消，已校验文件会保留');
+    } catch (error) { context.showProblem?.(error); }
+  }
+
+  function directoryChanged() {
+    if (state.versionDownloadActive) return;
+    const hadWaiting = Boolean(waiting);
+    waiting = null; failed = false; sourcePath = undefined;
+    refresh();
+    if (hadWaiting) {
+      gameStatus.textContent = '游戏目录已切换，请重新选择整合包';
+      statusBadge.textContent = 'READY';
+      downloadStatus.hidden = true;
+    }
+  }
+
+  elements.resumeButton?.addEventListener('click', () => { void resume(); });
+  elements.discardButton?.addEventListener('click', () => { void discard(); });
+  return { install, retry, resume, selectFile, discard, directoryChanged };
+}
+
+export async function installDroppedModpack(context, filePath) {
+  return createModpackUi(context).install(filePath);
 }

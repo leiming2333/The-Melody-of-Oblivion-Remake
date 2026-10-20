@@ -8,8 +8,8 @@
 [English](README.en.md) · [简体中文](README.md)
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Node.js](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
-[![Electron](https://img.shields.io/badge/Electron-43+-9feaf9.svg)](https://www.electronjs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-26.10.0-green.svg)](https://nodejs.org/)
+[![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
 [![Source](https://img.shields.io/badge/Source-v1.6.6-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
@@ -40,9 +40,9 @@ The current repository starts a new implementation; its version numbers and code
 - **Accounts** — create offline profiles, sign in with a Microsoft device code, or use LittleSkin Yggdrasil; sync skin avatars, refresh online credentials before launch, and keep tokens out of the renderer process.
 - **Java management** — match the Java major version required by the selected game; scan system installations and managed runtimes. Download Java 8, 16, 17, 21, or 25 from the button next to the Java path setting, with progress and cancellation. Downloads prefer Azul JRE and fall back to Adoptium, use parallel transfers, and verify SHA-256. Launching without the required Java opens settings instead of starting a download.
 - **Launch core** — resolve inherited version metadata, apply platform rules, assemble arguments and classpaths, extract native libraries safely, launch the Java process, and report its status. LittleSkin accounts automatically provision a SHA-256-verified authlib-injector.
-- **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instance directories, including overrides and supported loaders.
+- **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instances with overrides, Fabric, Forge, NeoForge, and Quilt. A single confirmation shows the game, loader, and file counts; optional files are unchecked by default. Optional failures produce warnings, while required failures support retry. Restricted CurseForge files can be downloaded from their official pages, selected locally, and verified against trusted hashes before installation continues.
 - **Launcher updates** — checks GitHub Releases on startup with a three-level policy (auto-download / notify only / never); system notifications announce new versions and ready updates; release notes are shown in settings; update downloads fall back across GitHub mirrors with slow-speed detection and are SHA-256 verified before install. Legacy boolean update settings migrate automatically.
-- **Desktop UI** — a compact fixed-size frameless Electron window with version, account, download, launch, and settings flows.
+- **Desktop UI** — a compact fixed-size frameless Electron window with version, account, download, launch, and settings flows. Reopen background tasks from home; retry failures or copy redacted details from the problem dialog. Closing a dialog keeps the task running. Cancel stops it and becomes unavailable during final commit.
 
 The automated test suite covers accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, local version management, and launcher updates.
 
@@ -59,18 +59,18 @@ The website shows the actual home and account screens and uses the same Desert L
 ## Current limitations
 
 - Public multi-architecture builds are available for Windows, macOS, and Linux. Platform-specific behavior may still vary.
-- Update behavior differs per platform: Linux AppImages replace themselves and restart; Windows stages same-name updates, replaces the EXE after exit, and keeps an `.old` backup (legacy versioned EXEs still update side by side); macOS downloads a zip that must be extracted and replaced manually.
+- Downloaded updates are installed only after choosing “Restart and install.” Windows preserves the current EXE name. macOS uses system `ditto` to validate and replace the `.app`, with a manual ZIP fallback for unwritable directories, read-only media, or App Translocation. Linux replaces the AppImage. The old app exits only after a helper handshake. Confirmation requires the new window, preload bridge, and local interface to load successfully; unconfirmed updates retain their backup and offer retry or recovery.
+- Update records are isolated by installation path. A healthy update retains one rollback generation and cleans only older files owned by that record. Untracked Windows EXEs and `.old` files can be selected manually in settings and moved to the recycle bin. Update cleanup excludes game data.
 - Microsoft sign-in depends on the launcher's Azure application registration being accepted by Minecraft Services. Provider-side policy or registration changes can make login unavailable.
 - LittleSkin Yggdrasil works only when both client and server are configured for the same authentication service. It does not replace a premium account or grant access to premium-only servers. See the [LittleSkin manual](https://manual.littlesk.in/yggdrasil/).
-- CurseForge installation depends on downloadable file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Packs containing restricted or unavailable files may fail.
+- CurseForge installation depends on file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Missing trusted hashes require a metadata requery before local import. Removed files may remain unavailable.
 - Quilt modpacks are supported; compatibility depends on the game version and mods.
-- Modpack handling and user-facing failure recovery are still being refined.
+- Manual-file recovery sessions last only within the current window. Changing the game directory or archive, or restarting, requires selecting the pack again. Linux ARMv7 packages have not passed native startup validation.
 
 ## Requirements
 
 - Windows 10/11, macOS, or Linux, with a download matching the device architecture
-- Node.js 22 or later
-- npm compatible with the committed lockfile
+- Node.js `26.10.0` and npm `11.13.0` for source development and builds
 - An internet connection for metadata, game files, authentication, and managed Java downloads
 - A legally owned Minecraft: Java Edition account for authenticated online play
 
@@ -99,6 +99,8 @@ Download, loader, modpack, Java download and game-launch services initialize on 
 | `npm run check` | Syntax-check the main, preload, and renderer JavaScript |
 | `npm test` | Run the Node.js test suite |
 | `npm run smoke` | Load the Electron window with temporary user data and exit |
+| `npm run verify:toolchain` | Verify pinned Node, npm, Electron, and electron-builder versions |
+| `npm run build -- --target windows-x64` | Build one target through the shared entry point without publishing |
 | `npm run build:win` | Build Windows portable EXE with a persistent runtime |
 | `npm run build:linux` | Build Linux AppImage |
 | `npm run build:mac` | Build macOS zip packages |
@@ -140,14 +142,11 @@ Security-sensitive reports should not include account files, access tokens, refr
 
 Java stdout and stderr are saved under `launcher-cache/game-logs` in the game root. Each log is limited to 2 MiB, with five recent logs retained by default; logs for running games remain available. Known account tokens and common credential fields are redacted, and full launch commands are not recorded. Crash messages include the log path. Check usernames, server addresses, and other personal details before sharing a log.
 
-Modpack previews read only the manifest. SHA-1-verified downloads are cached under `launcher-cache/modpack-files` in the game root and survive failed or cancelled installations. Every reuse verifies the file again; files without a valid hash are not cached. To reclaim space, remove this cache directory after closing games and stopping installations.
+Modpack previews and installation share archive safety checks. Hash-verified downloads are cached under `launcher-cache/modpack-files` in the game root and survive failed or cancelled installations. Every reuse verifies the file again; files without trusted hashes are not cached. Local imports are copied to a temporary file before verification; renamed files are accepted when their hashes match. All downloads finish or stop and partial instances are removed before waiting for missing files.
 
-## Next steps
+Internal staging directories are hidden from the instance list. Startup scans and later installations reclaim only inactive crash residue with a valid launcher ownership marker and a safe path, retaining verified downloads. Failed cleanup can be retried later. To reclaim cache space, remove the cache directory after closing games and stopping installations.
 
-- Finish modpack compatibility and recovery paths.
-- Improve error messages and cancellation behavior across the UI.
-- Improve repeatable multi-platform builds and release artifacts.
-- Polish per-platform update installation (Windows old-file cleanup and automatic macOS replacement).
+Builds use a pinned toolchain, a committed lockfile, one platform target definition, and clean isolated output directories. Manually dispatched CI produces eight packages, checksum sidecars, `SHA256SUMS`, a build manifest, and seven native startup/upgrade reports without public publication. Version tags publish only after validation. Repeatability means fixed inputs and traceable outputs, not identical bytes. See [release validation](docs/ci-release-validation.md).
 
 ## Historical references
 

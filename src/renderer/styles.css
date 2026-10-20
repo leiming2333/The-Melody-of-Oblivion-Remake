@@ -644,6 +644,10 @@ textarea {
   letter-spacing: 0.16em;
 }
 
+.deck-status #gameStatus { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-status button { flex-shrink: 0; padding: 3px; font-size: 10px; }
+.deck-status button[hidden] { display: none; }
+
 .status-light {
   width: 7px;
   height: 7px;
@@ -1051,6 +1055,9 @@ textarea {
 
 .version-dialog form {
   padding: 22px 24px 20px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .account-dialog form {
@@ -2131,6 +2138,22 @@ progress:indeterminate::-moz-progress-bar {
   opacity: 0.48;
 }
 
+.launcher-update-setting > button[hidden], .task-actions button[hidden],
+.modpack-recovery[hidden], .history-files[hidden], .setting-group[hidden] { display: none; }
+.launcher-update-setting { flex-wrap: wrap; }
+.task-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.modpack-recovery { margin: 12px 0; padding: 12px; border: 1px solid rgba(239,170,131,.35); border-radius: 5px; }
+.modpack-recovery > strong { font-size: 12px; color: #efaa83; }
+.modpack-recovery p { font-size: 11px; line-height: 1.7; color: rgba(255,255,255,.7); }
+.modpack-recovery ul, .history-files { list-style: none; margin: 10px 0; padding: 0; max-height: 150px; overflow-y: auto; }
+.modpack-recovery li { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.08); }
+.modpack-recovery li > span { min-width: 0; flex: 1; font-size: 11px; overflow-wrap: anywhere; }
+.modpack-recovery li button { flex-shrink: 0; font-size: 10px; padding: 6px; }
+.modpack-recovery button:disabled { opacity: .5; cursor: wait; }
+.history-files li { padding: 7px 0; font-size: 11px; overflow-wrap: anywhere; }
+.history-files label { display: flex; align-items: flex-start; gap: 8px; }
+.history-files small { display: block; margin-top: 4px; color: rgba(255,255,255,.55); }
+
 .launcher-update-notes-setting {
   margin-top: 10px;
 }
@@ -2164,13 +2187,17 @@ progress:indeterminate::-moz-progress-bar {
   flex: 1;
 }
 
-.dialog-actions button {
+.dialog-actions button,
+.task-actions button,
+#launcherHistoryButton {
   min-width: 78px;
   height: 32px;
   border-radius: 3px;
   cursor: pointer;
   font-size: 10px;
 }
+
+.task-actions button, #launcherHistoryButton { padding: 0 12px; }
 
 .dialog-actions button:disabled,
 .dialog-close:disabled {
@@ -2319,6 +2346,11 @@ progress:indeterminate::-moz-progress-bar {
 .problem-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 120px; overflow-y: auto; }
 .problem-dialog .dialog-actions { flex-wrap: wrap; }
 .problem-dialog button[hidden] { display: none; }
+.problem-dialog .dialog-header { gap: 12px; }
+.problem-dialog .dialog-header > div { min-width: 0; }
+.problem-dialog .dialog-header h2 { font-size: 22px; overflow-wrap: anywhere; }
+.problem-dialog .dialog-close { flex-shrink: 0; }
+#modpackConfirmSummary { white-space: pre-line; }
 
 .toast {
   position: fixed;

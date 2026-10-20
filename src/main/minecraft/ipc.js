@@ -1,6 +1,8 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { createLazyServices } = require('../lazy-services');
+const { createTaskError, registerTaskHandler } = require('../../shared/task-errors');
 
 function systemGameDirectory(app, platform = process.platform) {
   if (platform === 'win32') return path.join(app.getPath('appData'), '.minecraft');
@@ -47,22 +49,31 @@ function registerMinecraftIpc({
   getJavaProbeCache = () => javaProbeCache
 }) {
   const activeDownloads = new Map();
-  const preparingJavaDownloads = new Map();
   let gameDirectory;
   let services;
   let serviceSettings;
 
-  async function ensureMinecraftServices(settings) {
+  async function ensureMinecraftServices(settings, preparingTask) {
     const settingsStore = getSettingsStore();
     const currentSettings = settings ?? (settingsStore
       ? await settingsStore.getState()
       : { gameDirectoryMode: 'local' });
     const requestedDirectory = resolveGameDirectory(app, currentSettings.gameDirectoryMode);
-    if (gameDirectory === requestedDirectory) return currentSettings;
-    if (activeDownloads.size > 0) {
+    if (preparingTask?.controller.signal.aborted) throw createTaskError('TASK_CANCELLED', '下载已取消');
+    if (gameDirectory === requestedDirectory) {
+      if (preparingTask) Object.assign(preparingTask, { directory: gameDirectory, preparing: false });
+      return currentSettings;
+    }
+    if ([...activeDownloads.values()].some((task) => task !== preparingTask && !task.preparing)) {
       throw new Error('请先等待下载完成或取消下载，再切换游戏目录');
     }
 
+    const oldManager = services?.peek('modpackManager');
+    for (const [ownerId, entry] of recoveryOwners) {
+      oldManager?.discardOwnerSessions?.(ownerId);
+      entry.sender.removeListener('destroyed', entry.listener);
+    }
+    recoveryOwners.clear();
     gameDirectory = requestedDirectory;
     serviceSettings = { ...currentSettings };
     const config = serviceSettings;
@@ -116,15 +127,21 @@ function registerMinecraftIpc({
         return new AuthlibInjectorManager({ gameDirectory: directory });
       }
     });
+    if (preparingTask) Object.assign(preparingTask, { directory: gameDirectory, preparing: false });
     return currentSettings;
   }
 
-  async function applyDownloadSettings() {
+  async function applyDownloadSettings(task) {
     const settingsStore = getSettingsStore();
     const settings = settingsStore
       ? await settingsStore.getState()
       : { gameDirectoryMode: 'local', downloadConcurrency: 32, downloadSource: 'auto' };
-    await ensureMinecraftServices(settings);
+    await ensureMinecraftServices(settings, task);
+    if (task) {
+      task.directory = gameDirectory;
+      task.preparing = false;
+      if (task.controller.signal.aborted) throw createTaskError('TASK_CANCELLED', '下载已取消');
+    }
     Object.assign(serviceSettings, settings);
     const sourceManager = services.peek('sourceManager');
     sourceManager?.setDownloadPreference(settings.downloadSource);
@@ -139,24 +156,56 @@ function registerMinecraftIpc({
     return settings;
   }
 
-  async function runDownloadTask(event, taskId, runner) {
-    const registryId = `${event.sender.id}:${taskId}`;
-    if (activeDownloads.has(registryId)) {
-      throw new Error('该游戏版本正在下载中');
+  const recoveryOwners = new Map();
+  function recoveryOutcome(sender, result) {
+    const old = recoveryOwners.get(sender.id);
+    if (result?.status === 'waiting-for-files' && !old) {
+      const listener = () => {
+        services?.peek('modpackManager')?.discardOwnerSessions?.(sender.id);
+        recoveryOwners.delete(sender.id);
+      };
+      sender.once('destroyed', listener);
+      recoveryOwners.set(sender.id, { sender, listener });
+    } else if (result?.status !== 'waiting-for-files' && old) {
+      sender.removeListener('destroyed', old.listener);
+      recoveryOwners.delete(sender.id);
     }
-
+    return result;
+  }
+  async function runDownloadTask(event, kind, runner, options = {}) {
+    const taskId = typeof options.taskId === 'string' && /^[\w-]{1,100}$/.test(options.taskId)
+      ? options.taskId : randomUUID();
+    const registryId = `${event.sender.id}:${kind}:${taskId}`;
+    const javaTask = kind === 'java-runtime';
+    if ([...activeDownloads.values()].some((task) => javaTask
+      ? task.kind === 'java-runtime' : task.kind !== 'java-runtime')) {
+      throw createTaskError('TASK_BUSY', javaTask ? 'Java 运行环境正在下载中' : '请先等待当前安装完成或取消');
+    }
     const controller = new AbortController();
-    const task = { controller, senderId: event.sender.id, taskId };
-    const abortWhenDestroyed = () => controller.abort();
+    const task = { controller, senderId: event.sender.id, taskId, kind, preparing: true, cancellable: true };
+    const abortWhenDestroyed = () => {
+      controller.abort();
+      services?.peek('modpackManager')?.discardOwnerSessions?.(event.sender.id);
+      recoveryOwners.delete(event.sender.id);
+    };
     activeDownloads.set(registryId, task);
     event.sender.once('destroyed', abortWhenDestroyed);
-
+    const report = (progress) => {
+      task.phase = progress.phase;
+      if (progress.cancellable === false) task.cancellable = false;
+      if (!event.sender.isDestroyed()) event.sender.send(javaTask
+        ? 'minecraft:java-download-progress' : 'minecraft:download-progress', {
+        ...progress, taskId, cancellable: task.cancellable
+      });
+    };
     try {
-      return await runner(controller.signal);
+      report({ phase: 'preparing', message: '正在准备任务…' });
+      return await runner(controller.signal, report, task);
     } catch (error) {
       if (controller.signal.aborted || error.name === 'AbortError') {
-        throw new Error('下载已取消');
+        throw createTaskError('TASK_CANCELLED', '下载已取消', { phase: task.phase });
       }
+      if (!error.phase) error.phase = task.phase;
       throw error;
     } finally {
       event.sender.removeListener('destroyed', abortWhenDestroyed);
@@ -208,68 +257,83 @@ function registerMinecraftIpc({
       : { available: false };
   });
 
-  ipcMain.handle('minecraft:download-java', async (event, majorVersion) => {
-    if (preparingJavaDownloads.size > 0
-        || [...activeDownloads.values()].some((task) => task.taskId === 'java-runtime')) {
-      throw new Error('Java 运行环境正在下载中');
-    }
-    const controller = new AbortController();
-    const abortWhenDestroyed = () => controller.abort();
-    preparingJavaDownloads.set(event.sender.id, controller);
-    event.sender.once('destroyed', abortWhenDestroyed);
-    try {
-      const settings = await applyDownloadSettings();
-      if (controller.signal.aborted || event.sender.isDestroyed()) throw new Error('下载已取消');
+  registerTaskHandler(ipcMain, 'minecraft:download-java', (event, majorVersion, options = {}) => (
+    runDownloadTask(event, 'java-runtime', async (signal, report, task) => {
+      const settings = await applyDownloadSettings(task);
       const runtime = services.javaRuntime;
       runtime.segmentConcurrency = Math.min(12, Math.max(4, Math.floor(settings.downloadConcurrency / 2)));
-      return await runDownloadTask(event, 'java-runtime', async (signal) => {
-        const javaPath = await runtime.ensureInstalled(majorVersion, (progress) => {
-          if (!event.sender.isDestroyed()) {
-            event.sender.send('minecraft:java-download-progress', progress);
-          }
-        }, AbortSignal.any([signal, controller.signal]));
-        return { javaPath, majorVersion };
-      });
-    } finally {
-      preparingJavaDownloads.delete(event.sender.id);
-      event.sender.removeListener('destroyed', abortWhenDestroyed);
-    }
-  });
+      const javaPath = await runtime.ensureInstalled(majorVersion, report, signal);
+      return { javaPath, majorVersion };
+    }, options)
+  ));
 
   ipcMain.handle('minecraft:cancel-java-download', async (event) => {
-    const task = activeDownloads.get(`${event.sender.id}:java-runtime`);
-    const controller = task?.controller ?? preparingJavaDownloads.get(event.sender.id);
+    const task = [...activeDownloads.values()].find((entry) => entry.senderId === event.sender.id
+      && entry.kind === 'java-runtime');
+    const controller = task?.controller;
     if (!controller || controller.signal.aborted) return { cancelled: 0 };
     controller.abort();
     return { cancelled: 1 };
   });
 
-  ipcMain.handle('minecraft:inspect-modpack', async (_event, filePath) => {
+  registerTaskHandler(ipcMain, 'minecraft:inspect-modpack', (event, filePath, options = {}) => (
+    runDownloadTask(event, 'inspect-modpack', async (signal, _report, task) => {
+      await applyDownloadSettings(task);
+      return services.modpackManager.inspect(filePath, { signal });
+    }, options)
+  ));
+
+  registerTaskHandler(ipcMain, 'minecraft:install-modpack', (event, filePath, options = {}) => (
+    runDownloadTask(event, 'modpack', async (signal, report, task) => {
+      await applyDownloadSettings(task);
+      const manager = services.modpackManager;
+      manager.discardOwnerSessions?.(event.sender.id);
+      const result = await manager.install(filePath, report, {
+        signal, installOptionalFiles: options.installOptionalFiles === true, ownerId: event.sender.id
+      });
+      return recoveryOutcome(event.sender, result);
+    }, options)
+  ));
+
+  registerTaskHandler(ipcMain, 'minecraft:resume-modpack', (event, sessionId, options = {}) => (
+    runDownloadTask(event, 'modpack', async (signal, report, task) => {
+      await applyDownloadSettings(task);
+      const result = await services.modpackManager.resume(sessionId, report, { signal, ownerId: event.sender.id });
+      return recoveryOutcome(event.sender, result);
+    }, options)
+  ));
+
+  registerTaskHandler(ipcMain, 'minecraft:select-missing-modpack-file', (event, sessionId, identity, options = {}) => (
+    runDownloadTask(event, 'modpack-file', async (signal, _report, task) => {
+      await applyDownloadSettings(task);
+      const manager = services.modpackManager;
+      await manager.getRecoveryState(sessionId, { ownerId: event.sender.id });
+      if (!dialog) throw new Error('文件选择服务不可用');
+      const selection = await dialog.showOpenDialog(BrowserWindow?.fromWebContents?.(event.sender), {
+        title: '选择下载的整合包文件', properties: ['openFile'],
+        filters: [{ name: '整合包文件', extensions: ['jar', 'zip'] }, { name: '所有文件', extensions: ['*'] }]
+      });
+      if (signal.aborted) throw createTaskError('TASK_CANCELLED', '下载已取消');
+      if (selection.canceled || !selection.filePaths.length) return { canceled: true };
+      return manager.importMissingFile(sessionId, {
+        projectId: identity?.projectId, fileId: identity?.fileId, filePath: selection.filePaths[0]
+      }, { signal, ownerId: event.sender.id });
+    }, options)
+  ));
+
+  registerTaskHandler(ipcMain, 'minecraft:discard-modpack-session', async (event, sessionId) => {
     await ensureMinecraftServices();
-    return services.modpackManager.inspect(filePath);
+    const result = await services.modpackManager.discardSession(sessionId, { ownerId: event.sender.id });
+    recoveryOutcome(event.sender, null);
+    return result;
   });
 
-  ipcMain.handle('minecraft:install-modpack', async (event, filePath, options = {}) => {
-    await applyDownloadSettings();
-    return runDownloadTask(event, `modpack:${path.basename(String(filePath ?? ''))}`, (signal) => (
-      services.modpackManager.install(filePath, (progress) => {
-        if (!event.sender.isDestroyed()) {
-          event.sender.send('minecraft:download-progress', progress);
-        }
-      }, { signal, installOptionalFiles: options.installOptionalFiles === true })
-    ));
-  });
-
-  ipcMain.handle('minecraft:download-version', async (event, versionId) => {
-    await applyDownloadSettings();
-    return runDownloadTask(event, `vanilla:${versionId}`, (signal) => (
-      services.downloader.installVersion(versionId, (progress) => {
-        if (!event.sender.isDestroyed()) {
-          event.sender.send('minecraft:download-progress', progress);
-        }
-      }, { signal })
-    ));
-  });
+  registerTaskHandler(ipcMain, 'minecraft:download-version', (event, versionId, options = {}) => (
+    runDownloadTask(event, 'vanilla', async (signal, report, task) => {
+      await applyDownloadSettings(task);
+      return services.downloader.installVersion(versionId, report, { signal });
+    }, options)
+  ));
 
   ipcMain.handle('minecraft:list-loaders', async (_event, request = {}) => {
     await applyDownloadSettings();
@@ -280,28 +344,26 @@ function registerMinecraftIpc({
     );
   });
 
-  ipcMain.handle('minecraft:install-loader', async (event, request = {}) => {
-    await applyDownloadSettings();
-    const taskId = `${request.gameVersion}:${request.loaderType}:${request.loaderVersion ?? ''}`;
-    return runDownloadTask(event, taskId, (signal) => (
-      services.loaderManager.installLoader(request, (progress) => {
-        if (!event.sender.isDestroyed()) {
-          event.sender.send('minecraft:download-progress', progress);
-        }
-      }, { signal })
-    ));
-  });
+  registerTaskHandler(ipcMain, 'minecraft:install-loader', (event, request = {}) => (
+    runDownloadTask(event, 'loader', async (signal, report, task) => {
+      await applyDownloadSettings(task);
+      return services.loaderManager.installLoader(request, report, { signal });
+    }, request)
+  ));
 
-  ipcMain.handle('minecraft:cancel-download', async (event) => {
+  ipcMain.handle('minecraft:cancel-download', async (event, options = {}) => {
     let cancelled = 0;
+    let committing = false;
     for (const task of activeDownloads.values()) {
-      if (task.senderId === event.sender.id && task.taskId !== 'java-runtime'
+      if (task.senderId === event.sender.id && task.kind !== 'java-runtime'
+          && (!options.taskId || task.taskId === options.taskId)
           && !task.controller.signal.aborted) {
+        if (!task.cancellable) { committing = true; continue; }
         task.controller.abort();
         cancelled += 1;
       }
     }
-    return { cancelled };
+    return committing ? { cancelled, committing: true } : { cancelled };
   });
 
   ipcMain.handle('minecraft:verify-version', async (event, versionId) => {

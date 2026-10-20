@@ -1,4 +1,21 @@
-const environment = window.launcherEnvironment;
+function taskApi(api) {
+  if (!api) return api;
+  return Object.fromEntries(Object.entries(api).map(([name, value]) => [name,
+    typeof value !== 'function' ? value : (...args) => {
+      const result = value(...args);
+      if (!result || typeof result.then !== 'function') return result;
+      return result.then((payload) => {
+        if (!payload?.__launcherTaskError) return payload;
+        const detail = payload.__launcherTaskError;
+        throw Object.assign(new Error(detail.message), detail);
+      });
+    }
+  ]));
+}
+
+const bridgeEnvironment = window.launcherEnvironment;
+const environment = bridgeEnvironment ? { ...bridgeEnvironment,
+  minecraft: taskApi(bridgeEnvironment.minecraft), updater: taskApi(bridgeEnvironment.updater) } : undefined;
 const localGameDirectoryHint = '游戏文件将生成在启动器所在目录的 .minecraft 文件夹中。';
 const windowControls = environment?.windowControls;
 const minecraft = environment?.minecraft;
@@ -65,6 +82,9 @@ const deleteVersionButton = document.querySelector('#deleteVersionButton');
 const clearVersionSelectionButton = document.querySelector('#clearVersionSelectionButton');
 const downloadVersionButton = document.querySelector('#downloadVersionButton');
 const cancelDownloadButton = document.querySelector('#cancelDownloadButton');
+const taskButton = document.querySelector('#taskButton');
+const homeCancelDownloadButton = document.querySelector('#homeCancelDownloadButton');
+const retryTaskButton = document.querySelector('#retryTaskButton');
 const downloadStatus = document.querySelector('#downloadStatus');
 const downloadMessage = document.querySelector('#downloadMessage');
 const downloadStage = document.querySelector('#downloadStage');
@@ -99,6 +119,16 @@ const launcherUpdateNotes = document.querySelector('#launcherUpdateNotes');
 const launcherUpdateStatus = document.querySelector('#launcherUpdateStatus');
 const launcherUpdateProgress = document.querySelector('#launcherUpdateProgress');
 const launcherUpdateButton = document.querySelector('#launcherUpdateButton');
+const launcherUpdateCancelButton = document.querySelector('#launcherUpdateCancelButton');
+const launcherUpdateRecovery = document.querySelector('#launcherUpdateRecovery');
+const launcherUpdateRecoveryMessage = document.querySelector('#launcherUpdateRecoveryMessage');
+const launcherUpdateRetryButton = document.querySelector('#launcherUpdateRetryButton');
+const launcherUpdateRollbackButton = document.querySelector('#launcherUpdateRollbackButton');
+const launcherUpdateKeepButton = document.querySelector('#launcherUpdateKeepButton');
+const launcherHistorySetting = document.querySelector('#launcherHistorySetting');
+const launcherHistoryButton = document.querySelector('#launcherHistoryButton');
+const launcherHistoryList = document.querySelector('#launcherHistoryList');
+const launcherHistoryCleanupButton = document.querySelector('#launcherHistoryCleanupButton');
 const launcherVersionMeta = document.querySelector('#launcherVersionMeta');
 const updateStatusBadge = document.querySelector('#updateStatusBadge');
 const updateBadgeRefresh = document.querySelector('#updateBadgeRefresh');
@@ -133,6 +163,9 @@ let versionVerifyActive = false;
 let modpackInstallActive = false;
 let launchRequestActive = false;
 let downloadCancelRequested = false;
+let activeTaskId = '';
+let downloadCancellable = true;
+let javaDownloadTaskId = '';
 let activeDownloadLabel = '';
 let lastDownloadProgress = null;
 let loaderVersions = [];
@@ -170,8 +203,11 @@ async function withLauncherUpdateUi(callback) {
         elements: { launcherUpdateStatus, launcherVersionMeta, updateStatusBadge, updateStatusBadgeSvg,
           updateBadgeRefresh, updateBadgeCheck, updateBadgeDownload, updateBadgeError,
           launcherUpdateProgress, launcherUpdateButton, launcherUpdateNotesSetting,
-          launcherUpdateNotes, settingsDialog },
-        ensureSettingsOpen
+          launcherUpdateNotes, settingsDialog, launcherUpdateCancelButton, launcherUpdateRecovery,
+          launcherUpdateRecoveryMessage, launcherUpdateRetryButton, launcherUpdateRollbackButton,
+          launcherUpdateKeepButton, launcherHistorySetting, launcherHistoryButton, launcherHistoryList,
+          launcherHistoryCleanupButton },
+        ensureSettingsOpen, confirmRollback: async (version) => window.confirm(`恢复到上一版本 ${version ?? ''}？启动器将重新启动，游戏数据会保留。`)
       })
     )).catch((error) => {
       launcherUpdateUiModule = undefined;
@@ -303,15 +339,32 @@ function delay(milliseconds) {
 function readableError(error) {
   const message = error?.message ?? String(error);
   globalThis.window?.launcherEnvironment?.diagnostics?.reportError?.(message);
-  return message.replace(/^Error invoking remote method '[^']+': Error: /, '');
+  return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [REDACTED]')
+    .replace(/((?:access[_-]?token|refresh[_-]?token|password|clientToken)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1[REDACTED]')
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED]');
 }
 
-function problemGuidance(message) {
+function problemGuidance(message, code, domain) {
+  if (code === 'ENOSPC' || /ENOSPC|空间不足|磁盘已满/.test(message)) {
+    return { title: '存储空间不足', message: '当前目录没有足够空间完成操作。',
+      advice: '释放磁盘空间后重试。已通过校验的整合包缓存会保留；请勿删除存档来处理此问题。' };
+  }
+  if (code === 'MODPACK_OPTIONAL_SKIPPED') {
+    return { title: '部分可选文件未安装', message: '整合包已安装完成，部分可选内容暂时不可用。',
+      advice: '可以先启动游戏。下方列出未安装的可选文件及原因。' };
+  }
+  if (/SESSION|SOURCE_CHANGED|ARCHIVE_CHANGED/.test(code ?? '')) {
+    return { title: '需要重新导入整合包', message: '原整合包文件、游戏目录或恢复会话已改变。',
+      advice: '重新拖入整合包。之前已校验的下载仍可复用。' };
+  }
   if (/需要 Java|未找到可用的 Java|未检测到.*Java|无法启动 Java|不是可用的 Java/.test(message)) {
     return { title: 'Java 环境不可用', message: '当前 Java 环境不符合游戏要求，或所选程序无法运行。',
       advice: '打开「启动设置」，重新检测 Java 或下载游戏要求的版本，也可以手动选择 Java 安装目录中的可执行文件。', settings: true };
   }
   if (/SHA-?\d+|校验失败|校验.*不符|文件.*损坏|清单已损坏|文件缺失|不完整/i.test(message)) {
+    if (domain === 'update') return { title: '更新包校验未通过', message: '更新包不完整或与官方摘要不符。',
+      advice: '重新下载更新包后再安装，当前启动器和回退备份会保留。' };
     return { title: '游戏文件不完整', message: '文件缺失、损坏或校验不匹配，当前操作无法完成。',
       advice: '在版本管理中重新验证或下载该版本；整合包请重新获取可信来源的文件。保留存档和 mods，不要直接删除整个游戏目录。' };
   }
@@ -353,18 +406,26 @@ function problemGuidance(message) {
   return { title: '操作未完成', message, advice: '请根据错误信息检查账户、网络或启动设置。若重试后仍失败，请将下方错误信息反馈给启动器维护者。' };
 }
 
-function showProblem(error, title = '操作未完成') {
+function showProblem(error, title = '操作未完成', options = {}) {
   const message = readableError(error);
-  const guidance = problemGuidance(message);
+  const guidance = problemGuidance(message, error?.code, options.domain);
   const dialog = document.querySelector('#problemDialog');
   document.querySelector('#problemTitle').textContent = guidance.title === '操作未完成' ? title : guidance.title;
   document.querySelector('#problemMessage').textContent = guidance.message;
   document.querySelector('#problemAdvice').textContent = guidance.advice;
-  document.querySelector('#problemError').textContent = message;
+  document.querySelector('#problemError').textContent = [error?.code ? `错误代码：${error.code}` : '',
+    error?.phase ? `阶段：${error.phase}` : '', message].filter(Boolean).join('\n');
   document.querySelector('#problemDetails').open = false;
   document.querySelector('#problemAccountButton').hidden = !guidance.account;
   const settingsButton = document.querySelector('#problemSettingsButton');
   if (settingsButton) settingsButton.hidden = !guidance.settings;
+  const retryButton = document.querySelector('#problemRetryButton');
+  if (retryButton) {
+    retryButton.hidden = typeof options.retry !== 'function';
+    retryButton.onclick = typeof options.retry !== 'function' ? null : () => {
+      dialog.close(); void options.retry();
+    };
+  }
   if (!dialog.open) dialog.showModal();
 }
 
@@ -736,6 +797,7 @@ javaDownloadVersionSelect.addEventListener('change', () => {
 
 minecraft?.onJavaDownloadProgress?.((progress) => {
   if (!javaDownloadActive) return;
+  if (progress.taskId && progress.taskId !== javaDownloadTaskId) return;
   javaDownloadHint.textContent = progress.message ?? '正在准备 Java 运行环境';
   const percent = renderProgressBar(javaDownloadProgress, progress.receivedBytes, progress.totalBytes);
   javaDownloadPercent.textContent = percent === null ? '—' : `${percent}%`;
@@ -758,6 +820,7 @@ javaDownloadStartButton.addEventListener('click', async () => {
   javaRequirementRequest += 1;
   const majorVersion = Number(javaDownloadVersionSelect.value);
   javaDownloadActive = true;
+  javaDownloadTaskId = crypto.randomUUID();
   javaDownloadCancelButton.disabled = false;
   javaDownloadProgress.hidden = false;
   javaDownloadProgress.removeAttribute('value');
@@ -765,7 +828,7 @@ javaDownloadStartButton.addEventListener('click', async () => {
   javaDownloadHint.textContent = `正在准备 Java ${majorVersion}`;
   renderJavaDownloadState();
   try {
-    const result = await minecraft.downloadJava(majorVersion);
+    const result = await minecraft.downloadJava(majorVersion, { taskId: javaDownloadTaskId });
     autoJavaDetectionPromise = null;
     rememberJavaPath(result.javaPath, majorVersion);
     renderJavaPathSetting();
@@ -779,10 +842,12 @@ javaDownloadStartButton.addEventListener('click', async () => {
     javaDownloadProgress.hidden = true;
     javaDownloadPercent.textContent = '';
     javaDownloadHint.textContent = readableError(error);
-    const cancelled = javaDownloadHint.textContent.includes('下载已取消');
+    const cancelled = error?.code === 'TASK_CANCELLED' || error?.name === 'AbortError' || javaDownloadHint.textContent === '下载已取消';
     showToast(cancelled ? javaDownloadHint.textContent : `下载失败：${javaDownloadHint.textContent}`, !cancelled);
+    if (!cancelled) showProblem(error, 'Java 下载未完成', { domain: 'java' });
   } finally {
     javaDownloadActive = false;
+    javaDownloadTaskId = '';
     renderJavaDownloadState();
   }
 });
@@ -1002,6 +1067,7 @@ function fallbackLoaderResult(gameVersion, loaderType) {
 }
 
 function updateDownloadProgress(progress) {
+  if (progress.taskId && progress.taskId !== activeTaskId) return;
   if (progress.sourceLabel) {
     const measured = Number(progress.sourceThroughput);
     const speed = Number.isFinite(measured) && measured > 0
@@ -1010,7 +1076,12 @@ function updateDownloadProgress(progress) {
   }
   lastDownloadProgress = progress;
   if (!versionDownloadActive) return;
-  if (downloadCancelRequested && progress.phase !== 'complete') return;
+  if (progress.cancellable === false) downloadCancellable = false;
+  cancelDownloadButton.disabled = downloadCancelRequested || !downloadCancellable;
+  homeCancelDownloadButton.hidden = !downloadCancellable;
+  homeCancelDownloadButton.disabled = downloadCancelRequested;
+  taskButton.hidden = false;
+  if (downloadCancelRequested && !['complete', 'cancelled', 'failed'].includes(progress.phase)) return;
   downloadStatus.hidden = false;
   downloadMessage.textContent = progress.message ?? '正在准备下载…';
   downloadStage.textContent = {
@@ -1026,6 +1097,10 @@ function updateDownloadProgress(progress) {
     'downloading-files': '整合包下载',
     'copying-overrides': '整理整合包',
     'committing-instance': '保存整合包',
+    'extracting': '解压整合包',
+    'waiting-for-files': '等待补齐',
+    cancelled: '已取消',
+    failed: '未完成',
     complete: '完成'
   }[progress.phase] ?? '下载';
 
@@ -1040,7 +1115,7 @@ function updateDownloadProgress(progress) {
   downloadPercent.textContent = percent === null ? '—' : `${percent}%`;
 
   // 主页状态条同步显示实时下载进度，避免下载进行中误显"下载失败"
-  if (activeDownloadLabel) {
+  if (activeDownloadLabel && !['waiting-for-files', 'cancelled', 'failed'].includes(progress.phase)) {
     if (progress.phase === 'complete') {
       gameStatus.textContent = `${activeDownloadLabel} 下载完成`;
     } else if (['preparing', 'preparing-base', 'installing-base'].includes(progress.phase)) {
@@ -1590,6 +1665,8 @@ async function installSelectedVersion() {
   }
 
   versionDownloadActive = true;
+  activeTaskId = crypto.randomUUID();
+  downloadCancellable = true;
   downloadCancelRequested = false;
   lastDownloadFailed = false;
   activeDownloadLabel = loaderLabel;
@@ -1610,6 +1687,7 @@ async function installSelectedVersion() {
     let result;
     if (minecraft?.installLoader) {
       result = await minecraft.installLoader({
+        taskId: activeTaskId,
         gameVersion: version.id,
         loaderType,
         loaderVersion: loader.version
@@ -1638,7 +1716,7 @@ async function installSelectedVersion() {
     statusBadge.textContent = 'READY';
   } catch (error) {
     const message = readableError(error);
-    const cancelled = downloadCancelRequested || message.includes('下载已取消');
+    const cancelled = error?.code === 'TASK_CANCELLED' || error?.name === 'AbortError' || message === '下载已取消';
     downloadMessage.textContent = cancelled
       ? '下载已取消'
       : `下载失败：${message}。可重新点击「重试」再次下载。`;
@@ -1650,11 +1728,16 @@ async function installSelectedVersion() {
     if (!cancelled) {
       lastDownloadFailed = true;
       showToast(`下载失败：${message}，可点击「重试」重新下载`, true);
+      showProblem(error, '游戏安装未完成', { retry: installSelectedVersion });
     } else {
-      showToast('已取消下载，并清理临时文件');
+      showToast('已取消下载，可重新安装');
     }
   } finally {
     versionDownloadActive = false;
+    activeTaskId = '';
+    downloadCancellable = true;
+    homeCancelDownloadButton.hidden = true;
+    taskButton.hidden = !lastDownloadFailed;
     downloadCancelRequested = false;
     cancelDownloadButton.hidden = true;
     cancelDownloadButton.disabled = false;
@@ -1753,6 +1836,20 @@ document.querySelector('#problemSettingsButton').addEventListener('click', () =>
   document.querySelector('#problemDialog').close();
   void openJavaSettings();
 });
+document.querySelector('#problemCopyButton').addEventListener('click', async () => {
+  try {
+    await environment?.diagnostics?.copyError?.(document.querySelector('#problemError').textContent);
+    showToast('已复制脱敏后的错误详情');
+  } catch (error) { showToast(`复制失败：${readableError(error)}`, true); }
+});
+
+function openActiveTask() {
+  if (!versionDialog.open) versionDialog.showModal();
+  downloadStatus.scrollIntoView?.({ block: 'nearest' });
+}
+taskButton.addEventListener('click', openActiveTask);
+homeCancelDownloadButton.addEventListener('click', () => cancelDownloadButton.click());
+retryTaskButton.addEventListener('click', () => { void withModpackUi((ui) => ui.retry()); });
 
 addOfflineButton.addEventListener('click', addOfflineAccount);
 offlineNameInput.addEventListener('keydown', (event) => {
@@ -1830,6 +1927,7 @@ settingsDialog.addEventListener('close', async () => {
         renderJavaPathSetting();
         void refreshAutoJavaDetection();
         invalidateVersionCatalogForDirectoryChange();
+        if (modpackUiModule) (await modpackUiModule).directoryChanged();
         await reloadLocalProfilesForDirectoryChange();
       }
       const sourceLabel = {
@@ -1933,13 +2031,20 @@ deleteVersionButton.addEventListener('click', deleteSelectedVersion);
 clearVersionSelectionButton.addEventListener('click', clearVersionSelection);
 downloadVersionButton.addEventListener('click', installSelectedVersion);
 cancelDownloadButton.addEventListener('click', async () => {
-  if (!versionDownloadActive || downloadCancelRequested) return;
+  if (!versionDownloadActive || downloadCancelRequested || !downloadCancellable) return;
   downloadCancelRequested = true;
   cancelDownloadButton.disabled = true;
   downloadMessage.textContent = '正在取消下载并清理临时文件…';
   statusBadge.textContent = 'CANCEL';
   try {
-    await minecraft?.cancelDownload?.();
+    const result = await minecraft?.cancelDownload?.({ taskId: activeTaskId });
+    if (result?.committing || result?.cancelled === 0) {
+      downloadCancelRequested = false;
+      downloadCancellable = !result.committing;
+      cancelDownloadButton.disabled = Boolean(result.committing);
+      homeCancelDownloadButton.hidden = Boolean(result.committing);
+      downloadMessage.textContent = result.committing ? '正在保存实例，完成后即可使用' : '任务正在结束，请稍候…';
+    }
   } catch (error) {
     downloadCancelRequested = false;
     cancelDownloadButton.disabled = false;
@@ -2021,14 +2126,29 @@ if (minecraft?.onLaunchStatus) {
 }
 
 let modpackUiModule;
-async function installDroppedModpack(filePath) {
+async function confirmModpack(info) {
+  const dialog = document.querySelector('#modpackConfirmDialog');
+  document.querySelector('#modpackConfirmTitle').textContent = info.name;
+  const optionalCount = Number(info.optionalFileCount ?? 0);
+  document.querySelector('#modpackConfirmSummary').textContent = [
+    `${info.format === 'modrinth' ? 'Modrinth' : 'CurseForge'} · Minecraft ${info.gameVersion}`,
+    `${loaderNames[info.loaderType] ?? info.loaderType} ${info.loaderVersion ?? ''}`,
+    `必需文件 ${info.requiredFileCount ?? info.fileCount ?? 0} 个，可选文件 ${optionalCount} 个。`
+  ].join('\n');
+  const optionalFiles = document.querySelector('#modpackOptionalFiles');
+  optionalFiles.checked = false;
+  document.querySelector('#modpackOptionalSetting').hidden = optionalCount === 0;
+  dialog.returnValue = '';
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'install'
+      ? { installOptionalFiles: optionalCount > 0 && optionalFiles.checked } : null), { once: true });
+    dialog.showModal();
+  });
+}
+
+async function withModpackUi(callback) {
   try {
-    modpackUiModule ??= import('./modules/modpack-ui.mjs').catch((error) => {
-      modpackUiModule = undefined;
-      throw error;
-    });
-    const { installDroppedModpack } = await modpackUiModule;
-    await installDroppedModpack({ state: {
+    modpackUiModule ??= import('./modules/modpack-ui.mjs').then(({ createModpackUi }) => createModpackUi({ state: {
       get versionDownloadActive() { return versionDownloadActive; },
       set versionDownloadActive(value) { versionDownloadActive = value; },
       get modpackInstallActive() { return modpackInstallActive; },
@@ -2036,13 +2156,38 @@ async function installDroppedModpack(filePath) {
       get downloadCancelRequested() { return downloadCancelRequested; },
       set downloadCancelRequested(value) { downloadCancelRequested = value; },
       get activeDownloadLabel() { return activeDownloadLabel; },
-      set activeDownloadLabel(value) { activeDownloadLabel = value; }
-    }, showToast, minecraft, loaderNames, cancelDownloadButton, downloadStatus, gameStatus,
+      set activeDownloadLabel(value) { activeDownloadLabel = value; },
+      get activeTaskId() { return activeTaskId; },
+      set activeTaskId(value) { activeTaskId = value; },
+      get downloadCancellable() { return downloadCancellable; },
+      set downloadCancellable(value) { downloadCancellable = value; }
+    }, showToast, showProblem, minecraft, loaderNames, cancelDownloadButton, downloadStatus, gameStatus,
       statusBadge, updateDownloadProgress, updateVersionAction, delay, loadLocalProfiles,
-      useVersion, readableError }, filePath);
+      useVersion, readableError, confirmPack: confirmModpack, newTaskId: () => crypto.randomUUID(),
+      openTask: openActiveTask, openExternal: (url) => environment?.shell?.openExternal(url),
+      updateTaskEntry: ({ visible, retry }) => {
+        taskButton.hidden = !visible;
+        retryTaskButton.hidden = !retry;
+        homeCancelDownloadButton.hidden = !versionDownloadActive || !downloadCancellable;
+      }, elements: {
+        recoveryPanel: document.querySelector('#modpackRecoveryPanel'),
+        recoveryTitle: document.querySelector('#modpackRecoveryTitle'),
+        missingFiles: document.querySelector('#modpackMissingFiles'),
+        resumeButton: document.querySelector('#modpackResumeButton'),
+        discardButton: document.querySelector('#modpackDiscardButton')
+      }
+    })).catch((error) => {
+      modpackUiModule = undefined;
+      throw error;
+    });
+    return await callback(await modpackUiModule);
   } catch (error) {
     showToast('整合包界面加载失败：' + readableError(error), true);
   }
+}
+
+async function installDroppedModpack(filePath) {
+  return withModpackUi((ui) => ui.install(filePath));
 }
 
 let modpackDragDepth = 0;
@@ -2236,6 +2381,7 @@ javaCheckDownloadButton.addEventListener('click', () => {
 requestAnimationFrame(() => requestAnimationFrame(async () => {
   environment?.diagnostics?.markStartup('renderer-painted');
   await environment?.diagnostics?.whenWindowShown?.();
+  await environment?.diagnostics?.rendererReady?.();
   setTimeout(() => {
     updaterApi?.getState?.().then(renderLauncherUpdate).catch((error) => {
       renderLauncherUpdate({ status: 'error', message: readableError(error), progress: 0 });

@@ -1,0 +1,29 @@
+name: Setup locked build toolchain
+description: Use the exact Node and npm versions declared by the project.
+inputs:
+  omit-dev:
+    description: Install production dependencies only.
+    default: 'false'
+  skip-electron:
+    description: Skip the Electron runtime download for source checks.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 26.10.0
+        cache: npm
+    - name: Install pinned npm
+      shell: bash
+      run: npm install --global npm@11.13.0 --ignore-scripts
+    - name: Verify toolchain and locked dependency sources
+      shell: bash
+      run: npm run verify:toolchain
+    - name: Install locked dependencies
+      shell: bash
+      env:
+        OMIT_DEV: ${{ inputs.omit-dev }}
+        ELECTRON_SKIP_BINARY_DOWNLOAD: ${{ inputs.skip-electron == 'true' && '1' || '' }}
+      run: |
+        if [ "$OMIT_DEV" = true ]; then npm ci --omit=dev; else npm ci; fi

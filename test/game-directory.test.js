@@ -90,7 +90,11 @@ async function ipcFixture(t, patch = {}) {
   return {
     gameDirectory: systemGameDirectory(app),
     settingsStore,
-    invoke: (channel, sender, ...args) => handlers.get(channel)({ sender }, ...args)
+    invoke: async (channel, sender, ...args) => {
+      const result = await handlers.get(channel)({ sender }, ...args);
+      if (result?.__launcherTaskError) throw Object.assign(new Error(result.__launcherTaskError.message), result.__launcherTaskError);
+      return result;
+    }
   };
 }
 
@@ -254,7 +258,13 @@ test('显式 Java 下载转发版本、分段并发和独立进度频道', async
   });
 
   assert.deepEqual(await invoke('minecraft:download-java', sender, 21), { javaPath, majorVersion: 21 });
-  assert.deepEqual(sender.messages, [{ channel: 'minecraft:java-download-progress', progress }]);
+  assert.equal(sender.messages[0].progress.phase, 'preparing');
+  const latest = sender.messages.at(-1);
+  assert.equal(latest.channel, 'minecraft:java-download-progress');
+  assert.deepEqual({ majorVersion: latest.progress.majorVersion, receivedBytes: latest.progress.receivedBytes,
+    totalBytes: latest.progress.totalBytes }, progress);
+  assert.equal(latest.progress.cancellable, true);
+  assert.equal(typeof latest.progress.taskId, 'string');
   assert.equal(sender.listenerCount('destroyed'), 0);
 });
 
@@ -371,6 +381,6 @@ test('modpack IPC forwards optional-file choices and defaults to required files'
     { filePath: 'pack.mrpack', optional: true, aborted: false },
     { filePath: 'pack.zip', optional: false, aborted: false }
   ]);
-  assert.equal(sender.messages.length, 2);
+  assert.equal(sender.messages.filter(({ progress }) => progress.phase === 'complete').length, 2);
   assert.equal(sender.listenerCount('destroyed'), 0);
 });

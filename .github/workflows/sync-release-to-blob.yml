@@ -4,28 +4,27 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing GitHub Release tag to copy (for example v1.6.1)
+        description: Existing complete release with release-manifest.json
         required: true
         type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: blob-release-sync
+  cancel-in-progress: false
+
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-toolchain
         with:
-          node-version: 22
-          cache: npm
-
-      - name: Install upload dependency
-        run: npm ci --omit=dev
+          omit-dev: 'true'
 
       - name: Download GitHub Release assets
         env:
@@ -37,7 +36,7 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           mkdir -p release-published
           gh release download "$RELEASE_TAG" --repo "$GH_REPO" --dir release-published \
-            --pattern '*.exe' --pattern '*.zip' --pattern '*.AppImage'
+            --pattern '*.exe' --pattern '*.zip' --pattern '*.AppImage' --pattern 'release-manifest.json'
           gh release view "$RELEASE_TAG" --repo "$GH_REPO" \
             --json tagName,name,url,body,publishedAt > release-published/release.json
 

@@ -1,45 +1,69 @@
-name: Verify packaged application
-description: Start the final portable EXE, extracted AppImage, or application from the macOS ZIP.
+name: Verify packaged application and upgrade
+description: Verify the final package version, runtime reuse and platform update transaction.
 inputs:
-  arch:
-    description: Expected architecture in the application's smoke report.
+  target:
     required: true
+    description: Target ID from release-targets.cjs.
+  arch:
+    required: true
+    description: Expected architecture.
+  artifact:
+    required: true
+    description: Final package path.
 runs:
   using: composite
   steps:
-    - name: Windows portable smoke
+    - name: Build isolated previous-version test package
+      shell: bash
+      env:
+        SMOKE_TARGET: ${{ inputs.target }}
+      run: npm run build -- --target "$SMOKE_TARGET" --upgrade-fixture
+    - name: Windows package and runtime smoke
       if: runner.os == 'Windows'
       shell: pwsh
       env:
         SMOKE_ARCH: ${{ inputs.arch }}
+        SMOKE_TARGET: ${{ inputs.target }}
+        SMOKE_ARTIFACT: ${{ inputs.artifact }}
       run: |
-        $artifacts = @(Get-ChildItem -LiteralPath release -Filter *.exe)
-        if ($artifacts.Count -ne 1) { throw 'Expected exactly one portable EXE' }
-        node scripts/verify-packaged.cjs --expected-arch $env:SMOKE_ARCH $artifacts[0].FullName
+        $version = node -p 'require("./package.json").version'
+        node scripts/verify-packaged.cjs --expected-arch $env:SMOKE_ARCH --expected-version $version --report "package-reports/smoke-$env:SMOKE_TARGET.json" --artifact $env:SMOKE_ARTIFACT $env:SMOKE_ARTIFACT
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    - name: Linux AppImage smoke
+        ./scripts/test-portable-runtime.ps1 -Executable $env:SMOKE_ARTIFACT -ExpectedArch $env:SMOKE_ARCH
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $previous = Join-Path "release/upgrade-fixtures/$env:SMOKE_TARGET" (Split-Path -Leaf $env:SMOKE_ARTIFACT)
+        node scripts/verify-upgrade.cjs --target $env:SMOKE_TARGET --artifact $env:SMOKE_ARTIFACT --previous-artifact $previous --report "package-reports/upgrade-$env:SMOKE_TARGET.json"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    - name: Linux package and upgrade smoke
       if: runner.os == 'Linux'
       shell: bash
       env:
         SMOKE_ARCH: ${{ inputs.arch }}
+        SMOKE_TARGET: ${{ inputs.target }}
+        SMOKE_ARTIFACT: ${{ inputs.artifact }}
       run: |
         set -euo pipefail
-        test "$(find release -maxdepth 1 -name '*.AppImage' | wc -l)" -eq 1
-        artifact=$(find release -maxdepth 1 -name '*.AppImage' -print -quit)
+        artifact=$(realpath "$SMOKE_ARTIFACT")
+        version=$(node -p 'require("./package.json").version')
         chmod +x "$artifact"
-        # Extract the final AppImage to avoid a FUSE requirement on CI.
-        "$artifact" --appimage-extract >/dev/null
-        xvfb-run -a node scripts/verify-packaged.cjs --expected-arch "$SMOKE_ARCH" squashfs-root/AppRun --no-sandbox
-    - name: macOS ZIP smoke
+        mkdir -p package-smoke
+        (cd package-smoke && "$artifact" --appimage-extract >/dev/null)
+        xvfb-run -a node scripts/verify-packaged.cjs --expected-arch "$SMOKE_ARCH" --expected-version "$version" --report "package-reports/smoke-$SMOKE_TARGET.json" --artifact "$artifact" package-smoke/squashfs-root/AppRun --no-sandbox
+        previous="release/upgrade-fixtures/$SMOKE_TARGET/$(basename "$artifact")"
+        xvfb-run -a node scripts/verify-upgrade.cjs --target "$SMOKE_TARGET" --artifact "$artifact" --previous-artifact "$previous" --report "package-reports/upgrade-$SMOKE_TARGET.json"
+    - name: macOS package and upgrade smoke
       if: runner.os == 'macOS'
       shell: bash
       env:
         SMOKE_ARCH: ${{ inputs.arch }}
+        SMOKE_TARGET: ${{ inputs.target }}
+        SMOKE_ARTIFACT: ${{ inputs.artifact }}
       run: |
         set -euo pipefail
-        test "$(find release -maxdepth 1 -name '*.zip' | wc -l)" -eq 1
-        artifact=$(find release -maxdepth 1 -name '*.zip' -print -quit)
-        unzip -q "$artifact" -d package-smoke
+        version=$(node -p 'require("./package.json").version')
+        ditto -x -k "$SMOKE_ARTIFACT" package-smoke
         binary=$(find package-smoke -path '*/Contents/MacOS/*' -type f -print -quit)
         test -n "$binary"
-        node scripts/verify-packaged.cjs --expected-arch "$SMOKE_ARCH" "$binary"
+        node scripts/verify-packaged.cjs --expected-arch "$SMOKE_ARCH" --expected-version "$version" --report "package-reports/smoke-$SMOKE_TARGET.json" --artifact "$SMOKE_ARTIFACT" "$binary"
+        previous="release/upgrade-fixtures/$SMOKE_TARGET/$(basename "$SMOKE_ARTIFACT")"
+        node scripts/verify-upgrade.cjs --target "$SMOKE_TARGET" --artifact "$SMOKE_ARTIFACT" --previous-artifact "$previous" --report "package-reports/upgrade-$SMOKE_TARGET.json"

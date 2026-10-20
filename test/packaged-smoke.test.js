@@ -41,3 +41,14 @@ test('package verification checks the requested artifact architecture when the h
     JSON.stringify({ ok: true, packaged: true, platform: 'another-platform', arch: '${reportedArch}' }));`);
   await assert.rejects(verify(process.execPath, [wrongPlatform], { expectedArch: reportedArch }), /does not match/);
 });
+
+test('package verification rejects an incorrect embedded version and saves evidence bound to the final artifact', async t => {
+  const binary = await script(t, `require('fs').writeFileSync(process.env.MELODY_SMOKE_RESULT,
+    JSON.stringify({ ok: true, packaged: true, platform: process.platform, arch: process.arch, version: '1.2.3' }));`);
+  await assert.rejects(verify(process.execPath, [binary], { expectedVersion: '1.2.4' }), /does not match/);
+  const reportPath = path.join(path.dirname(binary), 'report.json');
+  const report = await verify(process.execPath, [binary], { expectedVersion: '1.2.3', reportPath, artifactPath: binary });
+  assert.equal(report.artifact, path.basename(binary));
+  assert.match(report.artifactSha256, /^[a-f\d]{64}$/);
+  assert.deepEqual(JSON.parse(await fs.readFile(reportPath)), report);
+});
