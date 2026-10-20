@@ -89,6 +89,37 @@ async function verifyMacPermissionFallback({ createManager, targetParent, instal
     quitCalls, helperCalls, recoveryAction: 'keep-current' };
 }
 
+async function writeUpgradeFailureReport({ reportPath, error, target, directory, helperOutput, userDataDirectories }, fileSystem = fs) {
+  const report = { ok: false, target, message: error.message, errorCode: error.code || null,
+    diagnosticsDirectory: directory, helperOutput, transactions: [], diagnosticErrors: [] };
+  const recordError = (operation, filename, failure) => report.diagnosticErrors.push({ operation, path: filename,
+    code: failure.code || null, message: failure.message });
+  for (const dataDirectory of userDataDirectories) {
+    const updates = path.join(dataDirectory, 'updates');
+    let journals;
+    try { journals = await fileSystem.readdir(updates); }
+    catch (failure) {
+      if (failure.code !== 'ENOENT') recordError('list-journals', updates, failure);
+      continue;
+    }
+    for (const journal of journals.filter(name => name.endsWith('.json'))) {
+      const filename = path.join(updates, journal);
+      try {
+        const contents = JSON.parse(await fileSystem.readFile(filename, 'utf8'));
+        report.transactions.push({ userData: path.basename(dataDirectory), journal, ...contents });
+      } catch (failure) { recordError('read-journal', filename, failure); }
+    }
+  }
+  try {
+    await fileSystem.mkdir(path.dirname(path.resolve(reportPath)), { recursive: true });
+    await fileSystem.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  } catch (failure) {
+    recordError('write-failure-report', reportPath, failure);
+    console.error(`Could not write upgrade failure report: ${failure.message}`);
+  }
+  return report;
+}
+
 async function verifyUpgrade({ target: targetId, artifact, previousArtifact, report: reportPath }) {
   const target = targets.find(item => item.id === targetId);
   if (!target?.smokeRunner || target.platform !== process.platform) throw new Error('Upgrade smoke requires a native runnable target');
@@ -228,17 +259,8 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
     return report;
   } catch (error) {
     if (reportPath) {
-      const transactions = [];
-      for (const dataDirectory of [userData, permissionUserData]) {
-        const journals = await fs.readdir(path.join(dataDirectory, 'updates')).catch(() => []);
-        for (const journal of journals.filter(name => name.endsWith('.json'))) {
-          transactions.push({ userData: path.basename(dataDirectory),
-            ...JSON.parse(await fs.readFile(path.join(dataDirectory, 'updates', journal), 'utf8')) });
-        }
-      }
-      await fs.mkdir(path.dirname(path.resolve(reportPath)), { recursive: true });
-      await fs.writeFile(reportPath, `${JSON.stringify({ ok: false, target: targetId, message: error.message,
-        diagnosticsDirectory: directory, helperOutput, transactions }, null, 2)}\n`);
+      await writeUpgradeFailureReport({ reportPath, error, target: targetId, directory, helperOutput,
+        userDataDirectories: [userData, permissionUserData] });
     }
     throw error;
   } finally {
@@ -259,4 +281,4 @@ if (require.main === module) {
   }
   verifyUpgrade(options).catch(error => { console.error(error); process.exitCode = 1; });
 }
-module.exports = { verifyUpgrade, hashInstallation };
+module.exports = { verifyUpgrade, hashInstallation, writeUpgradeFailureReport };

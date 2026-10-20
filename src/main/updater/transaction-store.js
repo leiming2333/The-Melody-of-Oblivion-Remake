@@ -4,6 +4,8 @@ const crypto = require('node:crypto');
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const PHASES = new Set(['prepared', 'applying', 'awaiting-health', 'confirmed', 'rolled-back', 'failed', 'abandoned']);
+const WINDOWS_FILE_RETRY_DELAYS = [20, 40, 80, 160, 240, 320];
+const WINDOWS_FILE_RETRY_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
 
 function identity(value, platform) {
   const resolved = path.resolve(value);
@@ -73,10 +75,23 @@ class TransactionStore {
       && typeof record.toVersion === 'string' && typeof record.fromVersion === 'string';
   }
 
+  async retryFileAccess(operation) {
+    for (let attempt = 0; ; attempt++) {
+      try { return await operation(); }
+      catch (error) {
+        // ReplaceFile and virus scanners can briefly hold a Windows journal.
+        // Keep retries below one second and preserve permanent access errors.
+        if (this.platform !== 'win32' || !WINDOWS_FILE_RETRY_CODES.has(error.code)
+          || attempt >= WINDOWS_FILE_RETRY_DELAYS.length) throw error;
+        await new Promise((resolve) => setTimeout(resolve, WINDOWS_FILE_RETRY_DELAYS[attempt]));
+      }
+    }
+  }
+
   async load() {
     if (!this.persistent) return this.records;
     try {
-      const report = JSON.parse(await this.fs.readFile(this.filePath, 'utf8'));
+      const report = JSON.parse(await this.retryFileAccess(() => this.fs.readFile(this.filePath, 'utf8')));
       if (report.schema !== 1 || report.key !== this.key || !Array.isArray(report.records)) {
         throw new Error('更新恢复记录格式无效，已保留原文件');
       }
@@ -98,11 +113,11 @@ class TransactionStore {
     const report = JSON.stringify({ schema: 1, key: this.key, records: this.records }, null, 2);
     this.queue = this.queue.catch(() => {}).then(async () => {
       if (!this.persistent) return;
-      await this.fs.mkdir(path.dirname(this.filePath), { recursive: true });
+      await this.retryFileAccess(() => this.fs.mkdir(path.dirname(this.filePath), { recursive: true }));
       const temporary = `${this.filePath}.${crypto.randomUUID()}.tmp`;
       try {
-        await this.fs.writeFile(temporary, report, { mode: 0o600 });
-        await this.fs.rename(temporary, this.filePath);
+        await this.retryFileAccess(() => this.fs.writeFile(temporary, report, { mode: 0o600 }));
+        await this.retryFileAccess(() => this.fs.rename(temporary, this.filePath));
       } finally {
         await this.fs.rm(temporary, { force: true }).catch(() => {});
       }
