@@ -825,11 +825,13 @@ test('an active update stream can outlast its connection timeout', async (t) => 
         clearInterval(timer);
         response.end();
       }
-    }, 40);
+    }, 600);
     response.on('close', () => clearInterval(timer));
   });
   await downloadToFile(url, target, undefined, {
-    enforceMinSpeed: false, connectTimeoutMs: 100, stallTimeoutMs: 1000
+    // Keep the body slower than the connection deadline, allowing enough time
+    // for a cold native fetch connection on the slower macOS Intel runner.
+    enforceMinSpeed: false, connectTimeoutMs: 2000, stallTimeoutMs: 5000
   });
   assert.equal(await fs.readFile(target, 'utf8'), 'aaaaa');
 });
