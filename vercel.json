@@ -4,6 +4,18 @@
   "outputDirectory": ".",
   "cleanUrls": true,
   "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "the-melody-of-o-r\\.ccwu\\.cc"
+        }
+      ],
+      "destination": "/api/disabled-domain"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
