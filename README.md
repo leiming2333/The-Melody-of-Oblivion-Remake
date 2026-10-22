@@ -16,7 +16,7 @@
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.7.1`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.7.1`，支持离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://the-melody-of-o-r.ccwu.cc/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -37,7 +37,7 @@
 - **游戏版本**：浏览 Mojang 版本清单、识别本地安装、下载原版游戏、验证所需文件，并将可移除的配置移动到回收站。
 - **模组加载器**：通过统一流程查询并安装 Fabric、Forge、NeoForge 与 Quilt。
 - **可靠下载**：在 Mojang 官方源与 BMCLAPI 之间选择；自动模式会测速；支持任务并发、大文件 HTTP Range 分段、SHA-1 校验、取消下载及失败后切换来源重试。
-- **账户系统**：支持离线账户、Microsoft 设备代码登录及 LittleSkin Yggdrasil；可同步皮肤头像、启动前刷新在线凭据，并阻止令牌进入渲染进程。
+- **账户系统**：支持离线账户及 LittleSkin Yggdrasil；可同步皮肤头像、启动前刷新 LittleSkin 凭据，并阻止令牌进入渲染进程。
 - **Java 管理**：匹配游戏所需的 Java 主版本，检测系统安装与启动器托管环境。在 Java 路径设置旁手动下载 Java 8、16、17、21 或 25，支持进度与取消；优先 Azul JRE，失败后切换 Adoptium，使用并行下载与 SHA-256 校验。启动时缺少所需 Java 会打开设置，不再自动下载。
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
 - **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides、Fabric、Forge、NeoForge 与 Quilt。导入确认显示游戏、加载器和文件数，可选文件默认不安装；可选文件的远端解析或下载失败仅警告，必需文件失败可重试；磁盘、权限或安全检查错误会中止安装。CurseForge 受限文件可从官方页面下载后选择本地文件，通过可信摘要校验再继续安装。
@@ -48,11 +48,11 @@
 
 ## 实际界面
 
-以下截图来自当前 `1.6.5` 源码运行的 Electron 启动器，截图时尚未添加账户或安装游戏。
+以下截图来自 `1.6.5` 源码运行的 Electron 启动器，截图时尚未添加账户或安装游戏。当前源码界面可能有所不同。
 
 ![沙漠湖泊默认壁纸与启动器主界面](assets/launcher-screenshot.png)
 
-![Microsoft、离线和 LittleSkin 账户管理实际界面](assets/launcher-accounts.png)
+![v1.6.5 账户管理实际界面](assets/launcher-accounts.png)
 
 官网首屏使用上面的主界面截图，账户介绍使用账户管理截图，背景也采用沙漠湖泊场景。下载区可选择系统、架构和下载来源。版本更新公告单独显示，默认展开，只展示最新一个版本。官网不展示安装包的 SHA-256 校验值，启动器安装更新前仍会校验 SHA-256。
 
@@ -61,7 +61,7 @@
 - 提供 Windows、macOS 与 Linux 的多架构公开构建，不同平台的细节表现仍可能存在差异。
 - 更新下载完成后点击「重启并安装」才替换程序。Windows 保留当前 EXE 名称；macOS 使用系统 `ditto` 校验并替换 `.app`，在只读介质、目录不可写或 App Translocation 环境下提供 ZIP 手动替换入口；Linux 替换 AppImage。辅助进程握手成功后才退出旧程序，新版窗口、预加载桥接和本地界面加载完成才确认更新；未确认时保留备份并提供重试或恢复入口。
 - 每个安装路径独立记录更新状态，确认成功后保留最近一份回退版本，只清理该记录拥有的旧文件。无记录的 Windows 历史 EXE 和 `.old` 可在设置中勾选后移入回收站。游戏数据不在更新清理范围内。
-- Microsoft 登录依赖启动器的 Azure 应用注册获得 Minecraft Services 接受。服务方策略或注册状态改变可能导致登录暂时不可用。
+- 当前源码已移除 Microsoft 登录接入，账户管理仅支持离线和 LittleSkin 登录。历史 Microsoft 账户仍以加密形式保留，但不再显示或用于启动；请重新选择可用账户。
 - LittleSkin Yggdrasil 仅在客户端和服务端使用相同验证服务时生效；它不能代替正版账户，也不会授予进入正版验证服务器的权限。参见 [LittleSkin 用户使用手册](https://manual.littlesk.in/yggdrasil/)。
 - CurseForge 安装依赖 CurseTools 提供的文件元数据，或配置 `CURSEFORGE_API_KEY`。临时查询失败会自动重试；缺少可信摘要时仍需重新查询，不能直接导入用户文件，已下架文件也可能无法补齐。
 - 支持 Quilt 整合包，实际兼容性取决于游戏版本与 Mod。
@@ -85,8 +85,6 @@ Windows 提供单文件便携 EXE，无需安装，打包文件名不带版本�
 npm ci
 npm run dev
 ```
-
-Microsoft 登录使用内置的公开 Azure 应用 ID。如需使用自己的应用注册，可在启动或构建前设置 `MELODY_MICROSOFT_CLIENT_ID`。
 
 系统目录模式使用操作系统默认的 Minecraft 应用数据目录（Windows 为 `%APPDATA%\.minecraft`）。本地目录模式使用启动器 EXE 旁的 `.minecraft`，不会因运行文件子目录或缓存回退而改变。整合包实例存放在所选 `.minecraft\melody-instances` 下。
 
@@ -117,7 +115,7 @@ Java 检测结果保存在用户数据目录的 `java-cache.json`，可执行文
 ```text
 src/
 ├── main/                 Electron 主进程
-│   ├── accounts/         离线、Microsoft 与 LittleSkin 账户
+│   ├── accounts/         离线与 LittleSkin 账户
 │   ├── minecraft/        下载、Java、加载器、启动与整合包
 │   └── settings/         持久化设置
 ├── preload/              沙箱化的渲染进程桥接层
@@ -134,10 +132,9 @@ styles.css                落地页样式
 ## 安全说明
 
 - Electron 渲染进程启用了上下文隔离和沙箱，并关闭 Node.js 集成。
-- Microsoft 与 LittleSkin 的访问令牌、刷新令牌和客户端令牌不会出现在提供给渲染进程的账户对象中。
+- LittleSkin 的访问令牌和客户端令牌不会出现在提供给渲染进程的账户对象中。
 - 在线账户令牌使用 Electron `safeStorage` 加密保存。如果安全存储不可用，或 Linux 使用 `basic_text` 等无保护后端，启动器会拒绝保存或读取在线凭据。离线账户仍可使用。
 - 启动器按用户数据目录限制多开；再次打开会聚焦已有窗口。同一文件的账户和设置修改也会在不同存储对象之间排队，避免互相覆盖。
-- Microsoft 登录使用公开 OAuth 应用 ID，构建时可用 `MELODY_MICROSOFT_CLIENT_ID` 覆盖。仓库不包含客户端密钥；公开 Electron 构建无法对内嵌 Client ID 保密。
 - 下载目标、整合包路径、压缩包解压位置和远程模组 URL 均会经过验证，以降低路径穿越及不安全 URL 的风险。
 - 上游元数据提供哈希时，SHA-1 校验可发现意外损坏，但不应将 SHA-1 视为现代的真实性保证。
 
