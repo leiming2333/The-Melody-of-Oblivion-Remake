@@ -379,7 +379,8 @@ function replaceVariables(argument, variables) {
 }
 
 function normalizeAccount(account) {
-  if (!account || !/^[A-Za-z0-9_]{3,16}$/.test(account.name ?? '')) {
+  if (!account || !['offline', 'yggdrasil'].includes(account.type)
+    || !/^[A-Za-z0-9_]{3,16}$/.test(account.name ?? '')) {
     throw new Error('请先添加并选择一个可用的游戏账户');
   }
   const accountUuid = account.type === 'offline'
@@ -392,9 +393,7 @@ function normalizeAccount(account) {
     uuid,
     skinModel: account.skinModel === 'alex' ? 'alex' : 'steve',
     accessToken: account.accessToken || '0',
-    userType: account.type === 'microsoft' ? 'msa' : 'legacy',
-    xuid: account.xuid || '',
-    clientId: account.clientId || ''
+    userType: 'legacy'
   };
 }
 
@@ -419,10 +418,10 @@ function launchVariables({
     auth_player_name: normalizedAccount.name,
     auth_session: `token:${normalizedAccount.accessToken}:${normalizedAccount.uuid}`,
     auth_uuid: normalizedAccount.uuid,
-    auth_xuid: normalizedAccount.xuid,
+    auth_xuid: '',
     classpath,
     classpath_separator: path.delimiter,
-    clientid: normalizedAccount.clientId,
+    clientid: '',
     game_assets: legacyAssets,
     game_directory: instanceDirectory ?? gameDirectory,
     launcher_name: LAUNCHER_NAME,

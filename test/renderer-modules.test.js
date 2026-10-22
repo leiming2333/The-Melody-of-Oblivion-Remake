@@ -73,6 +73,26 @@ test('offline names can be saved repeatedly and a failed rename restores the lat
   assert.equal(toasts.at(-1), 'Invalid name');
 });
 
+test('unsupported saved account types cannot be selected while deletion remains available', async (t) => {
+  const { renderAccountList } = await import('../src/renderer/modules/account-ui.mjs');
+  const fixture = await accountUiFixture(t);
+  const removed = [], selected = [];
+  fixture.state.accountState.accounts = [{ id: 'microsoft:legacy', type: 'microsoft', name: 'Legacy', uuid: 'old-uuid' }];
+  fixture.state.accountState.currentId = null;
+  fixture.selectAccount = (id) => selected.push(id);
+  fixture.removeAccount = (id) => removed.push(id);
+  renderAccountList(fixture);
+  const row = fixture.accountList.children[0];
+  assert.equal(row.children[1].children[1].textContent, '已停用的账户');
+  const [selectButton, removeButton] = row.children[2].children;
+  assert.equal(selectButton.textContent, '已停用');
+  assert.equal(selectButton.disabled, true);
+  await selectButton.dispatch('click');
+  assert.deepEqual(selected, []);
+  await removeButton.dispatch('click');
+  assert.deepEqual(removed, ['microsoft:legacy']);
+});
+
 test('successive pending offline renames save in order without replacing later text or account selection', async (t) => {
   let entered, release;
   const requested = new Promise((resolve) => { entered = resolve; });

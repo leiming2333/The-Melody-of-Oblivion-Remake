@@ -94,7 +94,7 @@ export function renderAccountList(context) {
       ? `离线账户 · ${account.uuid}`
       : account.type === 'yggdrasil'
         ? `LittleSkin 外置 · ${account.uuid}`
-        : `Microsoft · ${account.uuid}`;
+        : '已停用的账户';
     if (account.loginError) {
       detail.textContent = account.loginError;
       detail.title = account.loginError;
@@ -106,9 +106,10 @@ export function renderAccountList(context) {
 
     const selectButton = document.createElement('button');
     selectButton.type = 'button';
-    selectButton.textContent = account.id === state.accountState.currentId ? '当前' : '使用';
-    selectButton.disabled = account.id === state.accountState.currentId;
-    selectButton.addEventListener('click', () => selectAccount(account.id));
+    const supported = ['offline', 'yggdrasil'].includes(account.type);
+    selectButton.textContent = !supported ? '已停用' : account.id === state.accountState.currentId ? '当前' : '使用';
+    selectButton.disabled = !supported || account.id === state.accountState.currentId;
+    if (supported) selectButton.addEventListener('click', () => selectAccount(account.id));
     actions.append(selectButton);
 
     if (account.type === 'offline') {

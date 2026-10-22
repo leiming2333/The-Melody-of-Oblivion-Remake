@@ -33,42 +33,7 @@ test('离线用户名校验限制为 3–16 位合法字符', () => {
   assert.throws(() => validateOfflineName('ab'), /3–16/);
 });
 
-test('signing out of Microsoft clears the active selection and retains the saved account', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-microsoft-signout-'));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const store = new AccountStore(path.join(root, 'accounts.json'));
-  const before = await store.upsertMicrosoft({
-    uuid: '01234567-89ab-cdef-0123-456789abcdef',
-    name: 'Player_01', accessToken: 'access', microsoftRefreshToken: 'refresh'
-  });
-
-  const signedOut = await store.signOut(before.current.id);
-  assert.equal(signedOut.current, null);
-  assert.equal(signedOut.currentId, null);
-  assert.equal(signedOut.accounts.length, 1);
-  assert.equal((await store.getState()).current, null);
-  assert.equal((await store.getAccount(before.current.id)).microsoftRefreshToken, 'refresh');
-});
-
-test('refreshing Microsoft credentials preserves selection while an explicit login selects the account', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-refresh-account-'));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const store = new AccountStore(path.join(root, 'accounts.json'));
-  const credentials = {
-    uuid: '01234567-89ab-cdef-0123-456789abcdef',
-    name: 'Player_01', accessToken: 'old-access', microsoftRefreshToken: 'old-refresh'
-  };
-  const microsoftId = (await store.upsertMicrosoft(credentials)).currentId;
-  const offlineId = (await store.addOffline('Steve')).currentId;
-  assert.equal((await store.upsertMicrosoft({ ...credentials, accessToken: 'refreshed-access' }, { select: false })).currentId, offlineId);
-  assert.equal((await store.getAccount(microsoftId)).accessToken, 'refreshed-access');
-  await store.select(microsoftId);
-  await store.signOut(microsoftId);
-  assert.equal((await store.upsertMicrosoft({ ...credentials, accessToken: 'latest-access' }, { select: false })).currentId, null);
-  assert.equal((await store.upsertMicrosoft(credentials)).currentId, microsoftId);
-});
-
-test('Microsoft 档案可解析正版皮肤地址并拒绝非官方纹理域名', () => {
+test('皮肤档案只接受允许的纹理域名', () => {
   const textureUrl = 'https://textures.minecraft.net/texture/012345abcdef';
   const profile = {
     properties: [{
@@ -126,70 +91,60 @@ test('LittleSkin 令牌会加密保存且不会暴露给页面', async (t) => {
   assert.equal(privateAccount.clientToken, 'little-client-token');
 });
 
-test('Microsoft 登录令牌只提供给启动核心，不会暴露给页面', async (t) => {
-  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-microsoft-account-test-'));
-  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
-  const filePath = path.join(temporaryRoot, 'accounts.json');
-  await fs.writeFile(filePath, JSON.stringify({
-    version: 2,
-    currentId: 'microsoft:test',
-    accounts: [{
-      id: 'microsoft:test',
-      type: 'microsoft',
-      name: '正版玩家',
-      uuid: '01234567-89ab-cdef-0123-456789abcdef',
-      accessToken: 'secret-access-token',
-      clientId: 'secret-client-id',
-      xuid: 'secret-xuid'
-    }]
-  }), 'utf8');
+test('历史 Microsoft 账户不可用于页面、选择、启动或皮肤同步', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-retired-account-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'accounts.json');
+  const legacy = {
+    id: 'microsoft:old', type: 'microsoft', name: 'Player_01',
+    uuid: '01234567-89ab-cdef-0123-456789abcdef',
+    accessToken: 'old-access', microsoftRefreshToken: 'old-refresh'
+  };
+  const offline = { id: 'offline:steve', type: 'offline', name: 'Steve', uuid: offlineUuid('Steve') };
+  await fs.writeFile(file, JSON.stringify({ currentId: legacy.id, accounts: [legacy, offline] }));
+  const store = new AccountStore(file);
 
-  const store = new AccountStore(filePath);
-  const publicState = await store.getState();
-  assert.equal(publicState.current.accessToken, undefined);
-  assert.equal(publicState.current.clientId, undefined);
-  assert.equal(publicState.current.xuid, undefined);
-  assert.equal(publicState.accounts[0].accessToken, undefined);
+  const state = await store.getState();
+  assert.equal(state.currentId, null);
+  assert.equal(state.current, null);
+  assert.deepEqual(state.accounts.map((account) => account.id), [offline.id]);
+  assert.equal(await store.getCurrentAccount(), null);
+  assert.equal(await store.getAccount(legacy.id), null);
+  await assert.rejects(store.select(legacy.id), /不再支持 Microsoft 登录/);
+  let requested = false;
+  await assert.rejects(store.refreshSkin(legacy.id, () => { requested = true; }), /不支持在线皮肤同步/);
+  assert.equal(requested, false);
 
-  const launchAccount = await store.getCurrentAccount();
-  assert.equal(launchAccount.accessToken, 'secret-access-token');
-  assert.equal(launchAccount.clientId, 'secret-client-id');
-  assert.equal(launchAccount.xuid, 'secret-xuid');
+  await store.select(offline.id);
+  const removed = await store.remove(offline.id);
+  assert.deepEqual(removed, { currentId: null, current: null, accounts: [] });
+  assert.equal(await store.getCurrentAccount(), null);
+  assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).accounts[0].id, legacy.id);
 });
 
-test('Microsoft 访问令牌与刷新令牌会通过系统凭据编码器落盘', async (t) => {
-  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-secret-account-test-'));
-  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
-  const filePath = path.join(temporaryRoot, 'accounts.json');
-  const secretCodec = {
-    encode: (value) => `encoded:${Buffer.from(value).toString('base64')}`,
-    decode: (value) => value.startsWith('encoded:')
-      ? Buffer.from(value.slice('encoded:'.length), 'base64').toString('utf8')
-      : value
-  };
-  const store = new AccountStore(filePath, { secretCodec });
-  const publicState = await store.upsertMicrosoft({
-    name: 'Player_01',
+test('历史 Microsoft 凭据在离线账户保存时继续加密保留', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-legacy-secrets-test-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'accounts.json');
+  const legacy = {
+    id: 'microsoft:old', type: 'microsoft', name: 'Player_01',
     uuid: '01234567-89ab-cdef-0123-456789abcdef',
-    accessToken: 'minecraft-access-token',
-    accessTokenExpiresAt: Date.now() + 3600000,
-    microsoftClientId: '11111111-2222-3333-4444-555555555555',
-    microsoftRefreshToken: 'microsoft-refresh-token',
-    clientId: '11111111-2222-3333-4444-555555555555',
-    xuid: '123456789'
+    accessToken: 'encoded:old-access', microsoftRefreshToken: 'encoded:old-refresh'
+  };
+  await fs.writeFile(file, JSON.stringify({ currentId: legacy.id, accounts: [legacy] }));
+  const store = new AccountStore(file, {
+    secretCodec: {
+      encode: (value) => 'encoded:' + value,
+      decode: (value) => value.slice('encoded:'.length)
+    }
   });
-  assert.equal(publicState.current.accessToken, undefined);
-  assert.equal(publicState.current.microsoftRefreshToken, undefined);
-  assert.equal(publicState.current.accessTokenExpiresAt, undefined);
-
-  const persisted = await fs.readFile(filePath, 'utf8');
-  assert.equal(persisted.includes('minecraft-access-token'), false);
-  assert.equal(persisted.includes('microsoft-refresh-token'), false);
-  assert.match(persisted, /encoded:/);
-
-  const privateAccount = await store.getCurrentAccount();
-  assert.equal(privateAccount.accessToken, 'minecraft-access-token');
-  assert.equal(privateAccount.microsoftRefreshToken, 'microsoft-refresh-token');
+  const state = await store.addOffline('Steve');
+  assert.equal(state.current.name, 'Steve');
+  assert.equal(JSON.stringify(state).includes('old-access'), false);
+  assert.equal(await store.getAccount(legacy.id), null);
+  const saved = JSON.parse(await fs.readFile(file, 'utf8')).accounts[0];
+  assert.equal(saved.accessToken, legacy.accessToken);
+  assert.equal(saved.microsoftRefreshToken, legacy.microsoftRefreshToken);
 });
 
 test('账户可以持久化、切换和删除', async (context) => {
@@ -216,10 +171,10 @@ test('账户可以持久化、切换和删除', async (context) => {
   assert.equal(finalState.current.name, 'Alex');
 });
 
-for (const type of ['microsoft', 'yggdrasil']) {
-  const secondSecret = type === 'microsoft' ? 'microsoftRefreshToken' : 'clientToken';
+for (const type of ['yggdrasil']) {
+  const secondSecret = 'clientToken';
   const uuid = '01234567-89ab-cdef-0123-456789abcdef';
-  const id = `${type === 'microsoft' ? 'microsoft' : 'littleskin'}:${uuid}`;
+  const id = `littleskin:${uuid}`;
   const secretCodec = {
     encode: (value) => `encoded:${value}`,
     decode: (value) => {
@@ -280,9 +235,7 @@ for (const type of ['microsoft', 'yggdrasil']) {
     await fs.writeFile(filePath, JSON.stringify({ currentId: id, accounts: [damagedAccount] }));
     const store = new AccountStore(filePath, { secretCodec });
     const credentials = { uuid, name: 'Player_01', accessToken: 'new-access', [secondSecret]: 'new-secret' };
-    const state = type === 'microsoft'
-      ? await store.upsertMicrosoft(credentials)
-      : await store.upsertYggdrasil(credentials);
+    const state = await store.upsertYggdrasil(credentials);
 
     assert.equal(state.current.loginError, undefined);
     const account = await store.getCurrentAccount();
@@ -311,7 +264,7 @@ test('安全存储不可用或旧明文凭据不会阻止离线账户操作', as
     }
   });
 
-  assert.equal((await store.getState()).accounts.length, 1);
+  assert.deepEqual(await store.getState(), { currentId: null, current: null, accounts: [] });
   const state = await store.addOffline('Steve');
   assert.equal(state.current.type, 'offline');
   assert.equal((await store.getCurrentAccount()).name, 'Steve');
