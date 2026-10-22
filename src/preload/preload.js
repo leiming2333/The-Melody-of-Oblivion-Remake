@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
       return () => ipcRenderer.removeListener('minecraft:java-download-progress', listener);
     },
     inspectModpack: (filePath, options = {}) => invokeTask('minecraft:inspect-modpack', filePath, options),
+    getModpackRecovery: () => invokeTask('minecraft:get-modpack-recovery'),
     installModpack: (filePath, options = {}) => invokeTask('minecraft:install-modpack', filePath, options),
     resumeModpack: (sessionId, options = {}) => invokeTask('minecraft:resume-modpack', sessionId, options),
     selectMissingModpackFile: (sessionId, identity, options = {}) => invokeTask('minecraft:select-missing-modpack-file', sessionId, identity, options),
@@ -104,12 +105,21 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     addOffline: (playerName, skinModel = 'steve') => (
       ipcRenderer.invoke('accounts:add-offline', playerName, skinModel)
     ),
+    beginMicrosoft: () => ipcRenderer.invoke('accounts:begin-microsoft'),
+    completeMicrosoft: (sessionId) => ipcRenderer.invoke('accounts:complete-microsoft', sessionId),
+    copyMicrosoftCode: (code) => ipcRenderer.invoke('accounts:copy-microsoft-code', code),
+    cancelMicrosoft: (sessionId) => ipcRenderer.invoke('accounts:cancel-microsoft', sessionId),
     loginLittleSkin: (username, password) => (
       ipcRenderer.invoke('accounts:login-littleskin', username, password)
     ),
     selectLittleSkinProfile: (sessionId, profileId) => (
       ipcRenderer.invoke('accounts:select-littleskin-profile', sessionId, profileId)
     ),
+    onMicrosoftProgress: (callback) => {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on('accounts:microsoft-progress', listener);
+      return () => ipcRenderer.removeListener('accounts:microsoft-progress', listener);
+    },
     select: (accountId) => ipcRenderer.invoke('accounts:select', accountId),
     setSkinModel: (accountId, skinModel) => (
       ipcRenderer.invoke('accounts:set-skin-model', accountId, skinModel)

@@ -6,6 +6,8 @@ const net = require('node:net');
 const crypto = require('node:crypto');
 const streamFs = require('node:fs');
 const { pipeline } = require('node:stream/promises');
+const { setTimeout: delay } = require('node:timers/promises');
+const { runFileExclusive } = require('../file-write-queue');
 const {
   createDownloadProgressTracker,
   runPool,
@@ -21,6 +23,9 @@ const { STAGING_MARKER, createStagingDirectory, removeStagingDirectory,
 
 const MODPACK_EXTENSIONS = Object.freeze(['.mrpack', '.zip']);
 const INSTANCE_ID_PATTERN = /^[0-9A-Za-z._-]{1,100}$/;
+const RECOVERY_SCHEMA_VERSION = 1;
+const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RECOVERY_REASONS = new Set(['metadata-unavailable', 'restricted', 'download-failed']);
 const PRIVATE_NETWORKS = new net.BlockList();
 for (const [address, prefix, family] of [
   ['0.0.0.0', 8, 'ipv4'], ['10.0.0.0', 8, 'ipv4'], ['100.64.0.0', 10, 'ipv4'],
@@ -78,6 +83,70 @@ function safeDownloadUrl(value) {
     throw new Error(`整合包包含不安全的模组下载地址：${parsed.hostname}`);
   }
   return parsed.toString();
+}
+
+function samePath(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string') return false;
+  const a = path.resolve(left);
+  const b = path.resolve(right);
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+function serializeCurseForgeEntry(value, { missing = false } = {}) {
+  const projectId = Number(value?.projectId);
+  const fileId = Number(value?.fileId);
+  if (!Number.isSafeInteger(projectId) || projectId < 1 || !Number.isSafeInteger(fileId) || fileId < 1) return undefined;
+  const result = { projectId, fileId, required: value.required !== false };
+  if (typeof value.fileName === 'string' && value.fileName
+    && safeRelativePath(value.fileName) === value.fileName && !value.fileName.includes('/')) {
+    result.fileName = value.fileName;
+    result.path = `mods/${value.fileName}`;
+  }
+  if (Array.isArray(value.urls)) result.urls = value.urls.slice(0, 8).map(safeDownloadUrl);
+  else result.urls = [];
+  if (/^[0-9a-f]{40}$/i.test(value.sha1 ?? '')) result.sha1 = value.sha1.toLowerCase();
+  if (Number.isSafeInteger(value.size) && value.size >= 0) result.size = value.size;
+  if (missing && RECOVERY_REASONS.has(value.reason)) result.reason = value.reason;
+  if (!missing && (!result.fileName || !result.path)) return undefined;
+  return result;
+}
+
+function serializeRecoverySession(session) {
+  if (!SESSION_ID_PATTERN.test(session?.sessionId ?? '')
+    || typeof session.archivePath !== 'string' || !path.isAbsolute(session.archivePath)
+    || !/^[0-9a-f]{64}$/i.test(session.fingerprint ?? '')) return undefined;
+  const metadata = [...session.metadata.values()].map((entry) => serializeCurseForgeEntry(entry)).filter(Boolean);
+  const missing = [...session.missing.values()].map((entry) => serializeCurseForgeEntry(entry, { missing: true })).filter(Boolean);
+  return {
+    sessionId: session.sessionId,
+    archivePath: session.archivePath,
+    gameDirectory: session.gameDirectory,
+    fingerprint: session.fingerprint.toLowerCase(),
+    installOptionalFiles: session.installOptionalFiles === true,
+    name: String(session.name ?? path.basename(session.archivePath)).slice(0, 100),
+    metadata,
+    missing,
+    updatedAt: session.updatedAt ?? new Date().toISOString()
+  };
+}
+
+function restoreRecoverySession(value, gameDirectory) {
+  if (!value || !samePath(value.gameDirectory, gameDirectory)) return undefined;
+  const base = serializeRecoverySession({
+    ...value,
+    metadata: new Map((Array.isArray(value.metadata) ? value.metadata : []).map((entry) => [
+      `${entry?.projectId}:${entry?.fileId}`, entry
+    ])),
+    missing: new Map((Array.isArray(value.missing) ? value.missing : []).map((entry) => [
+      `${entry?.projectId}:${entry?.fileId}`, entry
+    ]))
+  });
+  if (!base) return undefined;
+  const archivePath = validateModpackFile(base.archivePath);
+  const metadata = new Map(base.metadata.map((entry) => [`${entry.projectId}:${entry.fileId}`, entry]));
+  const missing = new Map(base.missing.map((entry) => [`${entry.projectId}:${entry.fileId}`, entry]));
+  return { ...base, archivePath, gameDirectory: path.resolve(gameDirectory), metadata, missing, ownerId: null,
+    busy: false, cancellable: true, controller: null, waiting: true };
 }
 
 async function validatePublicDownloadUrl(value, lookupHost = defaultLookupHost) {
@@ -296,22 +365,32 @@ async function archiveFingerprint(filePath, signal) {
   return hash.digest('hex');
 }
 
+async function queryCurseForgeMetadata(url, options, signal) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let status;
+    try {
+      const metadata = await fetchWithTimeout(url, options, 12000, async (response) => {
+        status = response.status;
+        return response.ok ? (await response.json()).data : undefined;
+      });
+      if (metadata || (status && status < 500 && status !== 429)) return metadata;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+    }
+    if (attempt === 0) await delay(150, undefined, { signal });
+  }
+  return undefined;
+}
+
 async function resolveCurseForgeMetadata(entry, signal) {
   const communityUrl = `https://api.curse.tools/v1/cf/mods/${entry.projectId}/files/${entry.fileId}`;
-  let metadata;
-  try {
-    metadata = await fetchWithTimeout(communityUrl, { signal }, 12000,
-      async (response) => response.ok ? (await response.json()).data : undefined);
-  } catch (error) {
-    if (signal?.aborted) throw error;
-  }
+  let metadata = await queryCurseForgeMetadata(communityUrl, { signal }, signal);
 
   if (!metadata && process.env.CURSEFORGE_API_KEY) {
-    metadata = await fetchWithTimeout(
+    metadata = await queryCurseForgeMetadata(
       `https://api.curseforge.com/v1/mods/${entry.projectId}/files/${entry.fileId}`,
       { headers: { 'x-api-key': process.env.CURSEFORGE_API_KEY }, signal },
-      12000,
-      async (response) => response.ok ? (await response.json()).data : undefined
+      signal
     );
   }
   if (!metadata?.fileName) {
@@ -345,13 +424,65 @@ async function resolveCurseForgeFile(entry, signal) {
 }
 
 class ModpackManager {
-  constructor({ gameDirectory, loaderManager, concurrency = 16, segmentConcurrency = 8, lookupHost = defaultLookupHost }) {
+  constructor({ gameDirectory, loaderManager, concurrency = 16, segmentConcurrency = 8,
+    lookupHost = defaultLookupHost, recoveryFile }) {
     this.gameDirectory = gameDirectory;
     this.loaderManager = loaderManager;
     this.concurrency = concurrency;
     this.segmentConcurrency = segmentConcurrency;
     this.lookupHost = lookupHost;
     this.sessions = new Map();
+    this.recoveryFile = recoveryFile ?? safePath(gameDirectory, 'launcher-cache', 'modpack-recovery.json');
+    this.recoveryLoaded = null;
+  }
+
+  loadRecoverySessions() {
+    this.recoveryLoaded ??= fs.readFile(this.recoveryFile, 'utf8').then((text) => {
+      const value = JSON.parse(text);
+      if (value?.schemaVersion !== RECOVERY_SCHEMA_VERSION || !Array.isArray(value.sessions)) return;
+      for (const record of value.sessions.slice(0, 8)) {
+        try {
+          const session = restoreRecoverySession(record, this.gameDirectory);
+          if (session) this.sessions.set(session.sessionId, session);
+        } catch {
+          // Ignore individual records that were edited or belong to an older format.
+        }
+      }
+    }).catch((error) => {
+      if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+    });
+    return this.recoveryLoaded;
+  }
+
+  saveRecoverySessions() {
+    return runFileExclusive(this.recoveryFile, async () => {
+      const sessions = [...this.sessions.values()]
+        .filter((session) => session.waiting)
+        .map(serializeRecoverySession)
+        .filter(Boolean);
+      if (sessions.length === 0) {
+        await fs.rm(this.recoveryFile, { force: true });
+        return;
+      }
+      await writeJsonAtomic(this.recoveryFile, { schemaVersion: RECOVERY_SCHEMA_VERSION, sessions });
+    });
+  }
+
+  async claimRecoverySession(ownerId) {
+    await this.loadRecoverySessions();
+    const candidates = [...this.sessions.values()]
+      .filter((session) => session.waiting && (session.ownerId === null || session.ownerId === (ownerId ?? null)))
+      .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
+    for (const session of candidates) {
+      session.ownerId = ownerId ?? null;
+      try {
+        await this.verifySessionArchive(session);
+        return this.getRecoveryState(session.sessionId, { ownerId });
+      } catch (error) {
+        if (error.code !== 'MODPACK_ARCHIVE_CHANGED') throw error;
+      }
+    }
+    return null;
   }
 
   async withExtractedPack(filePath, operation, { signal, onProgress } = {}) {
@@ -376,6 +507,15 @@ class ModpackManager {
     const pack = manifest.name === 'modrinth.index.json'
       ? parseModrinthIndex(manifest.value)
       : parseCurseForgeManifest(manifest.value);
+    if (pack.loaderType !== 'vanilla' && typeof this.loaderManager?.validateLoaderVersion === 'function') {
+      try {
+        await this.loaderManager.validateLoaderVersion(pack.gameVersion, pack.loaderType, pack.loaderVersion, signal);
+      } catch (error) {
+        throwIfAborted(signal);
+        throw modpackError(`整合包加载器兼容性检查失败：${error.message}`,
+          'MODPACK_LOADER_INCOMPATIBLE', 'inspecting', isRemoteFailure(error), error);
+      }
+    }
     return publicPackInfo(pack);
   }
 
@@ -391,6 +531,7 @@ class ModpackManager {
   getRecoveryState(sessionId, { ownerId } = {}) {
     const session = this.getSession(sessionId, ownerId);
     return { status: 'waiting-for-files', sessionId, name: session.name,
+      sourceName: path.basename(session.archivePath),
       canResume: session.missing.size === 0,
       files: [...session.missing.values()].map((file) => ({
         projectId: file.projectId, fileId: file.fileId, fileName: file.fileName,
@@ -420,23 +561,45 @@ class ModpackManager {
       for (const [key, missing] of session.missing) {
         if (missing.sha1 === entry.sha1 && missing.size === entry.size) session.missing.delete(key);
       }
+      session.updatedAt = new Date().toISOString();
+      await this.saveRecoverySessions();
       return this.getRecoveryState(sessionId, { ownerId });
-    } finally { session.busy = false; }
+    } finally {
+      session.busy = false;
+      session.controller = null;
+      if (session.releaseWhenIdle) { session.ownerId = null; session.releaseWhenIdle = false; }
+    }
   }
 
-  discardSession(sessionId, { ownerId } = {}) {
+  async discardSession(sessionId, { ownerId } = {}) {
     const session = this.getSession(sessionId, ownerId);
     if (session.busy && session.cancellable === false) return { cancelled: false };
     session.controller?.abort();
     this.sessions.delete(sessionId);
+    await this.saveRecoverySessions();
     return { cancelled: true };
   }
 
-  discardOwnerSessions(ownerId) {
+  async discardOwnerSessions(ownerId) {
+    await this.loadRecoverySessions();
     for (const [sessionId, session] of this.sessions) {
       if (session.ownerId !== (ownerId ?? null)) continue;
       if (session.cancellable !== false) session.controller?.abort();
       this.sessions.delete(sessionId);
+    }
+    await this.saveRecoverySessions();
+  }
+
+  releaseOwnerSessions(ownerId) {
+    for (const session of this.sessions.values()) {
+      if (session.ownerId !== (ownerId ?? null)) continue;
+      if (session.busy) {
+        if (session.cancellable !== false) session.controller?.abort();
+        session.releaseWhenIdle = true;
+        continue;
+      }
+      session.ownerId = null;
+      session.controller = null;
     }
   }
 
@@ -446,20 +609,24 @@ class ModpackManager {
     catch (error) {
       throwIfAborted(signal);
       this.sessions.delete(session.sessionId);
+      await this.saveRecoverySessions();
       throw modpackError('原整合包已移动或无法读取，请重新选择归档', 'MODPACK_ARCHIVE_CHANGED', 'preparing', false, error);
     }
     if (fingerprint !== session.fingerprint) {
       this.sessions.delete(session.sessionId);
+      await this.saveRecoverySessions();
       throw modpackError('整合包归档已更改，请重新选择归档', 'MODPACK_ARCHIVE_CHANGED', 'preparing', false);
     }
   }
 
   async install(filePath, onProgress = () => {}, { signal, installOptionalFiles = false, ownerId } = {}) {
     throwIfAborted(signal);
+    await this.loadRecoverySessions();
     const archivePath = validateModpackFile(filePath);
     const session = { sessionId: crypto.randomUUID(), archivePath, ownerId: ownerId ?? null,
       gameDirectory: path.resolve(this.gameDirectory), fingerprint: await archiveFingerprint(archivePath, signal),
-      installOptionalFiles, metadata: new Map(), missing: new Map(), busy: false, cancellable: true };
+      installOptionalFiles, metadata: new Map(), missing: new Map(), busy: false, cancellable: true,
+      waiting: false, updatedAt: new Date().toISOString() };
     for (const [id, previous] of this.sessions) {
       if (previous.ownerId === session.ownerId && !previous.busy) this.sessions.delete(id);
     }
@@ -485,15 +652,29 @@ class ModpackManager {
       const cleanupWarnings = await cleanupStaleStaging(session.gameDirectory);
       const result = await this.performInstall(session, progress, taskSignal, cleanupWarnings);
       if (session.cancellable) throwIfAborted(taskSignal);
+      if (result?.status === 'waiting-for-files') {
+        session.waiting = true;
+        session.updatedAt = new Date().toISOString();
+        await this.saveRecoverySessions();
+      } else {
+        await this.saveRecoverySessions();
+      }
       return result;
     } catch (error) {
       // A resumed task can fail or be cancelled after a manual file was
       // verified. Keep that recovery handle until explicitly discarded, unless
       // the archive/session is no longer trustworthy.
-      if (initial || error.retryable === false) this.sessions.delete(session.sessionId);
+      if (initial || error.retryable === false) {
+        this.sessions.delete(session.sessionId);
+        await this.saveRecoverySessions();
+      }
       error.phase ??= phase;
       throw error;
-    } finally { session.busy = false; }
+    } finally {
+      session.busy = false;
+      session.controller = null;
+      if (session.releaseWhenIdle) { session.ownerId = null; session.releaseWhenIdle = false; }
+    }
   }
 
   async performInstall(session, onProgress, signal, cleanupWarnings) {

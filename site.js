@@ -15,17 +15,17 @@ const translations = {
   "hero.preview": "See the launcher",
   "hero.release": "Choose a build here and download over HTTPS",
   "intro.title": "Your familiar accounts,<br>all in one place.",
-  "intro.body": "Manage offline and LittleSkin accounts at the bottom left. Switch installed versions and open launch settings on the right, or change your wallpaper in settings.",
+  "intro.body": "Manage Microsoft, offline, and LittleSkin accounts at the bottom left. Switch installed versions and open launch settings on the right, or change your wallpaper in settings.",
   "fact.accounts": "account types",
   "fact.threads": "download threads",
   "fact.platforms": "desktop platforms",
-  "intro.caption": "Historical v1.6.5 account management screen; the current source interface may differ",
+  "intro.caption": "Actual v1.6.5 account management screen",
   "features.title": "Fewer steps between install and play.",
   "features.lead": "The things you use often stay close. Download and installation progress stay visible.",
   "feature.download.title": "Downloads that keep moving",
   "feature.download.body": "Official and mirror sources are tested automatically. Large files download in parts, and slow or failed routes can be switched.",
   "feature.accounts.title": "Switch accounts when you need to",
-  "feature.accounts.body": "Use offline or LittleSkin sign-in. Your avatar updates with the current account.",
+  "feature.accounts.body": "Use offline, Microsoft, or LittleSkin sign-in. Your avatar updates with the current account.",
   "feature.loaders.title": "Set up mods in one place",
   "feature.loaders.body": "Install Fabric, Forge, NeoForge, or Quilt for the version you choose, or import Modrinth and CurseForge modpacks.",
   "feature.java.title": "Java handled for you",
@@ -33,7 +33,7 @@ const translations = {
   "guide.title": "Three steps to your first game.",
   "guide.lead": "Download and open the launcher, then follow these steps to get ready.",
   "guide.account.title": "Add a game account",
-  "guide.account.body": "Click the account panel at the bottom left to add an offline or LittleSkin account.",
+  "guide.account.body": "Click the account panel at the bottom left to add an offline, Microsoft, or LittleSkin account. For Microsoft sign-in, follow the prompts to authorize in your browser.",
   "guide.version.title": "Install a game version",
   "guide.version.body": "Open Switch version and choose a Minecraft version. Select a matching loader if you want mods. Once the download finishes, the game appears in the home screen list.",
   "guide.play.title": "Select your game and launch",
@@ -107,8 +107,8 @@ function setLanguage(language) {
   languageButton.textContent = english ? "中文" : "EN";
   languageButton.setAttribute("aria-label", english ? "切换为中文" : "Switch language");
   document.querySelector(".launcher-figure img").alt = english
-    ? "Historical Melody Launcher v1.6.5 account management screen"
-    : "忘却的旋律 v1.6.5 启动器历史账户管理界面";
+    ? "Actual Melody Launcher account screen with Microsoft, offline, and LittleSkin sign-in"
+    : "忘却的旋律启动器真实账户管理界面，包含 Microsoft、离线和 LittleSkin 登录";
   document.querySelector(".hero-launcher-preview img").alt = english
     ? "Actual Melody Launcher 1.6.5 home screen with the default Desert Lake wallpaper"
     : "忘却的旋律 1.6.5 启动器真实主界面，默认沙漠湖泊壁纸";

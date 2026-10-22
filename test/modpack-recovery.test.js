@@ -104,6 +104,57 @@ test('restricted CF files wait after downloads settle, verify manual copies, res
   assert.equal(downloads, 1);
 });
 
+test('a waiting CF recovery session survives restart and is claimed by the new window', async t => {
+  const f = await fixture(t, { files: [{ projectID: 1, fileID: 21 }] });
+  const manual = 'persisted manual mod';
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (String(url).includes('api.curse.tools')) {
+      return Response.json({ data: metadata(21, manual, null, 'persisted.jar') });
+    }
+    throw new Error('unexpected download');
+  });
+  const waiting = await f.manager.install(f.archive, () => {}, { ownerId: 7 });
+  assert.equal(waiting.status, 'waiting-for-files');
+  f.manager.releaseOwnerSessions(7);
+
+  const persisted = await fs.readFile(path.join(f.gameDirectory, 'launcher-cache', 'modpack-recovery.json'), 'utf8');
+  assert.equal(persisted.includes('ownerId'), false);
+  assert.equal(persisted.includes('.installing-'), false);
+
+  const restarted = new ModpackManager({ gameDirectory: f.gameDirectory, loaderManager: f.manager.loaderManager,
+    lookupHost: f.manager.lookupHost });
+  const restored = await restarted.claimRecoverySession(9);
+  assert.equal(restored.sessionId, waiting.sessionId);
+  assert.equal(restored.sourceName, 'pack.zip');
+  assert.equal(restored.files[0].fileName, 'persisted.jar');
+  assert.throws(() => restarted.getRecoveryState(waiting.sessionId, { ownerId: 7 }),
+    { code: 'MODPACK_SESSION_EXPIRED' });
+
+  const chosen = path.join(f.root, 'persisted.jar');
+  await fs.writeFile(chosen, manual);
+  await restarted.importMissingFile(waiting.sessionId,
+    { projectId: 1, fileId: 21, filePath: chosen }, { ownerId: 9 });
+  const result = await restarted.resume(waiting.sessionId, () => {}, { ownerId: 9 });
+  assert.equal(result.status, 'complete');
+  await assert.rejects(fs.stat(path.join(f.gameDirectory, 'launcher-cache', 'modpack-recovery.json')),
+    { code: 'ENOENT' });
+});
+
+test('CurseForge metadata retries a transient service failure before asking for manual recovery', async t => {
+  const f = await fixture(t, { files: [{ projectID: 1, fileID: 31 }] });
+  let queries = 0;
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (!String(url).includes('api.curse.tools')) throw new Error('unexpected download');
+    queries += 1;
+    return queries === 1 ? new Response(null, { status: 503 })
+      : Response.json({ data: metadata(31, 'manual', null, 'retry.jar') });
+  });
+  const waiting = await f.manager.install(f.archive);
+  assert.equal(queries, 2);
+  assert.equal(waiting.files[0].reason, 'restricted');
+  assert.equal(waiting.files[0].canImport, true);
+});
+
 test('missing CF metadata permits only a query retry, and archive or game-directory changes invalidate recovery', async t => {
   const f = await fixture(t, { files: [{ projectID: 1, fileID: 11 }] });
   let available = false;

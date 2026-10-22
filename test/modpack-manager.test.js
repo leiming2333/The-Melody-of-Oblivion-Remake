@@ -221,6 +221,26 @@ test('可以从最小 mrpack 压缩包读取安装信息', async (t) => {
   });
 });
 
+test('Quilt 整合包预览会在下载前验证游戏与加载器版本组合', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-quilt-preflight-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const archivePath = path.join(root, 'quilt.mrpack');
+  await fs.writeFile(archivePath, storedZip([['modrinth.index.json', JSON.stringify({
+    formatVersion: 1, game: 'minecraft', name: 'Quilt Preview', versionId: '1',
+    dependencies: { minecraft: '1.20.1', 'quilt-loader': '0.26.4' }, files: []
+  })]]));
+  const calls = [];
+  const manager = new ModpackManager({ gameDirectory: root, loaderManager: {
+    validateLoaderVersion: async (...args) => calls.push(args)
+  } });
+  assert.equal((await manager.inspect(archivePath)).loaderType, 'quilt');
+  assert.deepEqual(calls[0].slice(0, 3), ['1.20.1', 'quilt', '0.26.4']);
+  manager.loaderManager.validateLoaderVersion = async () => { throw new Error('版本不存在'); };
+  await assert.rejects(manager.inspect(archivePath), error => (
+    error.code === 'MODPACK_LOADER_INCOMPATIBLE' && error.retryable === false
+  ));
+});
+
 test('预览仅读取压缩清单，不展开整合包覆盖文件', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-modpack-preview-test-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

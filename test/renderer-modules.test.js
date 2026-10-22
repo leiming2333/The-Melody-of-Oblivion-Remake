@@ -73,24 +73,24 @@ test('offline names can be saved repeatedly and a failed rename restores the lat
   assert.equal(toasts.at(-1), 'Invalid name');
 });
 
-test('unsupported saved account types cannot be selected while deletion remains available', async (t) => {
+test('unknown saved account types cannot be selected while deletion remains available', async (t) => {
   const { renderAccountList } = await import('../src/renderer/modules/account-ui.mjs');
   const fixture = await accountUiFixture(t);
   const removed = [], selected = [];
-  fixture.state.accountState.accounts = [{ id: 'microsoft:legacy', type: 'microsoft', name: 'Legacy', uuid: 'old-uuid' }];
+  fixture.state.accountState.accounts = [{ id: 'unknown:legacy', type: 'unknown', name: 'Legacy', uuid: 'old-uuid' }];
   fixture.state.accountState.currentId = null;
   fixture.selectAccount = (id) => selected.push(id);
   fixture.removeAccount = (id) => removed.push(id);
   renderAccountList(fixture);
   const row = fixture.accountList.children[0];
-  assert.equal(row.children[1].children[1].textContent, '已停用的账户');
+  assert.equal(row.children[1].children[1].textContent, '不支持的账户类型');
   const [selectButton, removeButton] = row.children[2].children;
-  assert.equal(selectButton.textContent, '已停用');
+  assert.equal(selectButton.textContent, '不可用');
   assert.equal(selectButton.disabled, true);
   await selectButton.dispatch('click');
   assert.deepEqual(selected, []);
   await removeButton.dispatch('click');
-  assert.deepEqual(removed, ['microsoft:legacy']);
+  assert.deepEqual(removed, ['unknown:legacy']);
 });
 
 test('successive pending offline renames save in order without replacing later text or account selection', async (t) => {
@@ -169,6 +169,30 @@ test('lazy modpack UI installs through existing IPC and resets state after succe
   await installDroppedModpack(context, 'pack.mrpack');
   assert.equal(state.versionDownloadActive, false);
   assert.equal(context.statusBadge.textContent, 'ERROR');
+});
+
+test('modpack UI restores a persisted missing-file session on startup', async () => {
+  const { createModpackUi } = await import('../src/renderer/modules/modpack-ui.mjs');
+  const state = { versionDownloadActive: false, modpackInstallActive: false };
+  const recoveryPanel = { hidden: true };
+  const recoveryTitle = { textContent: '' };
+  const gameStatus = { textContent: '' };
+  const statusBadge = { textContent: '' };
+  const toasts = [];
+  const ui = createModpackUi({ state, minecraft: { getModpackRecovery: async () => ({
+    status: 'waiting-for-files', sessionId: 'persisted', name: 'Persisted Pack', sourceName: 'pack.zip',
+    canResume: false, files: [{ projectId: 1, fileId: 2, reason: 'restricted', canImport: true }]
+  }) }, cancelDownloadButton: {}, downloadStatus: {}, gameStatus, statusBadge,
+  updateDownloadProgress() {}, updateVersionAction() {}, updateTaskEntry() {}, openTask() {},
+  showToast: (message) => toasts.push(message), readableError: error => error.message,
+  elements: { recoveryPanel, recoveryTitle } });
+  const result = await ui.restore();
+  assert.equal(result.sessionId, 'persisted');
+  assert.equal(recoveryPanel.hidden, false);
+  assert.equal(recoveryTitle.textContent, 'Persisted Pack · 1 个文件待处理');
+  assert.equal(gameStatus.textContent, 'Persisted Pack 需要补齐文件');
+  assert.equal(statusBadge.textContent, 'WAITING');
+  assert.deepEqual(toasts, ['已恢复 Persisted Pack 的补齐会话']);
 });
 
 test('modpack inspection excludes a second drop and cancellation never installs optional packs', async (t) => {

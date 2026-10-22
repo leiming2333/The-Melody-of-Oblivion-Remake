@@ -39,10 +39,12 @@ function registerMinecraftIpc({
   BrowserWindow,
   settingsStore,
   accountStore,
+  microsoftAuth,
   yggdrasilAuth,
   javaProbeCache,
   getSettingsStore = () => settingsStore,
   getAccountStore = () => accountStore,
+  getMicrosoftAuth = () => microsoftAuth,
   getYggdrasilAuth = () => yggdrasilAuth,
   getJavaProbeCache = () => javaProbeCache
 }) {
@@ -68,7 +70,7 @@ function registerMinecraftIpc({
 
     const oldManager = services?.peek('modpackManager');
     for (const [ownerId, entry] of recoveryOwners) {
-      oldManager?.discardOwnerSessions?.(ownerId);
+      oldManager?.releaseOwnerSessions?.(ownerId);
       entry.sender.removeListener('destroyed', entry.listener);
     }
     recoveryOwners.clear();
@@ -158,8 +160,9 @@ function registerMinecraftIpc({
   function recoveryOutcome(sender, result) {
     const old = recoveryOwners.get(sender.id);
     if (result?.status === 'waiting-for-files' && !old) {
+      const manager = services?.peek('modpackManager');
       const listener = () => {
-        services?.peek('modpackManager')?.discardOwnerSessions?.(sender.id);
+        manager?.releaseOwnerSessions?.(sender.id);
         recoveryOwners.delete(sender.id);
       };
       sender.once('destroyed', listener);
@@ -183,7 +186,7 @@ function registerMinecraftIpc({
     const task = { controller, senderId: event.sender.id, taskId, kind, preparing: true, cancellable: true };
     const abortWhenDestroyed = () => {
       controller.abort();
-      services?.peek('modpackManager')?.discardOwnerSessions?.(event.sender.id);
+      services?.peek('modpackManager')?.releaseOwnerSessions?.(event.sender.id);
       recoveryOwners.delete(event.sender.id);
     };
     activeDownloads.set(registryId, task);
@@ -281,11 +284,17 @@ function registerMinecraftIpc({
     }, options)
   ));
 
+  registerTaskHandler(ipcMain, 'minecraft:get-modpack-recovery', async (event) => {
+    await applyDownloadSettings();
+    const result = await services.modpackManager.claimRecoverySession(event.sender.id);
+    return recoveryOutcome(event.sender, result);
+  });
+
   registerTaskHandler(ipcMain, 'minecraft:install-modpack', (event, filePath, options = {}) => (
     runDownloadTask(event, 'modpack', async (signal, report, task) => {
       await applyDownloadSettings(task);
       const manager = services.modpackManager;
-      manager.discardOwnerSessions?.(event.sender.id);
+      await manager.discardOwnerSessions?.(event.sender.id);
       const result = await manager.install(filePath, report, {
         signal, installOptionalFiles: options.installOptionalFiles === true, ownerId: event.sender.id
       });
@@ -391,8 +400,16 @@ function registerMinecraftIpc({
     const accountStore = getAccountStore();
     const settingsStore = getSettingsStore();
     let currentAccount = accountStore ? await accountStore.getCurrentAccount() : undefined;
-    if (!currentAccount || !['offline', 'yggdrasil'].includes(currentAccount.type)) {
-      throw new Error('请先添加并选择离线或 LittleSkin 游戏账户');
+    if (currentAccount?.type === 'microsoft') {
+      const auth = getMicrosoftAuth();
+      if (!auth) throw new Error('Microsoft 登录服务不可用，请重新登录');
+      try {
+        currentAccount = await auth.ensureAccount(currentAccount);
+      } catch (error) {
+        if (error.code !== 'MICROSOFT_AUTH_EXPIRED') throw error;
+        await accountStore.signOut(currentAccount.id);
+        throw new Error('Microsoft 登录已过期，已自动退出，请重新登录');
+      }
     }
     if (currentAccount?.type === 'yggdrasil') {
       const yggdrasilAuth = getYggdrasilAuth();

@@ -71,16 +71,23 @@ export function createModpackUi(context) {
     refresh();
   }
 
+  function adoptWaiting(result, { restored = false } = {}) {
+    waiting = result;
+    sourceName = result.sourceName ?? sourceName ?? result.name;
+    gameStatus.textContent = `${result.name} 需要补齐文件`;
+    statusBadge.textContent = 'WAITING';
+    if (elements.recoveryTitle) elements.recoveryTitle.textContent = `${result.name} · ${result.files.length} 个文件待处理`;
+    context.updateDownloadProgress({ phase: 'waiting-for-files', message: '请补齐缺失文件，或重新查询后继续',
+      taskId: state.activeTaskId, cancellable: false });
+    refresh();
+    if (restored) showToast(`已恢复 ${result.name} 的补齐会话`);
+    else showToast('安装已暂停，已校验的文件会保留');
+    context.openTask?.();
+  }
+
   async function outcome(result) {
     if (result.status === 'waiting-for-files') {
-      waiting = result;
-      gameStatus.textContent = `${result.name} 需要补齐文件`;
-      statusBadge.textContent = 'WAITING';
-      if (elements.recoveryTitle) elements.recoveryTitle.textContent = `${result.name} · ${result.files.length} 个文件待处理`;
-      context.updateDownloadProgress({ phase: 'waiting-for-files', message: '请补齐缺失文件，或重新查询后继续',
-        taskId: state.activeTaskId, cancellable: false });
-      showToast('安装已暂停，已校验的文件会保留');
-      context.openTask?.();
+      adoptWaiting(result);
       return;
     }
     waiting = null;
@@ -94,6 +101,13 @@ export function createModpackUi(context) {
       : `${result.name} 已安装并设为当前游戏`);
     if (warnings.length) context.showProblem?.({ message: warnings.join('\n'), code: 'MODPACK_OPTIONAL_SKIPPED' },
       '部分可选文件未安装', { domain: 'modpack' });
+  }
+
+  async function restore() {
+    if (!minecraft?.getModpackRecovery || state.versionDownloadActive) return null;
+    const result = await minecraft.getModpackRecovery();
+    if (result?.status === 'waiting-for-files') adoptWaiting(result, { restored: true });
+    return result;
   }
 
   function reportFailure(error, retry, preserveWaiting = false) {
@@ -182,7 +196,7 @@ export function createModpackUi(context) {
     } catch (error) { context.showProblem?.(error); }
   }
 
-  function directoryChanged() {
+  async function directoryChanged() {
     if (state.versionDownloadActive) return;
     const hadWaiting = Boolean(waiting);
     waiting = null; failed = false; sourcePath = undefined;
@@ -192,11 +206,12 @@ export function createModpackUi(context) {
       statusBadge.textContent = 'READY';
       downloadStatus.hidden = true;
     }
+    await restore();
   }
 
   elements.resumeButton?.addEventListener('click', () => { void resume(); });
   elements.discardButton?.addEventListener('click', () => { void discard(); });
-  return { install, retry, resume, selectFile, discard, directoryChanged };
+  return { install, retry, resume, selectFile, discard, directoryChanged, restore };
 }
 
 export async function installDroppedModpack(context, filePath) {

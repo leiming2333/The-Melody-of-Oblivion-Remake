@@ -169,13 +169,30 @@ test('a reported commit boundary stays noncancellable even if later progress omi
   assert.deepEqual(await task, { status: 'complete', targetId: 'instance-pack' });
 });
 
+test('a new renderer can claim a persisted modpack recovery session', async t => {
+  const f = await fixture(t), owner = sender(9), released = [];
+  const waiting = { status: 'waiting-for-files', sessionId: 'persisted', files: [] };
+  t.mock.method(ModpackManager.prototype, 'claimRecoverySession', async ownerId => {
+    assert.equal(ownerId, owner.id);
+    return waiting;
+  });
+  t.mock.method(ModpackManager.prototype, 'releaseOwnerSessions', ownerId => released.push(ownerId));
+  assert.deepEqual(await f.invoke('minecraft:get-modpack-recovery', owner), waiting);
+  assert.equal(owner.listenerCount('destroyed'), 1);
+  owner.destroy();
+  assert.deepEqual(released, [owner.id]);
+});
+
 test('idle recovery ownership survives task completion and is released on window close or directory changes', async t => {
-  const f = await fixture(t), closedOwner = sender(7), changedOwner = sender(8), discarded = [];
+  const f = await fixture(t), closedOwner = sender(7), changedOwner = sender(8), discarded = [], released = [];
   const waiting = { status: 'waiting-for-files', sessionId: 'waiting', files: [] };
   t.mock.method(ModpackManager.prototype, 'install', async () => waiting);
   t.mock.method(ModpackManager.prototype, 'resume', async () => waiting);
-  t.mock.method(ModpackManager.prototype, 'discardOwnerSessions', function (ownerId) {
+  t.mock.method(ModpackManager.prototype, 'discardOwnerSessions', async function (ownerId) {
     discarded.push({ ownerId, directory: this.gameDirectory });
+  });
+  t.mock.method(ModpackManager.prototype, 'releaseOwnerSessions', function (ownerId) {
+    released.push({ ownerId, directory: this.gameDirectory });
   });
   t.mock.method(MinecraftVersionManager.prototype, 'listLocalProfiles', async () => []);
   await f.invoke('minecraft:install-modpack', closedOwner, 'pack.zip');
@@ -183,12 +200,14 @@ test('idle recovery ownership survives task completion and is released on window
   assert.equal(closedOwner.listenerCount('destroyed'), 1);
   closedOwner.destroy();
   assert.equal(closedOwner.listenerCount('destroyed'), 0);
-  assert.equal(discarded.filter(entry => entry.ownerId === closedOwner.id).length, 2);
+  assert.equal(discarded.filter(entry => entry.ownerId === closedOwner.id).length, 1);
+  assert.equal(released.filter(entry => entry.ownerId === closedOwner.id).length, 1);
   await f.invoke('minecraft:install-modpack', changedOwner, 'pack.zip');
   assert.equal(changedOwner.listenerCount('destroyed'), 1);
   f.settings.gameDirectoryMode = 'system';
   await f.invoke('minecraft:list-local-versions', changedOwner);
   assert.equal(changedOwner.listenerCount('destroyed'), 0);
-  assert.equal(discarded.filter(entry => entry.ownerId === changedOwner.id).length, 2);
-  assert.ok(discarded.every(entry => entry.directory === resolveGameDirectory(f.app, 'local')));
+  assert.equal(discarded.filter(entry => entry.ownerId === changedOwner.id).length, 1);
+  assert.equal(released.filter(entry => entry.ownerId === changedOwner.id).length, 1);
+  assert.ok([...discarded, ...released].every(entry => entry.directory === resolveGameDirectory(f.app, 'local')));
 });
