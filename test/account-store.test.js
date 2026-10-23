@@ -91,7 +91,7 @@ test('LittleSkin 令牌会加密保存且不会暴露给页面', async (t) => {
   assert.equal(privateAccount.clientToken, 'little-client-token');
 });
 
-test('历史 Microsoft 账户不可用于页面、选择、启动或皮肤同步', async (t) => {
+test('历史 Microsoft 账户在加载时被彻底移除', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-retired-account-test-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const file = path.join(root, 'accounts.json');
@@ -105,24 +105,27 @@ test('历史 Microsoft 账户不可用于页面、选择、启动或皮肤同步
   const store = new AccountStore(file);
 
   const state = await store.getState();
-  assert.equal(state.currentId, null);
-  assert.equal(state.current, null);
   assert.deepEqual(state.accounts.map((account) => account.id), [offline.id]);
-  assert.equal(await store.getCurrentAccount(), null);
+  assert.equal(state.currentId, offline.id);
+  assert.equal(state.current.name, 'Steve');
   assert.equal(await store.getAccount(legacy.id), null);
-  await assert.rejects(store.select(legacy.id), /不再支持 Microsoft 登录/);
+  await assert.rejects(store.select(legacy.id), /账户不存在/);
   let requested = false;
   await assert.rejects(store.refreshSkin(legacy.id, () => { requested = true; }), /不支持在线皮肤同步/);
   assert.equal(requested, false);
 
   await store.select(offline.id);
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  assert.deepEqual(saved.accounts.map((account) => account.id), [offline.id]);
+  assert.equal(JSON.stringify(saved).includes('old-access'), false);
+  assert.equal(JSON.stringify(saved).includes('old-refresh'), false);
+
   const removed = await store.remove(offline.id);
   assert.deepEqual(removed, { currentId: null, current: null, accounts: [] });
   assert.equal(await store.getCurrentAccount(), null);
-  assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).accounts[0].id, legacy.id);
 });
 
-test('历史 Microsoft 凭据在离线账户保存时继续加密保留', async (t) => {
+test('历史 Microsoft 凭据随遗留账户一并清除', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-legacy-secrets-test-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const file = path.join(root, 'accounts.json');
@@ -142,9 +145,10 @@ test('历史 Microsoft 凭据在离线账户保存时继续加密保留', async 
   assert.equal(state.current.name, 'Steve');
   assert.equal(JSON.stringify(state).includes('old-access'), false);
   assert.equal(await store.getAccount(legacy.id), null);
-  const saved = JSON.parse(await fs.readFile(file, 'utf8')).accounts[0];
-  assert.equal(saved.accessToken, legacy.accessToken);
-  assert.equal(saved.microsoftRefreshToken, legacy.microsoftRefreshToken);
+  const savedAccounts = JSON.parse(await fs.readFile(file, 'utf8')).accounts;
+  assert.deepEqual(savedAccounts.map((account) => account.type), ['offline']);
+  assert.equal(JSON.stringify(savedAccounts).includes('old-access'), false);
+  assert.equal(JSON.stringify(savedAccounts).includes('old-refresh'), false);
 });
 
 test('账户可以持久化、切换和删除', async (context) => {
@@ -268,10 +272,11 @@ test('安全存储不可用或旧明文凭据不会阻止离线账户操作', as
   const state = await store.addOffline('Steve');
   assert.equal(state.current.type, 'offline');
   assert.equal((await store.getCurrentAccount()).name, 'Steve');
-  const preserved = JSON.parse(await fs.readFile(filePath, 'utf8')).accounts[0];
-  assert.equal(preserved.accessToken, account.accessToken);
-  assert.equal(preserved.microsoftRefreshToken, account.microsoftRefreshToken);
-  assert.equal((await store.remove(account.id)).accounts.length, 1);
+  const saved = JSON.parse(await fs.readFile(filePath, 'utf8'));
+  assert.deepEqual(saved.accounts.map((savedAccount) => savedAccount.type), ['offline']);
+  assert.equal(JSON.stringify(saved).includes('old-plaintext'), false);
+  assert.equal(JSON.stringify(saved).includes('safe-storage:v1:lost-key'), false);
+  assert.equal((await store.remove(state.currentId)).accounts.length, 0);
 });
 
 test('账户文件替换失败时保留现有账户', async (t) => {

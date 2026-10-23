@@ -5,10 +5,8 @@ const { runFileExclusive } = require('../file-write-queue');
 
 const OFFLINE_NAME_PATTERN = /^[A-Za-z0-9_]{3,16}$/;
 const SKIN_MODELS = Object.freeze(['steve', 'alex']);
-// Keep historical credentials encrypted without making those accounts usable.
-const LEGACY_MICROSOFT_SECRET_FIELDS = Object.freeze(['accessToken', 'microsoftRefreshToken']);
 const YGGDRASIL_SECRET_FIELDS = Object.freeze(['accessToken', 'clientToken']);
-const STORED_ONLINE_ACCOUNT_TYPES = Object.freeze(['microsoft', 'yggdrasil']);
+const SUPPORTED_ACCOUNT_TYPES = Object.freeze(['offline', 'yggdrasil']);
 const UNREADABLE_SECRETS = Symbol('unreadableSecrets');
 const CREDENTIALS_UNAVAILABLE_MESSAGE = '登录凭据不可用，请重新登录或删除该账户';
 
@@ -22,11 +20,9 @@ function transformAccountSecrets(value, transform, { recoverErrors = false } = {
   return {
     ...value,
     accounts: value.accounts.map((account) => {
-      if (!STORED_ONLINE_ACCOUNT_TYPES.includes(account?.type)) return account;
+      if (account?.type !== 'yggdrasil') return account;
       const copy = { ...account };
-      const fields = account.type === 'microsoft'
-        ? LEGACY_MICROSOFT_SECRET_FIELDS
-        : YGGDRASIL_SECRET_FIELDS;
+      const fields = YGGDRASIL_SECRET_FIELDS;
       if (copy[UNREADABLE_SECRETS]) {
         Object.assign(copy, copy[UNREADABLE_SECRETS]);
         return copy;
@@ -116,24 +112,22 @@ function normalizeState(value) {
     ? value.accounts.filter(
         (account) =>
           account &&
-          (account.type === 'offline' || STORED_ONLINE_ACCOUNT_TYPES.includes(account.type)) &&
+          SUPPORTED_ACCOUNT_TYPES.includes(account.type) &&
           typeof account.id === 'string' &&
           typeof account.name === 'string' &&
           typeof account.uuid === 'string'
       ).map((account) => ({
         ...account,
         skinModel: SKIN_MODELS.includes(account.skinModel) ? account.skinModel : 'steve',
-        skinUrl: account.type === 'microsoft'
-          ? normalizeSkinUrl(account.skinUrl, ['textures.minecraft.net'])
-          : account.type === 'yggdrasil'
-            ? normalizeSkinUrl(account.skinUrl, ['littleskin.cn'])
-            : undefined
+        skinUrl: account.type === 'yggdrasil'
+          ? normalizeSkinUrl(account.skinUrl, ['littleskin.cn'])
+          : undefined
       }))
     : [];
   const selected = accounts.find((account) => account.id === value?.currentId);
-  const currentId = value?.currentId === null || selected?.type === 'microsoft'
+  const currentId = value?.currentId === null
     ? null
-    : selected?.id ?? accounts.find(isSupportedAccount)?.id ?? null;
+    : selected?.id ?? accounts[0]?.id ?? null;
   return { version: 4, currentId, accounts };
 }
 
@@ -188,10 +182,7 @@ class AccountStore {
         accessToken: _accessToken,
         accessTokenExpiresAt: _accessTokenExpiresAt,
         clientId: _clientId,
-        microsoftClientId: _microsoftClientId,
-        microsoftRefreshToken: _microsoftRefreshToken,
         clientToken: _clientToken,
-        xuid: _xuid,
         [UNREADABLE_SECRETS]: unreadableSecrets,
         ...visible
       } = account;
@@ -311,7 +302,6 @@ class AccountStore {
       if (!account) {
         throw new Error('账户不存在');
       }
-      if (!isSupportedAccount(account)) throw new Error('不再支持 Microsoft 登录，请选择离线或 LittleSkin 账户');
       state.currentId = accountId;
       await this.write(state);
       return this.publicState(state);

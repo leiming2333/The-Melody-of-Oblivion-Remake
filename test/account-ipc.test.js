@@ -27,7 +27,7 @@ test('account IPC registers only offline and LittleSkin account operations', () 
   ].sort());
 });
 
-test('offline account IPC hides historical Microsoft accounts and preserves encrypted storage', async (t) => {
+test('offline account IPC drops historical Microsoft accounts from state and storage', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-account-ipc-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const filePath = path.join(root, 'accounts.json');
@@ -53,7 +53,7 @@ test('offline account IPC hides historical Microsoft accounts and preserves encr
   assert.equal(created.current.skinModel, 'alex');
   assert.equal(created.accounts.length, 1);
   const offlineId = created.currentId;
-  await assert.rejects(invoke('accounts:select', {}, legacy.id), /不再支持|不支持|不可用/);
+  await assert.rejects(invoke('accounts:select', {}, legacy.id), /账户不存在/);
   const renamed = await invoke('accounts:rename', {}, offlineId, 'Player_02');
   assert.equal(renamed.current.name, 'Player_02');
   const remaining = await invoke('accounts:remove', {}, offlineId);
@@ -63,9 +63,8 @@ test('offline account IPC hides historical Microsoft accounts and preserves encr
   const persisted = await fs.readFile(filePath, 'utf8');
   assert.equal(persisted.includes('historical-access-token'), false);
   assert.equal(persisted.includes('historical-refresh-token'), false);
-  assert.deepEqual(JSON.parse(persisted).accounts.find((account) => account.id === legacy.id), {
-    ...legacy, skinModel: 'steve'
-  });
+  assert.equal(persisted.includes('microsoft'), false);
+  assert.equal(JSON.parse(persisted).accounts.length, 0);
 });
 
 test('LittleSkin IPC keeps login, profile selection and sender-owned cancellation', async () => {
