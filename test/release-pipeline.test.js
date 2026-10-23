@@ -47,13 +47,13 @@ async function fixture(t) {
   return { root, input, output, smoke, prepare };
 }
 
-test('all eight targets share one definition, with one emulated runtime gate', () => {
+test('all eight targets share one definition, with seven native runtime gates', () => {
   assert.equal(matrix().include.length, 8);
-  assert.equal(matrix(true).include.length, 8);
-  assert.equal(targets.filter(target => target.emulated).map(target => target.id).join(','), 'linux-armv7l');
-  assert.equal(targets.find(target => target.emulated).emulatedBy, 'qemu-user');
-  assert.equal(targets.filter(target => !target.smokeRunner).length, 0);
-  assert.equal(targets.filter(target => !target.emulated).every(target => target.emulatedBy === null), true);
+  assert.equal(matrix(true).include.length, 7);
+  // linux-armv7l ships without a runtime gate: qemu-user cannot execute an
+  // AppImage runtime, so the emulated path stays available but unused.
+  assert.equal(targets.find(target => !target.smokeRunner).id, 'linux-armv7l');
+  assert.equal(targets.filter(target => target.emulated).length, 0);
   assert.equal(selectTarget(['--win', '--ia32']).id, 'windows-ia32');
   assert.equal(selectTarget(['--target', 'macos-arm64']).arch, 'arm64');
   assert.throws(() => selectTarget(['--publish', 'always']), /Unsupported/);
@@ -64,18 +64,17 @@ test('all eight targets share one definition, with one emulated runtime gate', (
   assert.notEqual(fixture.output, targets[0].output);
 });
 
-test('ARMv7 evidence must stay marked as emulated and keeps its target architecture', async t => {
+test('a report for a target without a runtime gate is recorded as unverified', async t => {
   const { runtimeArch, manifestArch } = require('../scripts/verify-packaged.cjs');
   assert.equal(runtimeArch('armv7l'), 'arm');
   assert.equal(manifestArch('arm'), 'armv7l');
   assert.equal(runtimeArch('x64'), 'x64');
   const f = await fixture(t);
-  await f.prepare();
-  const smokeFile = path.join(f.smoke, 'smoke-linux-armv7l.json');
-  const report = JSON.parse(await fs.readFile(smokeFile, 'utf8'));
-  assert.equal(report.verification, 'emulated');
-  await fs.writeFile(smokeFile, JSON.stringify({ ...report, native: true, verification: 'native' }));
-  await assert.rejects(f.prepare(), /Smoke report mismatch: linux-armv7l/);
+  const manifest = await f.prepare();
+  const armv7 = manifest.assets.find(asset => asset.target === 'linux-armv7l');
+  assert.equal(armv7.smoke.status, 'not-verified');
+  assert.equal(armv7.upgrade.status, 'not-verified');
+  assert.equal(manifest.assets.filter(asset => asset.smoke.status === 'passed').length, 7);
 });
 
 test('manual builds assemble the same verified bundle that tagged releases publish', async () => {

@@ -13,7 +13,7 @@
 | Windows arm64 | `windows-11-arm` | portable EXE | 必须通过 |
 | Linux x64 | `ubuntu-24.04` | AppImage | 必须通过 |
 | Linux arm64 | `ubuntu-24.04-arm` | AppImage | 必须通过 |
-| Linux armv7l | `ubuntu-24.04`，交叉构建 | AppImage | 必须通过，在 QEMU 用户态 armhf 容器内执行，报告标记为模拟验收 |
+| Linux armv7l | `ubuntu-24.04`，交叉构建 | AppImage | 尚无运行时验收，不将构建成功视为启动成功 |
 | macOS x64 | `macos-15-intel` | ZIP | 必须通过 |
 | macOS arm64 | `macos-15` | ZIP | 必须通过 |
 
@@ -25,9 +25,9 @@ runner 标签不是不可变镜像；每个构建另记实际 `ImageOS`、`Image
 - [package-smoke.yml](../.github/workflows/package-smoke.yml) 提供 PR 和手动运行的原生打包检查。
 - [build.yml](../.github/workflows/build.yml) 构建八个目标，再调用 [release-smoke.yml](../.github/workflows/release-smoke.yml) 检查最终包。普通手动运行只上传 Actions 产物，不创建公开 Release。
 
-每个 `dist-<目标>` 包含安装包和 `build-metadata.json`；`smoke-<目标>` 保存启动与升级报告。所有构建及八类运行时验收（七类原生、一类 ARMv7 模拟）通过后，`verified-release-bundle` 汇总八个安装包、校验侧文件、排序后的 `SHA256SUMS` 和内含验证报告的 `release-manifest.json`。Actions 产物有保留期限，交付时需下载保存。
+每个 `dist-<目标>` 包含安装包和 `build-metadata.json`；`smoke-<目标>` 保存启动与升级报告。所有构建及七类原生验收通过后，`verified-release-bundle` 汇总八个安装包、校验侧文件、排序后的 `SHA256SUMS` 和内含验证报告的 `release-manifest.json`。Actions 产物有保留期限，交付时需下载保存。
 
-汇总器严格检查预期文件名、非空内容、重复或缺失文件、源码提交、锁文件摘要、工具链、包内版本以及报告与安装包摘要的对应关系。构建清单记录文件大小、SHA-256、runner、源提交和验证状态。校验文件的文件项只包含文件名，不含构建机器绝对路径。ARMv7 报告必须带 `native:false` 与 `emulatedBy:qemu-user`，汇总时记为 `passed-emulated`，不会记成原生验证。
+汇总器严格检查预期文件名、非空内容、重复或缺失文件、源码提交、锁文件摘要、工具链、包内版本以及报告与安装包摘要的对应关系。构建清单记录文件大小、SHA-256、runner、源提交和验证状态。校验文件的文件项只包含文件名，不含构建机器绝对路径。ARMv7 没有运行时验收，清单中记为 `not-verified`。
 
 ## 启动与升级验收范围
 
@@ -35,13 +35,13 @@ runner 标签不是不可变镜像；每个构建另记实际 `ImageOS`、`Image
 
 原生升级检查额外构建隔离的旧测试包：同一源码通过打包元数据设为 `0.0.0`，输出到 `release/upgrade-fixtures/<目标>/`，不进入发布集合。先实际启动旧测试包，再用真实更新管理器和辅助进程安装当前包，实际启动新版后确认健康；再升级一次检查唯一备份、最近一代保留与更旧受管备份清理。它验证不同包内版本和真实替换流程，不代表与任意历史公开版本兼容。
 
-Linux ARMv7 在 `ubuntu-24.04` 上通过 `docker/setup-qemu-action` 注册 arm/v7 后，用 `node:20-bookworm-slim` 的 armhf 容器解包并启动真实 AppImage，执行与原生目标相同的启动和两次升级检查。容器只在用户态翻译指令，GPU 渲染、驱动栈与真机性能不在验证范围内，报告中的 `native` 字段固定为 `false`。
+ARMv7 曾尝试用 QEMU 用户态替代原生验收：`ubuntu-24.04` 上注册 binfmt 后，armhf 容器可以执行自身工具链，但 AppImage 运行时（ELF 带尾部 squashfs）在 qemu-user 下始终返回 `ENOEXEC`，因此该路线暂时不纳入发布门槛，armv7 产物只做构建与校验。`verify-packaged.cjs` 与 `verify-upgrade.cjs` 保留 `--emulated <机制>` 参数，报告写入 `native:false` 与 `emulatedBy`，汇总时记为 `passed-emulated`；重新启用时不需要改脚本。待 AppImage 运行时可在模拟环境中执行后，把 `linux-armv7l` 的 `smokeRunner` 与 `emulatedBy` 加回 `scripts/release-targets.cjs` 即可恢复门槛。
 
 测试使用隔离安装目录和用户数据目录。健康确认由测试程序在新版启动报告成功后调用，实际产品则由主进程检测新版窗口显示、主框架本地页面加载和预加载桥接就绪。Java、账户与网络后台检查不阻挡健康确认。两类 macOS runner 还实际撤销隔离应用目录的写权限，要求系统拒绝写入后保留已校验 ZIP、降级为手动替换入口，且不退出或启动辅助进程；报告必须包含 `manualPermissionFallbackPassed:true`。App Translocation 降级、Windows 文件锁与辅助进程错误、回滚错误、不同安装路径隔离等故障分支另由事务测试覆盖。
 
 ## 公开发布与 Blob
 
-只有版本标签 `v<package.json.version>` 触发公开发布。流程校验标签与检出的源码、锁文件及包内版本，等待八包和八类运行时验收报告完整通过，再上传 draft 并公开。已有公开版本仅允许相同摘要的幂等重跑；内容不同直接失败，不能覆盖。
+只有版本标签 `v<package.json.version>` 触发公开发布。流程校验标签与检出的源码、锁文件及包内版本，等待八包和七类原生报告完整通过，再上传 draft 并公开。已有公开版本仅允许相同摘要的幂等重跑；内容不同直接失败，不能覆盖。
 
 配置 Blob 后，先同步全部已验证安装包和清单，全部成功才更新最新版本信息；失败不切换 latest。未配置 Blob 时报告跳过，不伪造同步成功。手动分支构建始终不走公开发布与 Blob 同步步骤。
 
