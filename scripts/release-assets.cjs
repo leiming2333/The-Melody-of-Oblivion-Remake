@@ -73,24 +73,30 @@ async function prepareRelease(input, output, { tag, commit, smokeDirectory, vers
     const metadata = JSON.parse(await fs.readFile(path.join(path.dirname(item.file), 'build-metadata.json'), 'utf8'));
     if (metadata.target !== item.target.id || metadata.version !== version || metadata.commit !== commit || metadata.sourceDirty !== false || metadata.lockSha256 !== lockSha256
       || JSON.stringify(metadata.toolchain) !== JSON.stringify(versions) || metadata.filename !== item.name || metadata.size !== item.size || metadata.sha256 !== item.sha256) throw new Error(`Invalid build metadata: ${item.name}`);
-    let smoke = { status: 'not-native-verified', reason: 'No supported GitHub ARMv7 runner' };
-    let upgrade = { status: 'not-native-verified', reason: 'No supported GitHub ARMv7 runner' };
+    let smoke = { status: 'not-verified', reason: 'No runtime acceptance for this target' };
+    let upgrade = { status: 'not-verified', reason: 'No runtime acceptance for this target' };
     if (item.target.smokeRunner) {
+      const emulated = item.target.emulated;
+      const mechanism = item.target.emulatedBy;
+      const matchesEvidence = (report) => !emulated || (report.native === false && report.emulatedBy === mechanism);
+      const matchesArch = (report) => report.arch === item.target.arch
+        || (emulated && item.target.arch === 'armv7l' && report.arch === 'arm');
       const matches = smokeFiles.filter(file => path.basename(file) === `smoke-${item.target.id}.json`);
       if (matches.length !== 1) throw new Error(`Missing smoke evidence: ${item.target.id}`);
       const report = JSON.parse(await fs.readFile(matches[0], 'utf8'));
-      if (!report.ok || !report.packaged || report.platform !== item.target.platform || report.arch !== item.target.arch || report.version !== version
-        || report.artifactSha256 !== item.sha256 || report.artifact !== item.name) throw new Error(`Smoke report mismatch: ${item.target.id}`);
-      smoke = { status: 'passed', report };
+      if (!report.ok || !report.packaged || report.platform !== item.target.platform || !matchesArch(report) || report.version !== version
+        || report.artifactSha256 !== item.sha256 || report.artifact !== item.name || !matchesEvidence(report)) throw new Error(`Smoke report mismatch: ${item.target.id}`);
+      smoke = { status: emulated ? 'passed-emulated' : 'passed', ...(emulated ? { emulatedBy: mechanism } : {}), report };
       const upgradeFiles = smokeFiles.filter(file => path.basename(file) === `upgrade-${item.target.id}.json`);
       if (upgradeFiles.length !== 1) throw new Error(`Missing upgrade evidence: ${item.target.id}`);
       const upgradeReport = JSON.parse(await fs.readFile(upgradeFiles[0], 'utf8'));
       if (!upgradeReport.ok || upgradeReport.target !== item.target.id || upgradeReport.version !== version || upgradeReport.artifactSha256 !== item.sha256
         || upgradeReport.artifact !== item.name || upgradeReport.upgrades !== 2 || !upgradeReport.previousBackupPreserved || !upgradeReport.olderManagedBackupCleaned
         || upgradeReport.previousVersion !== '0.0.0' || !upgradeReport.previousReport?.ok || !upgradeReport.previousReport.packaged
-        || upgradeReport.previousReport.version !== '0.0.0' || upgradeReport.previousReport.arch !== item.target.arch || upgradeReport.previousReport.platform !== item.target.platform
-        || (item.target.platform === 'darwin' && upgradeReport.manualPermissionFallbackPassed !== true)) throw new Error(`Upgrade report mismatch: ${item.target.id}`);
-      upgrade = { status: 'passed', report: upgradeReport };
+        || upgradeReport.previousReport.version !== '0.0.0' || !matchesArch(upgradeReport.previousReport) || upgradeReport.previousReport.platform !== item.target.platform
+        || (item.target.platform === 'darwin' && upgradeReport.manualPermissionFallbackPassed !== true)
+        || !matchesEvidence(upgradeReport)) throw new Error(`Upgrade report mismatch: ${item.target.id}`);
+      upgrade = { status: emulated ? 'passed-emulated' : 'passed', ...(emulated ? { emulatedBy: mechanism } : {}), report: upgradeReport };
     }
     assets.push({ name: item.name, target: item.target.id, platform: item.target.platform, arch: item.target.arch, size: item.size, sha256: item.sha256, build: metadata, smoke, upgrade });
   }

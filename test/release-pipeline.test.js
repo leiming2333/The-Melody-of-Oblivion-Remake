@@ -28,25 +28,32 @@ async function fixture(t) {
     await fs.writeFile(path.join(directory, 'build-metadata.json'), JSON.stringify({
       target: target.id, version, commit, sourceDirty: false, lockSha256, toolchain: versions, filename: target.filename, size: contents.length, sha256: await hashFile(file)
     }));
+    const evidence = target.emulated
+      ? { native: false, verification: 'emulated', emulatedBy: target.emulatedBy }
+      : { native: true, verification: 'native' };
     if (target.smokeRunner) await fs.writeFile(path.join(smoke, `smoke-${target.id}.json`), JSON.stringify({
       ok: true, packaged: true, platform: target.platform, arch: target.arch, version,
-      artifact: target.filename, artifactSha256: await hashFile(file)
+      artifact: target.filename, artifactSha256: await hashFile(file), ...evidence
     }));
     if (target.smokeRunner) await fs.writeFile(path.join(smoke, `upgrade-${target.id}.json`), JSON.stringify({
       ok: true, target: target.id, version, artifact: target.filename, artifactSha256: await hashFile(file),
       upgrades: 2, previousBackupPreserved: true, olderManagedBackupCleaned: true,
       ...(target.platform === 'darwin' ? { manualPermissionFallbackPassed: true } : {}),
-      previousVersion: '0.0.0', previousReport: { ok: true, packaged: true, version: '0.0.0', arch: target.arch, platform: target.platform }
+      previousVersion: '0.0.0', ...evidence,
+      previousReport: { ok: true, packaged: true, version: '0.0.0', arch: target.arch, platform: target.platform, ...evidence }
     }));
   }
   const prepare = () => prepareRelease(input, output, { tag: `v${version}`, version, commit, smokeDirectory: smoke });
   return { root, input, output, smoke, prepare };
 }
 
-test('all eight targets share one definition, with seven native runtime gates', () => {
+test('all eight targets share one definition, with one emulated runtime gate', () => {
   assert.equal(matrix().include.length, 8);
-  assert.equal(matrix(true).include.length, 7);
-  assert.equal(targets.find(target => !target.smokeRunner).id, 'linux-armv7l');
+  assert.equal(matrix(true).include.length, 8);
+  assert.equal(targets.filter(target => target.emulated).map(target => target.id).join(','), 'linux-armv7l');
+  assert.equal(targets.find(target => target.emulated).emulatedBy, 'qemu-user');
+  assert.equal(targets.filter(target => !target.smokeRunner).length, 0);
+  assert.equal(targets.filter(target => !target.emulated).every(target => target.emulatedBy === null), true);
   assert.equal(selectTarget(['--win', '--ia32']).id, 'windows-ia32');
   assert.equal(selectTarget(['--target', 'macos-arm64']).arch, 'arm64');
   assert.throws(() => selectTarget(['--publish', 'always']), /Unsupported/);
@@ -55,6 +62,20 @@ test('all eight targets share one definition, with seven native runtime gates', 
   assert.equal(fixture.fixtureVersion, '0.0.0');
   assert.equal(fixture.output, 'release/upgrade-fixtures/windows-x64');
   assert.notEqual(fixture.output, targets[0].output);
+});
+
+test('ARMv7 evidence must stay marked as emulated and keeps its target architecture', async t => {
+  const { runtimeArch, manifestArch } = require('../scripts/verify-packaged.cjs');
+  assert.equal(runtimeArch('armv7l'), 'arm');
+  assert.equal(manifestArch('arm'), 'armv7l');
+  assert.equal(runtimeArch('x64'), 'x64');
+  const f = await fixture(t);
+  await f.prepare();
+  const smokeFile = path.join(f.smoke, 'smoke-linux-armv7l.json');
+  const report = JSON.parse(await fs.readFile(smokeFile, 'utf8'));
+  assert.equal(report.verification, 'emulated');
+  await fs.writeFile(smokeFile, JSON.stringify({ ...report, native: true, verification: 'native' }));
+  await assert.rejects(f.prepare(), /Smoke report mismatch: linux-armv7l/);
 });
 
 test('manual builds assemble the same verified bundle that tagged releases publish', async () => {
@@ -77,7 +98,7 @@ test('build preflight rejects toolchain drift and dependencies without integrity
   assert.throws(() => assertToolchain({ node: versions.node, userAgent: `npm/${versions.npm}`, lock }), /integrity/);
 });
 
-test('release creates portable checksums and binds seven native reports to the exact eight packages', async t => {
+test('release creates portable checksums and binds eight runtime reports to the exact eight packages', async t => {
   const f = await fixture(t);
   const manifest = await f.prepare();
   assert.equal(manifest.assets.length, 8);

@@ -322,3 +322,73 @@ test('inspection and direct installation consistently reject duplicate, encrypte
   }
   assert.equal(f.baseCalls(), 0);
 });
+
+test('a waiting session keeps its verified archive copy and resumes after the original is moved', async t => {
+  const f = await fixture(t, { files: [{ projectID: 1, fileID: 41 }] });
+  const manual = 'mod supplied after the archive moved';
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (String(url).includes('api.curse.tools')) {
+      return Response.json({ data: metadata(41, manual, null, 'moved.jar') });
+    }
+    throw new Error('unexpected download');
+  });
+  const waiting = await f.manager.install(f.archive);
+  assert.equal(waiting.status, 'waiting-for-files');
+  const cacheDirectory = path.join(f.gameDirectory, 'launcher-cache', 'modpack-archives');
+  assert.equal((await fs.readdir(cacheDirectory)).length, 1);
+
+  await fs.rename(f.archive, path.join(f.root, 'moved-pack.zip'));
+
+  const restarted = new ModpackManager({ gameDirectory: f.gameDirectory,
+    loaderManager: f.manager.loaderManager, lookupHost: f.manager.lookupHost });
+  const restored = await restarted.claimRecoverySession('window');
+  assert.equal(restored.sessionId, waiting.sessionId);
+  assert.equal(restored.files[0].fileName, 'moved.jar');
+
+  const chosen = path.join(f.root, 'moved-mod.jar');
+  await fs.writeFile(chosen, manual);
+  await restarted.importMissingFile(waiting.sessionId,
+    { projectId: 1, fileId: 41, filePath: chosen }, { ownerId: 'window' });
+  const result = await restarted.resume(waiting.sessionId, () => {}, { ownerId: 'window' });
+  assert.equal(result.status, 'complete');
+  assert.equal(await fs.readFile(path.join(f.gameDirectory, 'melody-instances', result.instanceId,
+    'mods/moved.jar'), 'utf8'), manual);
+  await assert.rejects(fs.stat(cacheDirectory), { code: 'ENOENT' });
+});
+
+test('a changed archive still requires a new selection even when a copy exists', async t => {
+  const f = await fixture(t, { files: [{ projectID: 1, fileID: 51 }] });
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (String(url).includes('api.curse.tools')) {
+      return Response.json({ data: metadata(51, 'content', null, 'changed.jar') });
+    }
+    throw new Error('unexpected download');
+  });
+  const waiting = await f.manager.install(f.archive);
+  assert.equal(waiting.status, 'waiting-for-files');
+  await fs.appendFile(f.archive, 'changed');
+  await assert.rejects(f.manager.resume(waiting.sessionId, () => {}), { code: 'MODPACK_ARCHIVE_CHANGED' });
+  const cacheDirectory = path.join(f.gameDirectory, 'launcher-cache', 'modpack-archives');
+  await assert.rejects(fs.stat(cacheDirectory), { code: 'ENOENT' });
+});
+
+test('completed and discarded sessions release the managed archive copy', async t => {
+  const f = await fixture(t, { format: 'modrinth' });
+  const result = await f.manager.install(f.archive);
+  assert.equal(result.status, 'complete');
+  await assert.rejects(fs.stat(path.join(f.gameDirectory, 'launcher-cache', 'modpack-archives')), { code: 'ENOENT' });
+
+  const g = await fixture(t, { files: [{ projectID: 1, fileID: 61 }] });
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (String(url).includes('api.curse.tools')) return new Response(null, { status: 503 });
+    throw new Error('unexpected download');
+  });
+  const waiting = await g.manager.install(g.archive);
+  assert.equal(waiting.status, 'waiting-for-files');
+  const cacheDirectory = path.join(g.gameDirectory, 'launcher-cache', 'modpack-archives');
+  assert.equal((await fs.readdir(cacheDirectory)).length, 1);
+  await g.manager.discardSession(waiting.sessionId);
+  await assert.rejects(fs.stat(cacheDirectory), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(path.join(g.gameDirectory, 'launcher-cache', 'modpack-recovery.json')),
+    { code: 'ENOENT' });
+});

@@ -9,7 +9,7 @@ const { promisify } = require('node:util');
 const { createHash } = require('node:crypto');
 const { targets } = require('./release-targets.cjs');
 const { hashFile } = require('./release-assets.cjs');
-const { verify } = require('./verify-packaged.cjs');
+const { verify, runtimeArch } = require('./verify-packaged.cjs');
 const { UpdateManager } = require('../src/main/updater/update-manager');
 const { startInstallHelper } = require('../src/main/updater/install-helper');
 const run = promisify(execFile);
@@ -120,7 +120,7 @@ async function writeUpgradeFailureReport({ reportPath, error, target, directory,
   return report;
 }
 
-async function verifyUpgrade({ target: targetId, artifact, previousArtifact, report: reportPath }) {
+async function verifyUpgrade({ target: targetId, artifact, previousArtifact, report: reportPath, emulatedBy = null }) {
   const target = targets.find(item => item.id === targetId);
   if (!target?.smokeRunner || target.platform !== process.platform) throw new Error('Upgrade smoke requires a native runnable target');
   const packagePath = path.resolve(artifact);
@@ -175,13 +175,13 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
       const extract = await fs.mkdtemp(path.join(directory, 'linux-run-'));
       await run(installation, ['--appimage-extract'], { cwd: extract, maxBuffer: 16 * 1024 * 1024 });
       return verify(path.join(extract, 'squashfs-root', 'AppRun'), ['--no-sandbox'], {
-        expectedArch: target.arch, expectedVersion, reportPath
+        expectedArch: target.arch, expectedVersion, reportPath, emulatedBy
       });
     }
     const previousReportPath = path.join(directory, 'previous-package-smoke.json');
     const previousReport = target.platform === 'linux'
       ? await launchLinux('0.0.0', previousReportPath)
-      : await verify(executable, [], { expectedArch: target.arch, expectedVersion: '0.0.0', reportPath: previousReportPath });
+      : await verify(executable, [], { expectedArch: target.arch, expectedVersion: '0.0.0', reportPath: previousReportPath, emulatedBy });
     function manager(currentVersion, { dataDirectory = userData, quit = () => {}, helper } = {}) {
       return new UpdateManager({
         app: { isPackaged: true, getVersion: () => currentVersion,
@@ -233,7 +233,7 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
         try { return JSON.parse(await fs.readFile(smokeResult, 'utf8')); }
         catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return null; throw error; }
       }, 'Updated application did not produce a smoke report');
-      if (!report.ok || !report.packaged || report.platform !== target.platform || report.arch !== target.arch || report.version !== version) throw new Error('Updated application report does not match the package');
+      if (!report.ok || !report.packaged || report.platform !== target.platform || report.arch !== runtimeArch(target.arch) || report.version !== version) throw new Error('Updated application report does not match the package');
       if (await hashInstallation(record.backupPath) !== beforeHash) throw new Error('Previous installation bytes were not preserved');
       if (expectedInstallationHash && await hashInstallation(installation) !== expectedInstallationHash) throw new Error('Installed package bytes differ from the verified download');
       const healthy = manager(version);
@@ -250,6 +250,8 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
       previousPackage: 'Same source, isolated extraMetadata.version=0.0.0 test build',
       previousReport, healthyConfirmation: 'Explicit harness call after real packaged startup',
       backupCleanupReinstall: true, upgrades: records.length,
+      native: !emulatedBy, verification: emulatedBy ? 'emulated' : 'native',
+      ...(emulatedBy ? { emulatedBy } : {}),
       previousBackupPreserved: true, olderManagedBackupCleaned: true,
       ...(manualPermissionFallback ? { manualPermissionFallbackPassed: manualPermissionFallback.passed, manualPermissionFallback } : {}),
       reports: records.map(record => record.smoke) };
@@ -275,8 +277,9 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const options = {};
   for (let index = 0; index < args.length; index += 2) {
-    const key = { '--target': 'target', '--artifact': 'artifact', '--previous-artifact': 'previousArtifact', '--report': 'report' }[args[index]];
-    if (!key || !args[index + 1]) throw new Error('Usage: verify-upgrade.cjs --target <id> --artifact <package> --previous-artifact <0.0.0-package> --report <json>');
+    const key = { '--target': 'target', '--artifact': 'artifact', '--previous-artifact': 'previousArtifact',
+      '--report': 'report', '--emulated': 'emulatedBy' }[args[index]];
+    if (!key || !args[index + 1]) throw new Error('Usage: verify-upgrade.cjs --target <id> --artifact <package> --previous-artifact <0.0.0-package> --report <json> [--emulated <mechanism>]');
     options[key] = args[index + 1];
   }
   verifyUpgrade(options).catch(error => { console.error(error); process.exitCode = 1; });

@@ -27,6 +27,7 @@ jobs:
           target: ${{ matrix.id }}
           arch: ${{ matrix.arch }}
           artifact: ${{ matrix.output }}/${{ matrix.filename }}
+          emulated: ${{ matrix.emulated }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

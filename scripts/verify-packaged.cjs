@@ -3,9 +3,15 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 
+// QEMU user mode reports process.arch 'arm' for an armv7l package. The release
+// manifest keeps the target architecture so reports stay comparable.
+const runtimeArch = (arch) => arch === 'armv7l' ? 'arm' : arch;
+const manifestArch = (arch) => arch === 'arm' ? 'armv7l' : arch;
+const ARCHITECTURES = ['x64', 'ia32', 'arm64', 'arm', 'armv7l'];
+
 async function verify(binary, args = [], {
   timeoutMs = 60000, requirePackaged = true, expectedArch = process.arch, expectedVersion,
-  reportPath, artifactPath
+  reportPath, artifactPath, emulatedBy = null
 } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-package-smoke-'));
   const resultFile = path.join(directory, 'result.json');
@@ -23,10 +29,16 @@ async function verify(binary, args = [], {
       });
     });
     const result = JSON.parse(await fs.readFile(resultFile, 'utf8'));
-    if (!result.ok || (requirePackaged && !result.packaged) || result.platform !== process.platform || result.arch !== expectedArch
+    if (!result.ok || (requirePackaged && !result.packaged) || result.platform !== process.platform
+      || result.arch !== runtimeArch(expectedArch)
       || (expectedVersion && result.version !== expectedVersion)) {
       throw new Error('Smoke report does not match the expected packaged application');
     }
+    result.reportedArch = result.arch;
+    result.arch = manifestArch(result.arch);
+    result.native = !emulatedBy;
+    result.verification = emulatedBy ? 'emulated' : 'native';
+    if (emulatedBy) result.emulatedBy = emulatedBy;
     if (artifactPath) {
       const { hashFile } = require('./release-assets.cjs');
       result.artifactSha256 = await hashFile(artifactPath);
@@ -46,7 +58,8 @@ if (require.main === module) {
   const options = {};
   while (cliArgs[0]?.startsWith('--')) {
     const flag = cliArgs.shift();
-    const key = { '--expected-arch': 'expectedArch', '--expected-version': 'expectedVersion', '--report': 'reportPath', '--artifact': 'artifactPath' }[flag];
+    const key = { '--expected-arch': 'expectedArch', '--expected-version': 'expectedVersion', '--report': 'reportPath',
+      '--artifact': 'artifactPath', '--emulated': 'emulatedBy' }[flag];
     if (!key || !cliArgs[0] || cliArgs[0].startsWith('--')) {
       console.error(`Invalid verification option: ${flag}`);
       process.exitCode = 1;
@@ -55,9 +68,9 @@ if (require.main === module) {
     options[key] = cliArgs.shift();
   }
   const [binary, ...args] = cliArgs;
-  if (process.exitCode || !binary || (options.expectedArch && !['x64', 'ia32', 'arm64', 'arm'].includes(options.expectedArch))) {
-    console.error('Usage: node scripts/verify-packaged.cjs [--expected-arch <arch>] [--expected-version <version>] [--report <json>] [--artifact <package>] <executable> [arguments]');
+  if (process.exitCode || !binary || (options.expectedArch && !ARCHITECTURES.includes(options.expectedArch))) {
+    console.error('Usage: node scripts/verify-packaged.cjs [--expected-arch <arch>] [--expected-version <version>] [--report <json>] [--artifact <package>] [--emulated <mechanism>] <executable> [arguments]');
     process.exitCode = 1;
   } else verify(binary, args, options).catch(error => { console.error(error.message); process.exitCode = 1; });
 }
-module.exports = { verify };
+module.exports = { verify, runtimeArch, manifestArch };

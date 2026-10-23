@@ -10,6 +10,10 @@ inputs:
   artifact:
     required: true
     description: Final package path.
+  emulated:
+    required: false
+    default: 'false'
+    description: Run the Linux acceptance under QEMU user mode instead of native hardware.
 runs:
   using: composite
   steps:
@@ -35,7 +39,7 @@ runs:
         node scripts/verify-upgrade.cjs --target $env:SMOKE_TARGET --artifact $env:SMOKE_ARTIFACT --previous-artifact $previous --report "package-reports/upgrade-$env:SMOKE_TARGET.json"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     - name: Linux package and upgrade smoke
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && inputs.emulated != 'true'
       shell: bash
       env:
         SMOKE_ARCH: ${{ inputs.arch }}
@@ -51,6 +55,51 @@ runs:
         xvfb-run -a node scripts/verify-packaged.cjs --expected-arch "$SMOKE_ARCH" --expected-version "$version" --report "package-reports/smoke-$SMOKE_TARGET.json" --artifact "$artifact" package-smoke/squashfs-root/AppRun --no-sandbox
         previous="release/upgrade-fixtures/$SMOKE_TARGET/$(basename "$artifact")"
         xvfb-run -a node scripts/verify-upgrade.cjs --target "$SMOKE_TARGET" --artifact "$artifact" --previous-artifact "$previous" --report "package-reports/upgrade-$SMOKE_TARGET.json"
+    - name: Register QEMU for 32-bit ARM
+      if: runner.os == 'Linux' && inputs.emulated == 'true'
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm/v7
+    - name: Linux ARMv7 emulated package and upgrade smoke
+      if: runner.os == 'Linux' && inputs.emulated == 'true'
+      shell: bash
+      env:
+        SMOKE_ARCH: ${{ inputs.arch }}
+        SMOKE_TARGET: ${{ inputs.target }}
+        SMOKE_ARTIFACT: ${{ inputs.artifact }}
+        SMOKE_MECHANISM: qemu-user
+      run: |
+        set -euo pipefail
+        # GitHub hosts no 32-bit ARM runner, so the real armv7 AppImage boots
+        # inside an armhf container under QEMU user mode. The report records the
+        # mechanism and never claims native hardware.
+        version=$(node -p 'require("./package.json").version')
+        docker run --rm --platform linux/arm/v7 \
+          -v "$PWD:/work" -w /work \
+          -e SMOKE_ARCH -e SMOKE_TARGET -e SMOKE_ARTIFACT -e SMOKE_MECHANISM \
+          -e SMOKE_VERSION="$version" \
+          node:20-bookworm-slim bash -lc '
+            set -euo pipefail
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends \
+              xvfb xauth libgtk-3-0 libnss3 libasound2 libxss1 libgbm1 libx11-xcb1 \
+              libxcomposite1 libxdamage1 libxrandr2 libatk-bridge2.0-0 libatspi2.0-0 \
+              libcups2 libdrm2 libpango-1.0-0 libcairo2 libatk1.0-0 libglib2.0-0 \
+              libdbus-1-3 libexpat1 libxkbcommon0 libgdk-pixbuf-2.0-0 libfuse2 file >/dev/null
+            artifact=$(realpath "$SMOKE_ARTIFACT")
+            chmod +x "$artifact"
+            mkdir -p package-smoke
+            (cd package-smoke && "$artifact" --appimage-extract >/dev/null)
+            xvfb-run -a node scripts/verify-packaged.cjs --expected-arch "$SMOKE_ARCH" \
+              --expected-version "$SMOKE_VERSION" --emulated "$SMOKE_MECHANISM" \
+              --report "package-reports/smoke-$SMOKE_TARGET.json" \
+              --artifact "$artifact" package-smoke/squashfs-root/AppRun --no-sandbox
+            previous="release/upgrade-fixtures/$SMOKE_TARGET/$(basename "$artifact")"
+            xvfb-run -a node scripts/verify-upgrade.cjs --target "$SMOKE_TARGET" --artifact "$artifact" \
+              --previous-artifact "$previous" --emulated "$SMOKE_MECHANISM" \
+              --report "package-reports/upgrade-$SMOKE_TARGET.json"
+          '
     - name: macOS package and upgrade smoke
       if: runner.os == 'macOS'
       shell: bash

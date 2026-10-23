@@ -23,6 +23,8 @@ const { STAGING_MARKER, createStagingDirectory, removeStagingDirectory,
 
 const MODPACK_EXTENSIONS = Object.freeze(['.mrpack', '.zip']);
 const INSTANCE_ID_PATTERN = /^[0-9A-Za-z._-]{1,100}$/;
+const ARCHIVE_CACHE_DIR = 'modpack-archives';
+const ARCHIVE_CACHE_NAME = /^[0-9a-f]{64}\.(?:mrpack|zip)$/;
 const RECOVERY_SCHEMA_VERSION = 1;
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RECOVERY_REASONS = new Set(['metadata-unavailable', 'restricted', 'download-failed']);
@@ -111,12 +113,25 @@ function serializeCurseForgeEntry(value, { missing = false } = {}) {
   return result;
 }
 
-function serializeRecoverySession(session) {
+function cachedArchiveIn(value, cacheDirectory) {
+  if (typeof cacheDirectory !== 'string' || typeof value !== 'string' || !path.isAbsolute(value)) return undefined;
+  const resolved = path.resolve(value);
+  if (path.dirname(resolved) !== path.resolve(cacheDirectory)
+    || !ARCHIVE_CACHE_NAME.test(path.basename(resolved))) return undefined;
+  return resolved;
+}
+
+function archiveCachePath(cacheDirectory, fingerprint, archivePath) {
+  return path.join(cacheDirectory, `${fingerprint}${path.extname(archivePath).toLowerCase()}`);
+}
+
+function serializeRecoverySession(session, cacheDirectory) {
   if (!SESSION_ID_PATTERN.test(session?.sessionId ?? '')
     || typeof session.archivePath !== 'string' || !path.isAbsolute(session.archivePath)
     || !/^[0-9a-f]{64}$/i.test(session.fingerprint ?? '')) return undefined;
   const metadata = [...session.metadata.values()].map((entry) => serializeCurseForgeEntry(entry)).filter(Boolean);
   const missing = [...session.missing.values()].map((entry) => serializeCurseForgeEntry(entry, { missing: true })).filter(Boolean);
+  const cachedArchivePath = cachedArchiveIn(session.cachedArchivePath, cacheDirectory);
   return {
     sessionId: session.sessionId,
     archivePath: session.archivePath,
@@ -124,13 +139,14 @@ function serializeRecoverySession(session) {
     fingerprint: session.fingerprint.toLowerCase(),
     installOptionalFiles: session.installOptionalFiles === true,
     name: String(session.name ?? path.basename(session.archivePath)).slice(0, 100),
+    ...(cachedArchivePath ? { cachedArchivePath } : {}),
     metadata,
     missing,
     updatedAt: session.updatedAt ?? new Date().toISOString()
   };
 }
 
-function restoreRecoverySession(value, gameDirectory) {
+function restoreRecoverySession(value, gameDirectory, cacheDirectory) {
   if (!value || !samePath(value.gameDirectory, gameDirectory)) return undefined;
   const base = serializeRecoverySession({
     ...value,
@@ -140,7 +156,7 @@ function restoreRecoverySession(value, gameDirectory) {
     missing: new Map((Array.isArray(value.missing) ? value.missing : []).map((entry) => [
       `${entry?.projectId}:${entry?.fileId}`, entry
     ]))
-  });
+  }, cacheDirectory);
   if (!base) return undefined;
   const archivePath = validateModpackFile(base.archivePath);
   const metadata = new Map(base.metadata.map((entry) => [`${entry.projectId}:${entry.fileId}`, entry]));
@@ -433,6 +449,9 @@ class ModpackManager {
     this.lookupHost = lookupHost;
     this.sessions = new Map();
     this.recoveryFile = recoveryFile ?? safePath(gameDirectory, 'launcher-cache', 'modpack-recovery.json');
+    // A verified copy keeps a pending recovery session usable after the user
+    // moves, renames or deletes the archive they selected.
+    this.archiveCacheDirectory = path.join(path.dirname(this.recoveryFile), ARCHIVE_CACHE_DIR);
     this.recoveryLoaded = null;
   }
 
@@ -442,7 +461,7 @@ class ModpackManager {
       if (value?.schemaVersion !== RECOVERY_SCHEMA_VERSION || !Array.isArray(value.sessions)) return;
       for (const record of value.sessions.slice(0, 8)) {
         try {
-          const session = restoreRecoverySession(record, this.gameDirectory);
+          const session = restoreRecoverySession(record, this.gameDirectory, this.archiveCacheDirectory);
           if (session) this.sessions.set(session.sessionId, session);
         } catch {
           // Ignore individual records that were edited or belong to an older format.
@@ -450,7 +469,7 @@ class ModpackManager {
       }
     }).catch((error) => {
       if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
-    });
+    }).then(() => this.purgeArchiveCache());
     return this.recoveryLoaded;
   }
 
@@ -458,7 +477,7 @@ class ModpackManager {
     return runFileExclusive(this.recoveryFile, async () => {
       const sessions = [...this.sessions.values()]
         .filter((session) => session.waiting)
-        .map(serializeRecoverySession)
+        .map((session) => serializeRecoverySession(session, this.archiveCacheDirectory))
         .filter(Boolean);
       if (sessions.length === 0) {
         await fs.rm(this.recoveryFile, { force: true });
@@ -466,6 +485,53 @@ class ModpackManager {
       }
       await writeJsonAtomic(this.recoveryFile, { schemaVersion: RECOVERY_SCHEMA_VERSION, sessions });
     });
+  }
+
+  // Copies the verified archive into launcher-cache once a session starts
+  // waiting for files, so a moved archive no longer discards the session.
+  async cacheSessionArchive(session) {
+    const target = archiveCachePath(this.archiveCacheDirectory, session.fingerprint, session.archivePath);
+    if (session.cachedArchivePath === target && await this.archiveMatches(target, session.fingerprint)) return target;
+    await fs.mkdir(this.archiveCacheDirectory, { recursive: true });
+    const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+    try {
+      await fs.copyFile(session.archivePath, temporary);
+      await fs.rename(temporary, target);
+    } finally {
+      await fs.rm(temporary, { force: true }).catch(() => {});
+    }
+    session.cachedArchivePath = target;
+    return target;
+  }
+
+  async archiveMatches(filePath, fingerprint) {
+    try { return await archiveFingerprint(filePath) === fingerprint; }
+    catch { return false; }
+  }
+
+  async releaseArchiveCache(session) {
+    const cached = cachedArchiveIn(session.cachedArchivePath, this.archiveCacheDirectory);
+    session.cachedArchivePath = undefined;
+    if (!cached) return;
+    if ([...this.sessions.values()].some((other) => other !== session
+      && cachedArchiveIn(other.cachedArchivePath, this.archiveCacheDirectory) === cached)) return;
+    await fs.rm(cached, { force: true }).catch(() => {});
+    await fs.rmdir(this.archiveCacheDirectory).catch(() => {});
+  }
+
+  // Drops cached copies that no persisted session references (crash leftovers).
+  async purgeArchiveCache() {
+    let entries;
+    try { entries = await fs.readdir(this.archiveCacheDirectory); }
+    catch { return; }
+    const referenced = new Set([...this.sessions.values()]
+      .map((session) => cachedArchiveIn(session.cachedArchivePath, this.archiveCacheDirectory))
+      .filter(Boolean));
+    for (const entry of entries) {
+      const filePath = path.join(this.archiveCacheDirectory, entry);
+      if (referenced.has(filePath) || !ARCHIVE_CACHE_NAME.test(entry)) continue;
+      await fs.rm(filePath, { force: true }).catch(() => {});
+    }
   }
 
   async claimRecoverySession(ownerId) {
@@ -576,6 +642,7 @@ class ModpackManager {
     if (session.busy && session.cancellable === false) return { cancelled: false };
     session.controller?.abort();
     this.sessions.delete(sessionId);
+    await this.releaseArchiveCache(session);
     await this.saveRecoverySessions();
     return { cancelled: true };
   }
@@ -586,6 +653,7 @@ class ModpackManager {
       if (session.ownerId !== (ownerId ?? null)) continue;
       if (session.cancellable !== false) session.controller?.abort();
       this.sessions.delete(sessionId);
+      await this.releaseArchiveCache(session);
     }
     await this.saveRecoverySessions();
   }
@@ -608,12 +676,22 @@ class ModpackManager {
     try { fingerprint = await archiveFingerprint(session.archivePath, signal); }
     catch (error) {
       throwIfAborted(signal);
+      // The archive was moved, renamed or deleted. Fall back to the verified
+      // copy taken when the session started waiting so the user keeps the work.
+      const cached = cachedArchiveIn(session.cachedArchivePath, this.archiveCacheDirectory);
+      if (cached && await this.archiveMatches(cached, session.fingerprint)) {
+        session.archivePath = cached;
+        session.recoveredArchive = true;
+        return;
+      }
       this.sessions.delete(session.sessionId);
+      await this.releaseArchiveCache(session);
       await this.saveRecoverySessions();
       throw modpackError('原整合包已移动或无法读取，请重新选择归档', 'MODPACK_ARCHIVE_CHANGED', 'preparing', false, error);
     }
     if (fingerprint !== session.fingerprint) {
       this.sessions.delete(session.sessionId);
+      await this.releaseArchiveCache(session);
       await this.saveRecoverySessions();
       throw modpackError('整合包归档已更改，请重新选择归档', 'MODPACK_ARCHIVE_CHANGED', 'preparing', false);
     }
@@ -628,7 +706,10 @@ class ModpackManager {
       installOptionalFiles, metadata: new Map(), missing: new Map(), busy: false, cancellable: true,
       waiting: false, updatedAt: new Date().toISOString() };
     for (const [id, previous] of this.sessions) {
-      if (previous.ownerId === session.ownerId && !previous.busy) this.sessions.delete(id);
+      if (previous.ownerId === session.ownerId && !previous.busy) {
+        this.sessions.delete(id);
+        await this.releaseArchiveCache(previous);
+      }
     }
     this.sessions.set(session.sessionId, session);
     return this.runSession(session, onProgress, signal, true);
@@ -655,8 +736,12 @@ class ModpackManager {
       if (result?.status === 'waiting-for-files') {
         session.waiting = true;
         session.updatedAt = new Date().toISOString();
+        // Persisted sessions keep a verified archive copy so later resumes do
+        // not depend on the original file staying where the user left it.
+        await this.cacheSessionArchive(session).catch(() => {});
         await this.saveRecoverySessions();
       } else {
+        await this.releaseArchiveCache(session);
         await this.saveRecoverySessions();
       }
       return result;
@@ -666,6 +751,7 @@ class ModpackManager {
       // the archive/session is no longer trustworthy.
       if (initial || error.retryable === false) {
         this.sessions.delete(session.sessionId);
+        await this.releaseArchiveCache(session);
         await this.saveRecoverySessions();
       }
       error.phase ??= phase;
