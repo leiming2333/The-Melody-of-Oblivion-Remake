@@ -97,13 +97,18 @@ runs:
               libdbus-1-3 libexpat1 libxkbcommon0 libgdk-pixbuf-2.0-0 libfuse2 file >/dev/null
             artifact=$(realpath "$SMOKE_ARTIFACT")
             file "$artifact"
-            chmod +x "$artifact"
-            mkdir -p package-smoke
-            (cd package-smoke && "$artifact" --appimage-extract >/dev/null)
+            findmnt -no OPTIONS /work || true
+            # QEMU maps the executable segments itself, so a bind mount with
+            # restrictive flags makes the exec fail with ENOEXEC. Run the real
+            # package from the container filesystem instead.
+            cp "$artifact" /tmp/melody-package.AppImage
+            chmod +x /tmp/melody-package.AppImage
+            ls -l /lib/ld-linux-armhf.so.3 || true
+            (cd /tmp && ./melody-package.AppImage --appimage-extract >/dev/null)
             xvfb-run -a node scripts/verify-packaged.cjs --expected-arch "$SMOKE_ARCH" \
               --expected-version "$SMOKE_VERSION" --emulated "$SMOKE_MECHANISM" \
               --report "package-reports/smoke-$SMOKE_TARGET.json" \
-              --artifact "$artifact" package-smoke/squashfs-root/AppRun --no-sandbox
+              --artifact "$artifact" /tmp/squashfs-root/AppRun --no-sandbox
             previous="release/upgrade-fixtures/$SMOKE_TARGET/$(basename "$artifact")"
             xvfb-run -a node scripts/verify-upgrade.cjs --target "$SMOKE_TARGET" --artifact "$artifact" \
               --previous-artifact "$previous" --emulated "$SMOKE_MECHANISM" \
