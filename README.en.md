@@ -11,7 +11,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-26.10.0-green.svg)](https://nodejs.org/)
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#current-limitations)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#platform-coverage-and-prerequisites)
 [![Source](https://img.shields.io/badge/Source-v1.7.1-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
@@ -56,16 +56,15 @@ These screenshots were captured from the `1.6.5` Electron source, with no accoun
 
 The website shows the actual home and account screens and uses the same Desert Lake scene. Its download section offers system, architecture, and source selection. A separate release-notes section opens by default and shows only the latest version. The website does not display installer SHA-256 values; launcher updates still verify them before installation.
 
-## Current limitations
+## Platform coverage and prerequisites
 
-- Public multi-architecture builds are available for Windows, macOS, and Linux. Platform-specific behavior may still vary.
-- Downloaded updates are installed only after choosing “Restart and install.” Windows preserves the current EXE name. macOS uses system `ditto` to validate and replace the `.app`, with a manual ZIP fallback for unwritable directories, read-only media, or App Translocation. Linux replaces the AppImage. The old app exits only after a helper handshake. Confirmation requires the new window, preload bridge, and local interface to load successfully; unconfirmed updates retain their backup and offer retry or recovery.
-- Update records are isolated by installation path. A healthy update retains one rollback generation and cleans only older files owned by that record. Untracked Windows EXEs and `.old` files can be selected manually in settings and moved to the recycle bin. Update cleanup excludes game data.
-- Microsoft sign-in has been removed from the current source. Account management supports offline and LittleSkin sign-in. Historical Microsoft accounts remain encrypted in storage but are hidden and cannot launch games; select a supported account to continue.
-- LittleSkin Yggdrasil works only when both client and server are configured for the same authentication service. It does not replace a premium account or grant access to premium-only servers. See the [LittleSkin manual](https://manual.littlesk.in/yggdrasil/).
-- CurseForge installation depends on file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Transient lookup failures are retried automatically. Missing trusted hashes still require a metadata requery before local import, and removed files may remain unavailable.
-- Quilt modpacks are supported; compatibility depends on the game version and mods.
-- Manual-file recovery sessions are persisted per game directory and restored after a restart or after switching back to that directory. Moving, changing, or deleting the original archive invalidates the session and requires selecting the pack again. Linux ARMv7 packages have not passed native startup validation.
+- **Platforms**: public builds with SHA-256 checksums cover Windows x64 / ia32 / ARM64, Linux x64 / ARM64 / ARMv7, and macOS x64 / ARM64. Every target except Linux ARMv7 runs startup and upgrade acceptance on its own native runner, and a failure blocks the release. GitHub hosts no 32-bit ARM runner, so ARMv7 runs the same acceptance against the real armv7 package under QEMU user mode; those reports are marked `verification: emulated` and never claim native hardware validation.
+- **Update replacement**: downloaded updates install only after choosing “Restart and install.” Windows preserves the current EXE name. macOS uses system `ditto` to validate and replace the `.app`, with a manual ZIP fallback for unwritable directories, read-only media, or App Translocation. Linux replaces the AppImage. The old app exits only after a helper handshake. Confirmation requires the new window, preload bridge, and local interface to load successfully; unconfirmed updates retain their backup and offer retry or recovery.
+- **Update records and cleanup**: records are isolated by installation path. A healthy update retains one rollback generation and cleans only older files owned by that record. Untracked Windows EXEs and `.old` files can be selected manually in settings and moved to the recycle bin. Cleanup excludes game data.
+- **LittleSkin authentication**: Yggdrasil works only when client and server use the same authentication service. A LittleSkin account does not replace a premium account and never grants access to premium-only servers. See the [LittleSkin manual](https://manual.littleskin.cn/yggdrasil/).
+- **CurseForge metadata**: installation depends on file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Transient lookup failures are retried, resolved metadata is stored with the recovery session so restarts skip the requery, and a local file is never substituted when the trusted hash is missing. Removed files still have to be fetched from the pack page.
+- **Loader compatibility**: Fabric, Forge, NeoForge, and Quilt modpacks are supported, and loader versions are validated against their official metadata before installation. Whether a pack actually runs still depends on the game version and its mods.
+- **Manual-file recovery sessions**: sessions are persisted per game directory and restored after a restart or after switching back to that directory. Once a session waits for files, the launcher keeps a verified copy of the archive in `launcher-cache`, so moving, renaming, or deleting the original no longer discards it; the copy is removed when the session completes or is abandoned. Only a changed archive requires selecting the pack again.
 
 ## Requirements
 
@@ -144,7 +143,7 @@ Modpack previews and installation share archive safety checks. Hash-verified dow
 
 Internal staging directories are hidden from the instance list. Startup scans and later installations reclaim only inactive crash residue with a valid launcher ownership marker and a safe path, retaining verified downloads. Failed cleanup can be retried later. To reclaim cache space, remove the cache directory after closing games and stopping installations.
 
-Builds use a pinned toolchain, a committed lockfile, one platform target definition, and clean isolated output directories. Manually dispatched CI produces eight packages, checksum sidecars, `SHA256SUMS`, a build manifest, and seven native startup/upgrade reports without public publication. Version tags publish only after validation. Repeatability means fixed inputs and traceable outputs, not identical bytes. See [release validation](docs/ci-release-validation.md).
+Builds use a pinned toolchain, a committed lockfile, one platform target definition, and clean isolated output directories. Manually dispatched CI produces eight packages, checksum sidecars, `SHA256SUMS`, a build manifest, and eight runtime startup/upgrade reports (seven native, one emulated for ARMv7) without public publication. Version tags publish only after validation. Repeatability means fixed inputs and traceable outputs, not identical bytes. See [release validation](docs/ci-release-validation.md).
 
 ## Historical references
 

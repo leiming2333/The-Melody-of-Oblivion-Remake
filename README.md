@@ -11,7 +11,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-26.10.0-green.svg)](https://nodejs.org/)
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#当前限制)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#平台支持与使用前提)
 [![Source](https://img.shields.io/badge/Source-v1.7.1-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
@@ -56,16 +56,15 @@
 
 官网首屏使用上面的主界面截图，账户介绍使用账户管理截图，背景也采用沙漠湖泊场景。下载区可选择系统、架构和下载来源。版本更新公告单独显示，默认展开，只展示最新一个版本。官网不展示安装包的 SHA-256 校验值，启动器安装更新前仍会校验 SHA-256。
 
-## 当前限制
+## 平台支持与使用前提
 
-- 提供 Windows、macOS 与 Linux 的多架构公开构建，不同平台的细节表现仍可能存在差异。
-- 更新下载完成后点击「重启并安装」才替换程序。Windows 保留当前 EXE 名称；macOS 使用系统 `ditto` 校验并替换 `.app`，在只读介质、目录不可写或 App Translocation 环境下提供 ZIP 手动替换入口；Linux 替换 AppImage。辅助进程握手成功后才退出旧程序，新版窗口、预加载桥接和本地界面加载完成才确认更新；未确认时保留备份并提供重试或恢复入口。
-- 每个安装路径独立记录更新状态，确认成功后保留最近一份回退版本，只清理该记录拥有的旧文件。无记录的 Windows 历史 EXE 和 `.old` 可在设置中勾选后移入回收站。游戏数据不在更新清理范围内。
-- 当前源码已移除 Microsoft 登录接入，账户管理仅支持离线和 LittleSkin 登录。历史 Microsoft 账户仍以加密形式保留，但不再显示或用于启动；请重新选择可用账户。
-- LittleSkin Yggdrasil 仅在客户端和服务端使用相同验证服务时生效；它不能代替正版账户，也不会授予进入正版验证服务器的权限。参见 [LittleSkin 用户使用手册](https://manual.littlesk.in/yggdrasil/)。
-- CurseForge 安装依赖 CurseTools 提供的文件元数据，或配置 `CURSEFORGE_API_KEY`。临时查询失败会自动重试；缺少可信摘要时仍需重新查询，不能直接导入用户文件，已下架文件也可能无法补齐。
-- 支持 Quilt 整合包，实际兼容性取决于游戏版本与 Mod。
-- 整合包补齐会话按游戏目录持久化，重启或切换回原目录后会自动恢复。原归档被移动、修改或删除后，会话会失效并要求重新选择整合包。Linux ARMv7 产物尚未经过原生启动验收。
+- **平台覆盖**：Windows x64 / ia32 / ARM64、Linux x64 / ARM64 / ARMv7、macOS x64 / ARM64 均提供公开构建与 SHA-256 校验。除 Linux ARMv7 外，每个目标都由对应的原生 runner 执行启动与升级验收，未通过不发布；ARMv7 因 GitHub 不提供 32 位 ARM runner，改在 QEMU 用户态下用真实 armv7 安装包执行同类检查，报告记为 `verification: emulated`，不声称原生硬件验证。
+- **更新替换**：更新下载完成后点击「重启并安装」才替换程序。Windows 保留当前 EXE 名称；macOS 使用系统 `ditto` 校验并替换 `.app`，在只读介质、目录不可写或 App Translocation 环境下提供 ZIP 手动替换入口；Linux 替换 AppImage。辅助进程握手成功后才退出旧程序，新版窗口、预加载桥接和本地界面加载完成才确认更新；未确认时保留备份并提供重试或恢复入口。
+- **更新记录与清理**：每个安装路径独立记录更新状态，确认成功后保留最近一份回退版本，只清理该记录拥有的旧文件。无记录的 Windows 历史 EXE 和 `.old` 可在设置中勾选后移入回收站。游戏数据不在更新清理范围内。
+- **LittleSkin 验证服务**：Yggdrasil 仅在客户端和服务端使用相同验证服务时生效；LittleSkin 账户不能替代正版账户，也不会获得进入正版验证服务器的权限。参见 [LittleSkin 用户使用手册](https://manual.littleskin.cn/yggdrasil/)。
+- **CurseForge 元数据**：安装依赖 CurseTools 提供的文件元数据，或配置 `CURSEFORGE_API_KEY`。临时查询失败会自动重试，已解析的元数据随补齐会话保存，重启后无需重新查询；缺少可信摘要时不会用本地文件顶替校验，已下架文件仍需从整合包发布页获取。
+- **加载器兼容性**：支持 Fabric、Forge、NeoForge 与 Quilt 整合包，加载器版本安装前会向各自官方元数据校验；整合包能否正常运行最终取决于游戏版本与其中具体 Mod。
+- **整合包补齐会话**：按游戏目录持久化，重启或切换回原目录后会自动恢复。会话进入等待补齐状态时，启动器会在 `launcher-cache` 保留一份校验过的归档副本，原始归档被移动、重命名或删除后仍可继续，副本在会话完成或放弃后删除；原归档内容被改动时才要求重新选择整合包。
 
 ## 运行要求
 
@@ -148,7 +147,7 @@ Java 的标准输出和错误输出保存到游戏根目录的 `launcher-cache/g
 
 实例列表隐藏内部暂存目录。下次启动扫描或安装时仅回收带有本启动器归属标记、路径安全且非活跃的崩溃残留，保留已校验缓存；清理失败可在下次重试。需要释放缓存空间时，可在关闭游戏、停止安装后删除缓存目录。
 
-构建使用固定工具链、锁文件与单一平台目标定义，产物写入独立的干净目录。手动 CI 生成八类安装包、校验侧文件、`SHA256SUMS`、构建清单和七类原生启动/升级报告，不公开发布；版本标签验证通过后才发布。可重复构建在此指输入固定且产物可追溯，不承诺字节完全一致。详见[发布验证说明](docs/ci-release-validation.md)。
+构建使用固定工具链、锁文件与单一平台目标定义，产物写入独立的干净目录。手动 CI 生成八类安装包、校验侧文件、`SHA256SUMS`、构建清单和八类运行时启动/升级报告（七类原生、一类 ARMv7 模拟），不公开发布；版本标签验证通过后才发布。可重复构建在此指输入固定且产物可追溯，不承诺字节完全一致。详见[发布验证说明](docs/ci-release-validation.md)。
 
 ## 历史资料
 
