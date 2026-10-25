@@ -4,7 +4,7 @@ const path = require('node:path');
 function redactError(message) {
   return String(message).slice(0, 8000)
     .replace(/\bBearer\s+\S+/gi, 'Bearer [REDACTED]')
-    .replace(/((?:access[_-]?token|refresh[_-]?token|microsoftRefreshToken|clientToken|password|device_code|user_code)["']?\s*(?:[:=]\s*|\s+))(?:("[^"]*")|('[^']*')|([^\s,;]+))/gi, '$1[REDACTED]')
+    .replace(/((?:access[_-]?token|refresh[_-]?token|clientToken|password|device_code|user_code)["']?\s*(?:[:=]\s*|\s+))(?:("[^"]*")|('[^']*')|([^\s,;]+))/gi, '$1[REDACTED]')
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED]');
 }
 
