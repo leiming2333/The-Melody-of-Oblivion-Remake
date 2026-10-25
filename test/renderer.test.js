@@ -403,3 +403,90 @@ test('local loader actions survive a failed loader request and merge without dup
   assert.equal(context.downloadVersionButton.disabled, false);
   assert.equal(context.downloadVersionButton.textContent, '安装 Fabric');
 });
+
+function profileOptionsFixture({ profiles = [], remembered = '' } = {}) {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const options = [];
+  const versionSelect = {
+    get options() { return options; },
+    value: '',
+    replaceChildren() { options.length = 0; },
+    append(option) { options.push(option); }
+  };
+  const rememberedLog = [];
+  const context = {
+    document: { createElement: () => ({ value: '', textContent: '', disabled: false, hidden: false }) },
+    localProfiles: profiles,
+    versionSelect,
+    gameStatus: {}, statusBadge: {},
+    activeGameProfiles: new Set(),
+    loaderNames: { vanilla: '原版', fabric: 'Fabric' },
+    rememberedSelectedGame: () => remembered,
+    rememberSelectedGame: (value) => rememberedLog.push(value),
+    updateLaunchButtonState() {}, updateVersionAction() {}
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(
+    source.indexOf('function renderLocalProfileOptions()'),
+    source.indexOf('async function loadLocalProfiles(')
+  ), context);
+  return { context, rememberedLog };
+}
+
+test('an empty first-run profile list reports no selection instead of a blank chosen version', () => {
+  const { context, rememberedLog } = profileOptionsFixture();
+  context.renderLocalProfileOptions();
+  assert.equal(context.versionSelect.value, '');
+  assert.match(context.gameStatus.textContent, /尚无已安装游戏/);
+  assert.equal(context.statusBadge.textContent, 'READY');
+  assert.deepEqual(rememberedLog, ['']);
+});
+
+test('installed profiles still auto-select and honor a remembered selection', () => {
+  const { context: auto } = profileOptionsFixture({ profiles: [
+    { profileId: '1.21.1', valid: true, complete: true, loaderType: 'vanilla' },
+    { profileId: 'fabric-loader-0.16.10-1.21.1', valid: true, complete: true, loaderType: 'fabric' }
+  ] });
+  auto.renderLocalProfileOptions();
+  assert.equal(auto.versionSelect.value, '1.21.1');
+  assert.equal(auto.gameStatus.textContent, '已选择 1.21.1');
+  assert.equal(auto.statusBadge.textContent, 'SELECTED');
+
+  const { context: remembered } = profileOptionsFixture({ profiles: [
+    { profileId: '1.21.1', valid: true, complete: true, loaderType: 'vanilla' },
+    { profileId: 'fabric-loader-0.16.10-1.21.1', valid: true, complete: true, loaderType: 'fabric' }
+  ], remembered: 'fabric-loader-0.16.10-1.21.1' });
+  remembered.renderLocalProfileOptions();
+  assert.equal(remembered.versionSelect.value, 'fabric-loader-0.16.10-1.21.1');
+  assert.match(remembered.gameStatus.textContent, /^已选择 fabric-loader/);
+});
+
+test('launching without a version or account keeps a visible status instead of a fleeting toast', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  let handler;
+  const toasts = [];
+  const context = {
+    launchButton: { addEventListener(_name, callback) { handler = callback; } },
+    versionSelect: { value: '' },
+    accountState: { current: null },
+    gameStatus: {}, statusBadge: {}, launchHint: {},
+    showToast: (message, isError) => toasts.push({ message, isError }),
+    updateVersionAction() {}, updateLaunchButtonState() {}
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(
+    source.indexOf("launchButton.addEventListener('click'"),
+    source.indexOf("versionSelect.addEventListener('change'")
+  ), context);
+  await handler();
+  assert.equal(context.gameStatus.textContent, '请先安装并选择游戏版本');
+  assert.equal(context.statusBadge.textContent, 'READY');
+  assert.equal(context.launchHint.textContent, '请先选择已安装版本');
+  assert.deepEqual(toasts, [{ message: '请先安装并选择一个完整的游戏版本', isError: true }]);
+
+  context.versionSelect.value = '1.21.1';
+  await handler();
+  assert.equal(context.gameStatus.textContent, '请先添加并选择游戏账户');
+  assert.equal(context.launchHint.textContent, '请先添加游戏账户');
+  assert.deepEqual(toasts[1], { message: '请先添加并选择一个游戏账户', isError: true });
+});

@@ -1198,8 +1198,9 @@ function renderLocalProfileOptions() {
   }
 
   const preferredProfileId = previousProfileId || rememberedSelectedGame();
-  const preferredOption = [...versionSelect.options]
-    .find((option) => option.value === preferredProfileId && !option.disabled);
+  const preferredOption = preferredProfileId
+    ? [...versionSelect.options].find((option) => option.value === preferredProfileId && !option.disabled)
+    : undefined;
   const selectedOption = preferredOption
     ?? [...versionSelect.options].find((option) => option.value && !option.disabled);
   versionSelect.value = selectedOption?.value ?? '';
@@ -1210,8 +1211,8 @@ function renderLocalProfileOptions() {
     ));
     gameStatus.textContent = `已选择 ${selectedProfile?.displayName ?? selectedProfile?.profileId ?? selectedOption.value}`;
     statusBadge.textContent = activeGameProfiles.has(selectedOption.value) ? 'RUNNING' : 'SELECTED';
-  } else if (previousProfileId) {
-    gameStatus.textContent = '请选择游戏版本';
+  } else {
+    gameStatus.textContent = installedProfiles.length > 0 ? '请选择游戏版本' : '尚无已安装游戏，可在「切换版本」中下载';
     statusBadge.textContent = 'READY';
   }
   updateLaunchButtonState();
@@ -2250,11 +2251,17 @@ document.addEventListener('drop', async (event) => {
 
 launchButton.addEventListener('click', async () => {
   if (!versionSelect.value) {
-    showToast('请先安装并选择一个完整的游戏版本');
+    gameStatus.textContent = '请先安装并选择游戏版本';
+    statusBadge.textContent = 'READY';
+    launchHint.textContent = '请先选择已安装版本';
+    showToast('请先安装并选择一个完整的游戏版本', true);
     return;
   }
   if (!accountState.current) {
-    showToast('请先添加并选择一个游戏账户');
+    gameStatus.textContent = '请先添加并选择游戏账户';
+    statusBadge.textContent = 'READY';
+    launchHint.textContent = '请先添加游戏账户';
+    showToast('请先添加并选择一个游戏账户', true);
     return;
   }
   const profileId = versionSelect.value;
