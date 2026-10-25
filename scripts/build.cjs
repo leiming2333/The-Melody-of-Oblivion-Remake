@@ -55,6 +55,8 @@ async function build(args = process.argv.slice(2)) {
   }
   await fs.rm(output, { recursive: true, force: true });
   await fs.mkdir(output, { recursive: true });
+  const clientId = process.env.MELODY_MICROSOFT_CLIENT_ID || require('../src/main/accounts/microsoft-client-id.json').clientId;
+  await run(process.execPath, [path.join(__dirname, 'generate-client-id.js')], { env: { ...process.env, MELODY_MICROSOFT_CLIENT_ID: clientId } });
   const builder = require.resolve('electron-builder/cli.js');
   const platformFlag = { win32: '--win', linux: '--linux', darwin: '--mac' }[target.platform];
   await run(process.execPath, [builder, platformFlag, `--${target.arch}`, '--publish', 'never', `--config.directories.output=${output}`,
@@ -65,7 +67,7 @@ async function build(args = process.argv.slice(2)) {
   const { createHash } = require('node:crypto');
   const metadata = {
     schemaVersion: 1, target: target.id, version: target.fixtureVersion || pkg.version, isUpgradeFixture: Boolean(target.fixtureVersion),
-    commit, sourceDirty,
+    commit, sourceDirty, microsoftClientId: clientId.toLowerCase(),
     lockSha256: createHash('sha256').update(await fs.readFile(path.join(root, 'package-lock.json'))).digest('hex'),
     toolchain: versions,
     runner: { label: process.env.GITHUB_ACTIONS ? target.runner : 'local', os: process.platform, arch: process.arch,

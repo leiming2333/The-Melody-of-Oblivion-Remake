@@ -18,20 +18,23 @@ const {
   splitLegacyArguments
 } = require('../src/main/minecraft/launch-core');
 
-test('launch variables reject retired Microsoft accounts and use supported authentication only', () => {
+test('launch variables accept known account types and reject unknown account data', () => {
   const options = {
     account: {
-      type: 'yggdrasil', name: 'Player_01', uuid: '01234567-89ab-cdef-0123-456789abcdef',
-      accessToken: 'little-access', xuid: 'old-xuid', clientId: 'old-client'
+      type: 'microsoft', name: 'Player_01', uuid: '01234567-89ab-cdef-0123-456789abcdef',
+      accessToken: 'minecraft-access', xuid: 'xuid', clientId: 'client-id'
     },
     gameDirectory: path.resolve('fixture'), metadata: { clientJarId: 'base' }
   };
   const variables = launchVariables(options);
-  assert.equal(variables.auth_access_token, 'little-access');
-  assert.equal(variables.user_type, 'legacy');
-  assert.equal(variables.auth_xuid, '');
-  assert.equal(variables.clientid, '');
-  assert.throws(() => launchVariables({ ...options, account: { ...options.account, type: 'microsoft' } }), /可用的游戏账户/);
+  assert.equal(variables.auth_access_token, 'minecraft-access');
+  assert.equal(variables.user_type, 'msa');
+  assert.equal(variables.auth_xuid, 'xuid');
+  assert.equal(variables.clientid, 'client-id');
+  assert.throws(() => launchVariables({
+    ...options,
+    account: { ...options.account, type: 'unknown' }
+  }), /可用的游戏账户/);
 });
 
 test('legacy loader arguments replace inherited arguments while modern arrays merge', () => {

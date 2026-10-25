@@ -81,19 +81,16 @@ async function writeLaunchProfile(root) {
     id: 'base', mainClass: 'net.minecraft.client.main.Main', libraries: [],
     minecraftArguments: '--accessToken ${auth_access_token}'
   }));
-  const injectorPath = path.join(root, 'authlib-injector.jar');
-  await fs.writeFile(injectorPath, 'fixture');
-  return { path: injectorPath, server: 'littleskin.cn' };
 }
 
 const account = {
-  type: 'yggdrasil', name: 'Steve', uuid: '5627dd98-e6be-3c21-b8a8-e92344183641',
+  type: 'microsoft', name: 'Steve', uuid: '5627dd98-e6be-3c21-b8a8-e92344183641',
   accessToken: 'launch-secret'
 };
 
 test('launcher captures Java stdout and stderr and reports a flushed diagnostic log on exit', async (t) => {
   const root = await fixture(t);
-  const authlibInjector = await writeLaunchProfile(root);
+  await writeLaunchProfile(root);
   let child;
   const launcher = new MinecraftLauncher({
     gameDirectory: root, findJava: async () => 'java-test',
@@ -111,7 +108,7 @@ test('launcher captures Java stdout and stderr and reports a flushed diagnostic 
   });
   let exited;
   const completion = new Promise((resolve) => { exited = resolve; });
-  const result = await launcher.launch({ profileId: 'base', account, authlibInjector }, (status) => {
+  const result = await launcher.launch({ profileId: 'base', account }, (status) => {
     if (status.phase === 'exited') exited(status);
   });
   child.stdout.write('Launch token launch-secret\n');
@@ -130,7 +127,7 @@ test('launcher captures Java stdout and stderr and reports a flushed diagnostic 
 
 test('Java spawn failure includes a sanitized diagnostic log path and cleans launch natives', async (t) => {
   const root = await fixture(t);
-  const authlibInjector = await writeLaunchProfile(root);
+  await writeLaunchProfile(root);
   const launcher = new MinecraftLauncher({
     gameDirectory: root, findJava: async () => 'missing-java',
     spawnProcess: () => {
@@ -140,7 +137,7 @@ test('Java spawn failure includes a sanitized diagnostic log path and cleans lau
     }
   });
   let launchError;
-  await assert.rejects(launcher.launch({ profileId: 'base', account, authlibInjector }), (error) => {
+  await assert.rejects(launcher.launch({ profileId: 'base', account }), (error) => {
     launchError = error;
     return error.message.includes('游戏日志：') && !error.message.includes('launch-secret');
   });
@@ -153,7 +150,7 @@ test('Java spawn failure includes a sanitized diagnostic log path and cleans lau
 
 test('an unavailable log directory does not prevent launch or leave Java output undrained', async (t) => {
   const root = await fixture(t);
-  const authlibInjector = await writeLaunchProfile(root);
+  await writeLaunchProfile(root);
   await fs.mkdir(path.join(root, 'launcher-cache'));
   await fs.writeFile(path.join(root, 'launcher-cache', 'game-logs'), 'blocked directory');
   let child;
@@ -170,7 +167,7 @@ test('an unavailable log directory does not prevent launch or leave Java output 
   });
   let exited;
   const completion = new Promise((resolve) => { exited = resolve; });
-  const result = await launcher.launch({ profileId: 'base', account, authlibInjector }, (status) => {
+  const result = await launcher.launch({ profileId: 'base', account }, (status) => {
     if (status.phase === 'exited') exited(status);
   });
   assert.equal(result.logPath, undefined);

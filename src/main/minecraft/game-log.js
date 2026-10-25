@@ -10,7 +10,7 @@ const activeLogs = new Set();
 const TRUNCATED_MESSAGE = Buffer.from('[launcher] Earlier output omitted because the log reached its size limit.\n');
 
 function gameLogSecrets(account) {
-  return ['accessToken', 'refreshToken', 'clientToken']
+  return ['accessToken', 'microsoftRefreshToken', 'refreshToken', 'clientToken']
     .map((field) => account?.[field]).filter((value) => typeof value === 'string' && value && value !== '0')
     .flatMap((value) => [value, JSON.stringify(value).slice(1, -1), encodeURIComponent(value)])
     .sort((left, right) => right.length - left.length);
@@ -25,7 +25,7 @@ function redactGameOutput(value, secrets = []) {
   }
   return output
     .replace(/\b(Bearer|Basic)\s+\S+/gi, '$1 [REDACTED]')
-    .replace(/((?:access[_-]?token|refresh[_-]?token|clientToken|password|device_code|user_code)["']?\s*(?:[:=]\s*|\s+))(?:("(?:\\.|[^"\\])*")|('(?:\\.|[^'\\])*')|([^\s,;]+))/gi, '$1[REDACTED]')
+    .replace(/((?:access[_-]?token|refresh[_-]?token|microsoftRefreshToken|clientToken|password|device_code|user_code)["']?\s*(?:[:=]\s*|\s+))(?:("(?:\\.|[^"\\])*")|('(?:\\.|[^'\\])*')|([^\s,;]+))/gi, '$1[REDACTED]')
     .replace(/\btoken:[^:\s]+:/gi, 'token:[REDACTED]:')
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED]');
 }

@@ -90,11 +90,14 @@ export function renderAccountList(context) {
       copy.append(name);
     }
     const detail = document.createElement('small');
+    const supported = ['offline', 'microsoft', 'yggdrasil'].includes(account.type);
     detail.textContent = account.type === 'offline'
       ? `离线账户 · ${account.uuid}`
       : account.type === 'yggdrasil'
         ? `LittleSkin 外置 · ${account.uuid}`
-        : '已停用的账户';
+        : account.type === 'microsoft'
+          ? `Microsoft · ${account.uuid}`
+          : '不支持的账户类型';
     if (account.loginError) {
       detail.textContent = account.loginError;
       detail.title = account.loginError;
@@ -106,8 +109,7 @@ export function renderAccountList(context) {
 
     const selectButton = document.createElement('button');
     selectButton.type = 'button';
-    const supported = ['offline', 'yggdrasil'].includes(account.type);
-    selectButton.textContent = !supported ? '已停用' : account.id === state.accountState.currentId ? '当前' : '使用';
+    selectButton.textContent = !supported ? '不可用' : account.id === state.accountState.currentId ? '当前' : '使用';
     selectButton.disabled = !supported || account.id === state.accountState.currentId;
     if (supported) selectButton.addEventListener('click', () => selectAccount(account.id));
     actions.append(selectButton);
