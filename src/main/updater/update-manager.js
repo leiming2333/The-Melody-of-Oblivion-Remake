@@ -12,7 +12,7 @@ const { TransactionStore, identity, transactionPaths, assertManagedAncestors } =
 const { startInstallHelper, startWindowsHelper } = require('./install-helper');
 
 const UPDATE_CHANNEL = 'updater:state';
-const WEBSITE_ORIGIN = 'https://the-melody-of-o-r.ccwu.cc';
+const WEBSITE_ORIGIN = 'https://melodyoblivion.xyz';
 const WEBSITE_RELEASE_URL = `${WEBSITE_ORIGIN}/api/latest-release`;
 const LATEST_RELEASE_URL = 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest';
 const PLATFORM_KEYWORDS = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux: 'Linux' });

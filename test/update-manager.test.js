@@ -472,7 +472,7 @@ test('Release 接口直连失败时自动尝试镜像源', async () => {
   });
   const state = await manager.check();
   assert.equal(state.status, 'downloaded');
-  assert.equal(requestedUrls[0], 'https://the-melody-of-o-r.ccwu.cc/api/latest-release');
+  assert.equal(requestedUrls[0], 'https://melodyoblivion.xyz/api/latest-release');
   assert.equal(requestedUrls[1], 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest');
   assert.ok(requestedUrls[2].startsWith(`${GITHUB_MIRRORS[0]}/https://api.github.com/`));
 });
@@ -481,7 +481,7 @@ test('stale website metadata cannot hide a newer GitHub release', async () => {
   const requested = [];
   const { manager } = fixture({ fetchImpl: async (url) => {
     requested.push(url);
-    const tag = url.includes('the-melody-of-o-r.ccwu.cc') ? 'v1.2.0' : 'v9.9.9';
+    const tag = url.includes('melodyoblivion.xyz') ? 'v1.2.0' : 'v9.9.9';
     return { ok: true, json: async () => ({ tag_name: tag, assets: releaseAssets }) };
   } });
   const state = await manager.check({ autoDownload: false });
@@ -495,7 +495,7 @@ test('updater keeps Blob download URLs only for the verified GitHub version', as
   const blobAsset = { ...asset,
     browser_download_url: `https://fixture.public.blob.vercel-storage.com/releases/v9.9.9/${asset.name}` };
   const { manager, calls } = fixture({ fetchImpl: async (url) => ({ ok: true,
-    json: async () => ({ tag_name: 'v9.9.9', assets: [url.includes('the-melody-of-o-r.ccwu.cc') ? blobAsset : asset] }) }) });
+    json: async () => ({ tag_name: 'v9.9.9', assets: [url.includes('melodyoblivion.xyz') ? blobAsset : asset] }) }) });
   assert.equal((await manager.check()).status, 'downloaded');
   assert.equal(calls.download[0].url, blobAsset.browser_download_url);
   assert.equal(manager.release.assets[0].github_download_url, asset.browser_download_url);
@@ -507,7 +507,7 @@ test('stale mirrors cannot hide a known newer website release after GitHub fails
     requested.push(url);
     if (url.startsWith('https://api.github.com/')) throw new Error('fetch failed');
     return { ok: true, json: async () => ({
-      tag_name: url.includes('the-melody-of-o-r.ccwu.cc') ? 'v9.9.9' : 'v1.2.0', assets: releaseAssets
+      tag_name: url.includes('melodyoblivion.xyz') ? 'v9.9.9' : 'v1.2.0', assets: releaseAssets
     }) };
   } });
   const state = await manager.check({ autoDownload: false });
@@ -524,7 +524,7 @@ test('an outdated mirror is skipped until a later source confirms the website ve
   const { manager } = fixture({ fetchImpl: async (url) => {
     requested.push(url);
     if (url.startsWith('https://api.github.com/')) throw new Error('fetch failed');
-    if (url.includes('the-melody-of-o-r.ccwu.cc')) {
+    if (url.includes('melodyoblivion.xyz')) {
       return { ok: true, json: async () => ({ tag_name: 'v9.9.9', body: 'website notes', assets: [blobAsset] }) };
     }
     const outdated = url.startsWith(`${GITHUB_MIRRORS[0]}/`);
@@ -554,7 +554,7 @@ test('same-tag Blob digests cannot replace missing official digests or bypass of
         return { ok: true, text: async () => `${fixtureHash}  ${binary.name}\n` };
       }
       return { ok: true, json: async () => ({ tag_name: 'v9.9.9',
-        assets: url.includes('the-melody-of-o-r.ccwu.cc') ? [staleBlob] : [binary, sidecar] }) };
+        assets: url.includes('melodyoblivion.xyz') ? [staleBlob] : [binary, sidecar] }) };
     } });
     assert.equal((await manager.check()).status, 'downloaded');
     assert.equal(manager.release.assets[0].browser_download_url, binary.browser_download_url);
@@ -565,7 +565,7 @@ test('same-tag Blob digests cannot replace missing official digests or bypass of
 
 test('unverified current website metadata reports a failed check when GitHub and mirrors are unavailable', async () => {
   const { manager } = fixture({ fetchImpl: async (url) => {
-    if (!url.includes('the-melody-of-o-r.ccwu.cc')) throw new Error('fetch failed');
+    if (!url.includes('melodyoblivion.xyz')) throw new Error('fetch failed');
     return { ok: true, json: async () => ({ tag_name: 'v1.2.0', assets: releaseAssets }) };
   } });
   const state = await manager.check({ autoDownload: false });
@@ -575,7 +575,7 @@ test('unverified current website metadata reports a failed check when GitHub and
 
 test('known newer website release remains available when GitHub and mirrors are unavailable', async () => {
   const { manager } = fixture({ fetchImpl: async (url) => {
-    if (!url.includes('the-melody-of-o-r.ccwu.cc')) throw new Error('fetch failed');
+    if (!url.includes('melodyoblivion.xyz')) throw new Error('fetch failed');
     return { ok: true, json: async () => ({ tag_name: 'v9.9.9', assets: releaseAssets }) };
   } });
   const state = await manager.check({ autoDownload: false });
@@ -622,7 +622,7 @@ test('GitHub release metadata uses the website Blob download entry first', async
     assets: githubAssets,
     downloadFile: async (url) => {
       calls.download.push({ url });
-      if (!url.startsWith('https://the-melody-of-o-r.ccwu.cc/')) throw new Error('镜像不可用');
+      if (!url.startsWith('https://melodyoblivion.xyz/')) throw new Error('镜像不可用');
     }
   });
   assert.equal((await manager.check()).status, 'downloaded');
