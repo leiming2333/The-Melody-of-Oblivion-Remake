@@ -1861,6 +1861,40 @@ progress:indeterminate::-moz-progress-bar {
   color: #efaa83;
 }
 
+.sponsor-support-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 8px 0 0;
+  font-size: 10px;
+}
+
+.sponsor-support-name {
+  flex: none;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.sponsor-support-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.sponsor-support-links a {
+  color: rgba(239, 170, 131, 0.7);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sponsor-support-links a:hover {
+  color: #efaa83;
+}
+
+.sponsor-support-links a:focus-visible {
+  outline: 1px solid #efaa83;
+  outline-offset: 2px;
+}
+
 .download-setting-grid {
   display: grid;
   grid-template-columns: 0.9fr 1.1fr;
@@ -2108,66 +2142,6 @@ progress:indeterminate::-moz-progress-bar {
 .cancel-download-button[hidden] {
   display: none;
 }
-
-.java-check-dialog {
-  width: min(440px, calc(100vw - 48px));
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 8px;
-  overflow: hidden;
-  color: #f2ede7;
-  background:
-    linear-gradient(100deg, rgba(19, 13, 15, 0.94), rgba(19, 13, 15, 0.76)),
-    var(--launcher-dialog-scene) center / cover;
-  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.42);
-}
-
-.java-check-dialog::backdrop {
-  border-radius: 10px;
-  background: rgba(8, 6, 7, 0.48);
-  clip-path: inset(0 round 10px);
-  backdrop-filter: blur(5px);
-}
-
-.java-check-dialog form {
-  padding: 26px 28px 22px;
-}
-
-.java-check-header {
-  margin-bottom: 18px;
-}
-
-.java-check-body {
-  display: grid;
-  gap: 12px;
-}
-
-.java-check-hint {
-  margin: 0;
-  color: rgba(255, 255, 255, 0.66);
-  font-size: 12px;
-  line-height: 1.7;
-}
-
-.java-check-guide {
-  margin: 0;
-  padding: 12px 14px;
-  border: 1px solid rgba(221, 145, 107, 0.28);
-  border-radius: 5px;
-  background: rgba(221, 145, 107, 0.08);
-  color: rgba(255, 255, 255, 0.54);
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-.java-check-guide strong {
-  color: #efaa83;
-}
-
-.java-check-actions {
-  margin-top: 22px;
-}
-
 
 .problem-dialog {
   width: min(460px, calc(100vw - 32px));

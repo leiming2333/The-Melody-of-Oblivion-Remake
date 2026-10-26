@@ -408,6 +408,23 @@
             <pre id="launcherUpdateNotes" class="launcher-update-notes"></pre>
           </div>
 
+          <div class="setting-group sponsor-support-setting">
+            <label>赞助支持</label>
+            <p class="sponsor-support-row">
+              <span class="sponsor-support-name">镜像源支持</span>
+              <span class="sponsor-support-links">
+                <a href="https://bmclapi2.bangbang93.com" target="_blank" rel="noopener noreferrer">BMCLAPI</a>
+                <a href="https://mcimirror.top" target="_blank" rel="noopener noreferrer">MCIM</a>
+              </span>
+            </p>
+            <p class="sponsor-support-row">
+              <span class="sponsor-support-name">罂姚散漫</span>
+              <span class="sponsor-support-links">
+                <a href="https://space.bilibili.com/126269449" target="_blank" rel="noopener noreferrer">个人空间 ↗</a>
+              </span>
+            </p>
+          </div>
+
           <footer class="dialog-actions">
             <button class="secondary-dialog-button" value="cancel" type="submit">取消</button>
             <button class="primary-dialog-button" value="save" type="submit">保存设置</button>
@@ -427,6 +444,7 @@
           <footer class="dialog-actions">
             <button class="secondary-dialog-button" value="cancel" type="submit">关闭</button>
             <button id="problemCopyButton" class="secondary-dialog-button" type="button">复制错误详情</button>
+            <button id="problemJavaFixButton" class="primary-dialog-button" type="button" hidden>下载 Java 并启动</button>
             <button id="problemRetryButton" class="primary-dialog-button" type="button" hidden>重试</button>
             <button id="problemAccountButton" class="primary-dialog-button" type="button" hidden>前往账户管理</button>
             <button id="problemSettingsButton" class="primary-dialog-button" type="button" hidden>打开启动设置</button>
@@ -456,31 +474,6 @@
         <strong>松开以导入 Mod 或安装整合包</strong>
         <small>Mod .jar 导入当前游戏 · 整合包 .mrpack / .zip</small>
       </div>
-
-      <dialog id="javaCheckDialog" class="java-check-dialog">
-        <form method="dialog">
-          <header class="dialog-header java-check-header">
-            <div>
-              <p>JAVA RUNTIME</p>
-              <h2>未检测到 Java</h2>
-            </div>
-          </header>
-          <div class="java-check-body">
-            <p id="javaCheckHint" class="java-check-hint">
-              当前未检测到可用的 Java 运行环境。
-            </p>
-            <p class="java-check-guide">
-              可在启动设置中下载游戏所需版本的 Java 运行环境。
-            </p>
-          </div>
-          <footer class="dialog-actions java-check-actions">
-            <button id="javaCheckSkipButton" class="secondary-dialog-button" type="submit">跳过检测</button>
-            <button id="javaCheckRetryButton" class="secondary-dialog-button" type="button">重新检测</button>
-            <span class="dialog-action-spacer"></span>
-            <button id="javaCheckDownloadButton" class="primary-dialog-button" type="button">启动设置</button>
-          </footer>
-        </form>
-      </dialog>
     </div>
     <script src="renderer.js" defer></script>
   </body>

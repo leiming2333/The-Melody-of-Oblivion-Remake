@@ -38,7 +38,7 @@ The current repository starts a new implementation; its version numbers and code
 - **Mod loaders** — discover and install Fabric, Forge, NeoForge, and Quilt through a shared workflow.
 - **Resilient downloads** — choose between Mojang-hosted endpoints and BMCLAPI, probe sources in automatic mode, use configurable task concurrency, split large files with HTTP Range requests, verify SHA-1 metadata, cancel active work, and retry alternate sources.
 - **Accounts** — create offline profiles or use LittleSkin Yggdrasil; sync skin avatars, refresh LittleSkin credentials before launch, and keep tokens out of the renderer process.
-- **Java management** — match the Java major version required by the selected game; scan system installations and managed runtimes. Download Java 8, 16, 17, 21, or 25 from the button next to the Java path setting, with progress and cancellation. Downloads prefer Azul JRE and fall back to Adoptium, use parallel transfers, and verify SHA-256. Launching without the required Java opens settings instead of starting a download.
+- **Java management** — match the Java major version required by the selected game; scan system installations and managed runtimes. The home launch button previews Java readiness for the selected version, and a failed launch caused by a missing runtime offers a one-click download that retries automatically. Java 8, 16, 17, 21, or 25 can also be downloaded next to the Java path setting, with progress and cancellation. Downloads prefer Azul JRE and fall back to Adoptium, use parallel transfers, and verify SHA-256.
 - **Launch core** — resolve inherited version metadata, apply platform rules, assemble arguments and classpaths, extract native libraries safely, launch the Java process, and report its status. LittleSkin accounts automatically provision a SHA-256-verified authlib-injector.
 - **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instances with overrides, Fabric, Forge, NeoForge, and Quilt. A single confirmation shows the game, loader, and file counts; optional files are unchecked by default. Only remote resolution or download failures allow optional files to be skipped with a warning. Disk, permission, and security errors stop installation; required-file failures support retry. Restricted CurseForge files can be downloaded from their official pages, selected locally, and verified against trusted hashes before installation continues.
 - **Launcher updates** — checks GitHub Releases on startup with a three-level policy (auto-download / notify only / never); system notifications announce new versions and ready updates; release notes are shown in settings; update downloads fall back across GitHub mirrors with slow-speed detection and are SHA-256 verified before install. Legacy boolean update settings migrate automatically.
@@ -54,7 +54,7 @@ These screenshots were captured from the `1.6.5` Electron source, with no accoun
 
 ![Actual v1.6.5 account management screen](assets/launcher-accounts.png)
 
-The website shows the actual home and account screens and uses the same Desert Lake scene. Its download section offers system, architecture, and source selection. A separate release-notes section opens by default and shows only the latest version. The website does not display installer SHA-256 values; launcher updates still verify them before installation.
+The website does not embed launcher screenshots; the captures above appear in this README only. Its download section offers system, architecture, and source selection. A separate release-notes section opens by default and shows only the latest version. The website does not display installer SHA-256 values; launcher updates still verify them before installation.
 
 ## Platform coverage and prerequisites
 
@@ -85,7 +85,7 @@ npm run dev
 
 System directory mode uses the operating system's Minecraft application-data directory (`%APPDATA%\.minecraft` on Windows). Local mode uses `.minecraft` beside the portable EXE or source checkout; runtime cache locations do not change it. Modpack instances are created below the selected `.minecraft/melody-instances`.
 
-Java probe results are persisted in `java-cache.json` in the launcher user-data directory and invalidated when runtime files change; manual redetection bypasses the cache. Background initialization starts after the home screen paints. Missing Java produces a nonmodal hint. `logs/startup-latest.json` records the most recent startup stages from main-process entry onwards; portable EXE extraction before Electron starts is not measured.
+Java probe results are persisted in `java-cache.json` in the launcher user-data directory and invalidated when runtime files change; manual redetection bypasses the cache. Background initialization starts after the home screen paints. Missing Java produces a nonmodal hint on the launch button instead of a blocking dialog. The local version list resolves each profile's Java requirement through its inheritance chain, so the home screen can preview readiness before launching. `logs/startup-latest.json` records the most recent startup stages from main-process entry onwards; portable EXE extraction before Electron starts is not measured.
 
 Download, loader, modpack, Java download and game-launch services initialize on first use and are reused within the current game directory. Switching directories creates fresh services. Home-screen version scans and Java detection use lightweight readers. Extracted native libraries are cached by archive content and exclusion rules under `.minecraft/launcher-cache/native-archives`, with file verification on reuse and regeneration after changes or corruption. Each game uses separate copies; exiting a game removes its copies while preserving shared cache generations, which can be manually cleared after games close.
 
@@ -122,7 +122,7 @@ site.js                   Landing-page translations and behavior
 styles.css                Landing-page styles
 ```
 
-The repository root contains the website, while `src/renderer` contains the Electron launcher. The website displays actual launcher captures from `assets/launcher-screenshot.png` and `assets/launcher-accounts.png`; recapture them when the launcher interface changes.
+The repository root contains the website, while `src/renderer` contains the Electron launcher. The website does not embed launcher captures; `assets/launcher-screenshot.png` and `assets/launcher-accounts.png` appear in this README only, so recapture them when the launcher interface changes.
 
 ## Security notes
 

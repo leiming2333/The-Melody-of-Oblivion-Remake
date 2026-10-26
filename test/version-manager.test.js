@@ -103,6 +103,39 @@ test('加载器识别会优先区分 NeoForge 与 Forge', () => {
   assert.equal(detectLoaderType({ libraries: [{ name: 'net.minecraftforge:forge:47.0' }] }, 'custom'), 'forge');
 });
 
+test('版本列表会解析继承链上的 Java 需求并安全终止循环', async (t) => {
+  const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-java-requirement-test-'));
+  t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
+  await writeProfile(gameDirectory, '1.20.1', {
+    type: 'release',
+    javaVersion: { majorVersion: 17, component: 'java-runtime-gamma' }
+  });
+  await writeProfile(gameDirectory, 'fabric-loader-1.20.1', {
+    inheritsFrom: '1.20.1',
+    mainClass: 'net.fabricmc.loader.impl.launch.knot.KnotClient'
+  });
+  await writeProfile(gameDirectory, 'modern-standalone', {
+    type: 'release',
+    javaVersion: { majorVersion: 21 }
+  });
+  await writeProfile(gameDirectory, 'legacy-default', { type: 'release' });
+  await writeProfile(gameDirectory, 'loop-a', { inheritsFrom: 'loop-b' });
+  await writeProfile(gameDirectory, 'loop-b', { inheritsFrom: 'loop-a' });
+  await writeMarker(gameDirectory, '1.20.1');
+  await writeMarker(gameDirectory, 'fabric-loader-1.20.1');
+  await writeInstance(gameDirectory, 'pack-instance', 'fabric-loader-1.20.1', '测试整合包');
+
+  const manager = new MinecraftVersionManager({ gameDirectory });
+  const result = await manager.listLocalProfiles();
+  const profiles = new Map(result.profiles.map((profile) => [profile.targetId ?? profile.profileId, profile]));
+  assert.equal(profiles.get('1.20.1').requiredJavaVersion, 17);
+  assert.equal(profiles.get('fabric-loader-1.20.1').requiredJavaVersion, 17);
+  assert.equal(profiles.get('modern-standalone').requiredJavaVersion, 21);
+  assert.equal(profiles.get('legacy-default').requiredJavaVersion, 8);
+  assert.equal(profiles.get('loop-a').requiredJavaVersion, 8);
+  assert.equal(profiles.get('instance-pack-instance').requiredJavaVersion, 17);
+});
+
 test('完整的整合包实例会作为独立的已安装游戏返回', async (t) => {
   const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-instance-list-test-'));
   t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));

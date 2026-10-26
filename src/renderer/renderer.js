@@ -135,11 +135,6 @@ const toast = document.querySelector('#toast');
 const modpackDropOverlay = document.querySelector('#modpackDropOverlay');
 const wallpaperSlides = [...document.querySelectorAll('.background-slide')];
 const wallpaperSelect = document.querySelector('#wallpaperSelect');
-const javaCheckDialog = document.querySelector('#javaCheckDialog');
-const javaCheckHint = document.querySelector('#javaCheckHint');
-const javaCheckSkipButton = document.querySelector('#javaCheckSkipButton');
-const javaCheckRetryButton = document.querySelector('#javaCheckRetryButton');
-const javaCheckDownloadButton = document.querySelector('#javaCheckDownloadButton');
 
 let toastTimer;
 let localProfiles = [];
@@ -183,8 +178,14 @@ let selectedJavaMajorVersion;
 let savedJavaRuntimes = [];
 let autoJavaDetection = null;
 let autoJavaDetectionPromise = null;
+let javaEnvironmentKnown = false;
+let javaReadiness = { status: 'idle' };
 let javaDownloadActive = false;
 let javaRequirementRequest = 0;
+let javaFixActive = false;
+let javaFixMajorVersion;
+let javaFixTaskId = '';
+let javaFixCancelRequested = false;
 let littleSkinLoginActive = false;
 let launcherUpdateUiModule;
 async function withLauncherUpdateUi(callback) {
@@ -351,7 +352,7 @@ function problemGuidance(message, code, domain) {
   }
   if (/需要 Java|未找到可用的 Java|未检测到.*Java|无法启动 Java|不是可用的 Java/.test(message)) {
     return { title: 'Java 环境不可用', message: '当前 Java 环境不符合游戏要求，或所选程序无法运行。',
-      advice: '打开「启动设置」，重新检测 Java 或下载游戏要求的版本，也可以手动选择 Java 安装目录中的可执行文件。', settings: true };
+      advice: '可直接下载游戏所需的 Java 并自动重试启动，也可打开「启动设置」重新检测或手动选择 Java 可执行文件。', settings: true };
   }
   if (/SHA-?\d+|校验失败|校验.*不符|文件.*损坏|清单已损坏|文件缺失|不完整/i.test(message)) {
     if (domain === 'update') return { title: '更新包校验未通过', message: '更新包不完整或与官方摘要不符。',
@@ -392,6 +393,18 @@ function showProblem(error, title = '操作未完成', options = {}) {
   document.querySelector('#problemAccountButton').hidden = !guidance.account;
   const settingsButton = document.querySelector('#problemSettingsButton');
   if (settingsButton) settingsButton.hidden = !guidance.settings;
+  const javaFixButton = document.querySelector('#problemJavaFixButton');
+  if (javaFixButton) {
+    const majorVersion = Number.isInteger(options.javaFix) ? options.javaFix : undefined;
+    javaFixButton.hidden = !Number.isInteger(majorVersion);
+    javaFixButton.textContent = `下载 Java ${majorVersion} 并启动`;
+    javaFixButton.onclick = majorVersion === undefined
+      ? null
+      : () => {
+          dialog.close();
+          void downloadJavaAndLaunch(majorVersion);
+        };
+  }
   const retryButton = document.querySelector('#problemRetryButton');
   if (retryButton) {
     retryButton.hidden = typeof options.retry !== 'function';
@@ -561,6 +574,7 @@ function applySettingsToForm() {
     ? launcherSettings.launcherUpdatePolicy
     : 'auto';
   sourceHint.textContent = `${launcherSettings.downloadConcurrency} 路并发下载`;
+  refreshJavaReadiness();
 }
 
 function javaOptionLabel(majorVersion, javaPath, suffix = '') {
@@ -601,7 +615,42 @@ function applyAutoJavaDetection(result) {
   for (const entry of autoJavaDetection.runtimes) rememberJavaPath(entry.path, entry.majorVersion);
   rememberJavaPath(result.path, result.majorVersion);
   renderJavaPathSetting();
+  javaEnvironmentKnown = true;
+  refreshJavaReadiness();
   return true;
+}
+
+// 首页 Java 就绪预检：结合所选版本的 Java 需求与已检测到的运行环境
+function selectedProfileJavaRequirement() {
+  const targetId = versionSelect.value;
+  if (!targetId) return undefined;
+  const profile = localProfiles.find((entry) => (entry.targetId ?? entry.profileId) === targetId);
+  const majorVersion = Number(profile?.requiredJavaVersion);
+  return Number.isInteger(majorVersion) && majorVersion > 0 ? majorVersion : undefined;
+}
+
+function availableJavaMajors() {
+  return new Set([
+    ...(autoJavaDetection?.runtimes ?? []).map((entry) => entry.majorVersion),
+    ...savedJavaRuntimes.map((entry) => entry.majorVersion)
+  ].filter((majorVersion) => Number.isInteger(majorVersion)));
+}
+
+function refreshJavaReadiness() {
+  const required = selectedProfileJavaRequirement();
+  if (!Number.isInteger(required)) {
+    javaReadiness = { status: 'idle' };
+  } else if (availableJavaMajors().has(required)) {
+    javaReadiness = { status: 'ready', majorVersion: required };
+  } else if (javaEnvironmentKnown) {
+    // 检测完成前不预告缺失，避免检测结果未到时误报
+    javaReadiness = availableJavaMajors().size > 0
+      ? { status: 'missing', majorVersion: required }
+      : { status: 'absent', majorVersion: required };
+  } else {
+    javaReadiness = { status: 'idle' };
+  }
+  updateLaunchButtonState();
 }
 
 // 系统级 Java 检测只发起一次，多处共享结果
@@ -610,7 +659,9 @@ function detectSystemJava(force = false) {
   if (!autoJavaDetectionPromise) {
     autoJavaDetectionPromise = (minecraft?.detectJava
       ? minecraft.detectJava({ force })
-      : settingsApi.detectJava({ force })).catch(() => null);
+      : settingsApi.detectJava({ force }))
+      .catch(() => null)
+      .finally(() => { javaEnvironmentKnown = true; });
   }
   return autoJavaDetectionPromise;
 }
@@ -638,6 +689,8 @@ async function chooseJavaPath() {
     selectedJavaMajorVersion = selection.majorVersion;
     rememberJavaPath(selectedJavaPath, selectedJavaMajorVersion);
     renderJavaPathSetting();
+    javaEnvironmentKnown = true;
+    refreshJavaReadiness();
     showToast(`已选择 Java ${selection.majorVersion}`);
     return true;
   } catch (error) {
@@ -749,12 +802,13 @@ async function openJavaSettings(requiredMajorVersion) {
 }
 
 function renderJavaDownloadState() {
-  javaDownloadVersionSelect.disabled = javaDownloadActive;
-  javaDownloadStartButton.disabled = javaDownloadActive;
+  const busy = javaDownloadActive || javaFixActive;
+  javaDownloadVersionSelect.disabled = busy;
+  javaDownloadStartButton.disabled = busy;
   javaDownloadStartButton.textContent = javaDownloadActive ? '下载中' : '下载';
   javaDownloadCancelButton.hidden = !javaDownloadActive;
-  gameDirectoryModeSelect.disabled = javaDownloadActive;
-  settingsDialog.querySelector('[value="save"]').disabled = javaDownloadActive;
+  gameDirectoryModeSelect.disabled = busy;
+  settingsDialog.querySelector('[value="save"]').disabled = busy;
 }
 
 javaDownloadButton.addEventListener('click', () => {
@@ -767,6 +821,18 @@ javaDownloadVersionSelect.addEventListener('change', () => {
 });
 
 minecraft?.onJavaDownloadProgress?.((progress) => {
+  if (javaFixActive) {
+    // 一键修复走首页状态条，设置面板不重复展示
+    if (progress.taskId && progress.taskId !== javaFixTaskId) return;
+    if (progress.cancellable === false) homeCancelDownloadButton.hidden = true;
+    if (progress.message) gameStatus.textContent = progress.message;
+    const percent = Number.isFinite(progress.receivedBytes) && Number.isFinite(progress.totalBytes)
+      && progress.totalBytes > 0
+      ? Math.max(0, Math.min(99, Math.floor(progress.receivedBytes / progress.totalBytes * 100)))
+      : null;
+    launchHint.textContent = `Java ${javaFixMajorVersion} · ${percent === null ? '下载中' : `${percent}%`}`;
+    return;
+  }
   if (!javaDownloadActive) return;
   if (progress.taskId && progress.taskId !== javaDownloadTaskId) return;
   javaDownloadHint.textContent = progress.message ?? '正在准备 Java 运行环境';
@@ -779,7 +845,7 @@ minecraft?.onJavaDownloadProgress?.((progress) => {
 });
 
 javaDownloadStartButton.addEventListener('click', async () => {
-  if (javaDownloadActive) return;
+  if (javaDownloadActive || javaFixActive) return;
   if (!minecraft?.downloadJava) {
     showToast('当前环境不支持下载 Java');
     return;
@@ -804,6 +870,8 @@ javaDownloadStartButton.addEventListener('click', async () => {
     rememberJavaPath(result.javaPath, majorVersion);
     renderJavaPathSetting();
     if (!selectedJavaPath) applyAutoJavaDetection({ available: true, path: result.javaPath, majorVersion });
+    javaEnvironmentKnown = true;
+    refreshJavaReadiness();
     javaDownloadProgress.value = 100;
     javaDownloadPercent.textContent = '100%';
     javaDownloadHint.textContent = `Java ${majorVersion} 已安装`;
@@ -834,6 +902,76 @@ javaDownloadCancelButton.addEventListener('click', async () => {
     showProblem(error);
   }
 });
+
+// 启动失败后的一键修复：下载游戏所需 Java 并自动重试启动
+async function downloadJavaAndLaunch(majorVersion) {
+  if (!minecraft?.downloadJava) {
+    void openJavaSettings(majorVersion);
+    return;
+  }
+  if (javaFixActive || javaDownloadActive || launchRequestActive
+      || versionDownloadActive || modpackInstallActive || modImportActive) {
+    showToast('请先等待当前任务完成');
+    return;
+  }
+  javaFixActive = true;
+  javaFixMajorVersion = majorVersion;
+  javaFixTaskId = crypto.randomUUID();
+  javaFixCancelRequested = false;
+  launchButton.disabled = true;
+  launchLabel.textContent = '正在下载 Java';
+  launchHint.textContent = `正在下载 Java ${majorVersion}`;
+  gameStatus.textContent = `正在准备 Java ${majorVersion} 运行环境`;
+  statusBadge.textContent = 'JAVA';
+  homeCancelDownloadButton.hidden = false;
+  homeCancelDownloadButton.disabled = false;
+  renderJavaDownloadState();
+  let launchAfterFix = false;
+  try {
+    const result = await minecraft.downloadJava(majorVersion, { taskId: javaFixTaskId });
+    autoJavaDetectionPromise = null;
+    rememberJavaPath(result.javaPath, majorVersion);
+    renderJavaPathSetting();
+    if (!selectedJavaPath) applyAutoJavaDetection({ available: true, path: result.javaPath, majorVersion });
+    javaEnvironmentKnown = true;
+    refreshJavaReadiness();
+    window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
+    showToast(`Java ${majorVersion} 已就绪，正在启动游戏`);
+    gameStatus.textContent = `Java ${majorVersion} 已就绪，正在启动游戏`;
+    launchAfterFix = true;
+  } catch (error) {
+    const cancelled = error?.code === 'TASK_CANCELLED' || error?.name === 'AbortError';
+    showToast(cancelled ? '已取消 Java 下载，可再次启动游戏重试' : `Java 下载未完成：${readableError(error)}`, !cancelled);
+    if (!cancelled) {
+      showProblem(error, 'Java 下载未完成', { domain: 'java', retry: () => downloadJavaAndLaunch(majorVersion) });
+    }
+  } finally {
+    javaFixActive = false;
+    javaFixTaskId = '';
+    javaFixMajorVersion = undefined;
+    javaFixCancelRequested = false;
+    homeCancelDownloadButton.hidden = true;
+    homeCancelDownloadButton.disabled = false;
+    statusBadge.textContent = 'READY';
+    renderJavaDownloadState();
+    updateLaunchButtonState();
+  }
+  if (launchAfterFix) await launchSelectedVersion();
+}
+
+async function cancelJavaFixDownload() {
+  if (!javaFixActive || javaFixCancelRequested) return;
+  javaFixCancelRequested = true;
+  homeCancelDownloadButton.disabled = true;
+  launchHint.textContent = '正在取消 Java 下载…';
+  try {
+    await minecraft.cancelJavaDownload();
+  } catch (error) {
+    javaFixCancelRequested = false;
+    homeCancelDownloadButton.disabled = false;
+    showProblem(error);
+  }
+}
 
 function setLittleSkinLoginBusy(active) {
   littleSkinLoginActive = active;
@@ -1096,6 +1234,7 @@ function renderLocalProfileOptions() {
   }
   updateLaunchButtonState();
   updateVersionAction();
+  refreshJavaReadiness();
 }
 
 async function loadLocalProfiles(force = false) {
@@ -1512,6 +1651,7 @@ function useVersion(profileId, displayName = profileId) {
   statusBadge.textContent = 'SELECTED';
   updateLaunchButtonState();
   updateVersionAction();
+  refreshJavaReadiness();
   showToast(`已切换到 ${displayName}`);
 }
 
@@ -1523,6 +1663,7 @@ function clearVersionSelection() {
   statusBadge.textContent = 'READY';
   updateLaunchButtonState();
   updateVersionAction();
+  refreshJavaReadiness();
   showToast('已取消当前游戏版本选择');
 }
 
@@ -1728,7 +1869,13 @@ function openActiveTask() {
   downloadStatus.scrollIntoView?.({ block: 'nearest' });
 }
 taskButton.addEventListener('click', openActiveTask);
-homeCancelDownloadButton.addEventListener('click', () => cancelDownloadButton.click());
+homeCancelDownloadButton.addEventListener('click', () => {
+  if (javaFixActive) {
+    void cancelJavaFixDownload();
+    return;
+  }
+  cancelDownloadButton.click();
+});
 retryTaskButton.addEventListener('click', () => { void withModpackUi((ui) => ui.retry()); });
 
 addOfflineButton.addEventListener('click', addOfflineAccount);
@@ -1824,6 +1971,14 @@ gameDirectoryModeSelect.addEventListener('change', () => {
     : '使用操作系统的 Minecraft 默认游戏目录。';
 });
 
+// 赞助支持链接交给系统浏览器打开，避免替换掉启动器窗口内的界面。
+document.addEventListener('click', (event) => {
+  const link = event.target?.closest?.('.sponsor-support-setting a[href]');
+  if (!link) return;
+  event.preventDefault();
+  void environment?.shell?.openExternal(link.href);
+});
+
 javaSelect.addEventListener('change', async () => {
   if (javaSelect.value === 'auto') {
     selectedJavaPath = '';
@@ -1860,6 +2015,8 @@ javaRedetectButton.addEventListener('click', async () => {
     } else {
       autoJavaDetection = null;
       renderJavaPathSetting();
+      javaEnvironmentKnown = true;
+      refreshJavaReadiness();
       window.localStorage.removeItem(JAVA_CHECK_SKIP_KEY);
       showToast('未检测到 Java，可手动选择路径或安装后重新检测');
     }
@@ -1940,7 +2097,7 @@ if (minecraft?.onVerifyProgress) {
 
 function updateLaunchButtonState() {
   const selectedProfile = versionSelect.value;
-  if (launchRequestActive) return;
+  if (launchRequestActive || javaFixActive) return;
   if (selectedProfile && activeGameProfiles.has(selectedProfile)) {
     launchButton.disabled = true;
     launchButton.classList.remove('is-launching');
@@ -1951,7 +2108,19 @@ function updateLaunchButtonState() {
   launchButton.disabled = false;
   launchButton.classList.remove('is-launching');
   launchLabel.textContent = '启动游戏';
-  launchHint.textContent = selectedProfile ? '准备进入方块世界' : '请先选择已安装版本';
+  if (!selectedProfile) {
+    launchHint.textContent = '请先选择已安装版本';
+    return;
+  }
+  if (javaReadiness?.status === 'ready') {
+    launchHint.textContent = `Java ${javaReadiness.majorVersion} 已就绪`;
+  } else if (javaReadiness?.status === 'missing') {
+    launchHint.textContent = `缺少 Java ${javaReadiness.majorVersion} · 可一键下载并启动`;
+  } else if (javaReadiness?.status === 'absent') {
+    launchHint.textContent = '未检测到 Java · 可一键下载并启动';
+  } else {
+    launchHint.textContent = '准备进入方块世界';
+  }
 }
 
 if (minecraft?.onLaunchStatus) {
@@ -2093,7 +2262,7 @@ document.addEventListener('drop', async (event) => {
     showToast('请拖入 Mod .jar，或 Modrinth .mrpack / CurseForge .zip 整合包');
     return;
   }
-  if (modImportActive || versionDownloadActive || modpackInstallActive || launchRequestActive) {
+  if (modImportActive || versionDownloadActive || modpackInstallActive || launchRequestActive || javaFixActive) {
     showToast('请先等待当前任务完成后再导入');
     return;
   }
@@ -2120,7 +2289,11 @@ document.addEventListener('drop', async (event) => {
   } finally { modImportActive = false; }
 });
 
-launchButton.addEventListener('click', async () => {
+launchButton.addEventListener('click', () => {
+  void launchSelectedVersion();
+});
+
+async function launchSelectedVersion() {
   if (!versionSelect.value) {
     gameStatus.textContent = '请先安装并选择游戏版本';
     statusBadge.textContent = 'READY';
@@ -2160,7 +2333,10 @@ launchButton.addEventListener('click', async () => {
     gameStatus.textContent = '游戏启动失败';
     statusBadge.textContent = 'ERROR';
     const requiredJava = message.match(/需要 Java (\d+)/);
-    if (requiredJava) {
+    if (requiredJava && minecraft?.downloadJava) {
+      // 缺少所需 Java：提供一键下载并自动重试，而不是只给一条错误信息
+      showProblem(error, '游戏启动失败', { javaFix: Number(requiredJava[1]) });
+    } else if (requiredJava) {
       showToast(message, true);
       void openJavaSettings(Number(requiredJava[1]));
     } else {
@@ -2171,7 +2347,7 @@ launchButton.addEventListener('click', async () => {
     updateLaunchButtonState();
     updateVersionAction();
   }
-});
+}
 
 versionSelect.addEventListener('change', () => {
   javaRequirementRequest += 1;
@@ -2179,6 +2355,7 @@ versionSelect.addEventListener('change', () => {
     void prepareJavaDownloadSelection();
   }
   rememberSelectedGame(versionSelect.value);
+  refreshJavaReadiness();
   if (versionSelect.value) {
     gameStatus.textContent = `已选择 Minecraft ${versionSelect.value}`;
     statusBadge.textContent = activeGameProfiles.has(versionSelect.value) ? 'RUNNING' : 'SELECTED';
@@ -2218,40 +2395,8 @@ async function performJavaCheck() {
   } catch {
     // 检测失败时继续弹出引导，不阻断使用
   }
-  showToast('未检测到 Java，可在「启动设置」中下载；你可以继续使用启动器');
+  showToast('未检测到 Java，可启动游戏后按提示一键下载；你可以继续使用启动器');
 }
-
-javaCheckSkipButton.addEventListener('click', () => {
-  window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
-  showToast('已跳过 Java 检测，可在「启动设置」中手动选择 Java 路径');
-});
-
-javaCheckRetryButton.addEventListener('click', async () => {
-  if (!settingsApi?.detectJava) return;
-  javaCheckRetryButton.disabled = true;
-  javaCheckHint.textContent = '正在重新检测 Java…';
-  autoJavaDetectionPromise = null;
-  try {
-    const result = await detectSystemJava(true);
-    if (result?.available) {
-      window.localStorage.setItem(JAVA_CHECK_SKIP_KEY, '1');
-      applyAutoJavaDetection(result);
-      javaCheckDialog.close();
-      showToast(`已检测到 Java ${result.majorVersion}`);
-    } else {
-      javaCheckHint.textContent = '仍未检测到可用的 Java，请先安装后再点击「重新检测」。';
-    }
-  } catch (error) {
-    javaCheckHint.textContent = `检测失败：${readableError(error)}`;
-  } finally {
-    javaCheckRetryButton.disabled = false;
-  }
-});
-
-javaCheckDownloadButton.addEventListener('click', () => {
-  javaCheckDialog.close();
-  void openJavaSettings();
-});
 
 // Paint the home screen before starting filesystem scans and background setup.
 requestAnimationFrame(() => requestAnimationFrame(async () => {

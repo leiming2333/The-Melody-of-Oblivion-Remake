@@ -157,14 +157,13 @@ test('startup paints before background initialization and missing Java stays non
     settingsApi: { detectJava() {} },
     window: { localStorage: { getItem: () => null } },
     JAVA_CHECK_SKIP_KEY: 'java-skip',
-    javaCheckDialog: { showModal: () => { throw new Error('Startup must not open a modal'); } },
     showToast: (text) => events.push(text),
     readableError: (error) => error.message,
     updaterApi: undefined
   };
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('async function performJavaCheck()'),
-    source.indexOf("javaCheckSkipButton.addEventListener")), context);
+    source.indexOf('// Paint the home screen')), context);
   vm.runInContext(source.slice(source.indexOf('requestAnimationFrame(() => requestAnimationFrame(async () =>')), context);
   assert.deepEqual(events, []);
   frames.shift()();
@@ -189,7 +188,8 @@ test('a game crash displays the saved diagnostic log while normal exit stays non
   const toasts = [];
   const context = {
     minecraft: { onLaunchStatus: (callback) => { receive = callback; } },
-    versionSelect: { value: 'game' }, launchRequestActive: false,
+    versionSelect: { value: 'game' }, launchRequestActive: false, javaFixActive: false,
+    javaReadiness: { status: 'idle' },
     activeGameProfiles: new Set(), gameStatus: {}, statusBadge: {},
     launchButton: { classList: { remove() {} } }, launchLabel: {}, launchHint: {},
     showProblem: (error, title) => problems.push({ message: error.message, title }),
@@ -297,6 +297,7 @@ function catalogFixture() {
     downloadVersionButton: {}, deleteVersionButton: {}, clearVersionSelectionButton: {},
     gameStatus: {}, statusBadge: {}, versionDialog: { close() {} }, versionCloseButtons: [], deleted: [],
     versionTypeName: (type) => type, rememberSelectedGame() {}, updateLaunchButtonState() {},
+    refreshJavaReadiness() {},
     loadLocalProfiles: async () => {}, readableError: (error) => error.message,
     showToast() {}, window: { confirm: () => true },
     minecraft: {
@@ -390,7 +391,8 @@ function profileOptionsFixture({ profiles = [], remembered = '' } = {}) {
     loaderNames: { vanilla: '原版', fabric: 'Fabric' },
     rememberedSelectedGame: () => remembered,
     rememberSelectedGame: (value) => rememberedLog.push(value),
-    updateLaunchButtonState() {}, updateVersionAction() {}
+    updateLaunchButtonState() {}, updateVersionAction() {},
+    refreshJavaReadiness() {}
   };
   vm.createContext(context);
   vm.runInContext(source.slice(
@@ -456,4 +458,260 @@ test('launching without a version or account keeps a visible status instead of a
   assert.equal(context.gameStatus.textContent, '请先添加并选择游戏账户');
   assert.equal(context.launchHint.textContent, '请先添加游戏账户');
   assert.deepEqual(toasts[1], { message: '请先添加并选择一个游戏账户', isError: true });
+});
+
+test('launch hint previews Java readiness for the selected version', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const context = {
+    versionSelect: { value: '1.21.1' }, launchRequestActive: false, javaFixActive: false,
+    activeGameProfiles: new Set(),
+    launchButton: { classList: { remove() {} } }, launchLabel: {}, launchHint: {},
+    minecraft: undefined
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('function updateLaunchButtonState()'),
+    source.indexOf('let modpackUiModule;')), context);
+
+  context.javaReadiness = { status: 'ready', majorVersion: 21 };
+  context.updateLaunchButtonState();
+  assert.equal(context.launchHint.textContent, 'Java 21 已就绪');
+
+  context.javaReadiness = { status: 'missing', majorVersion: 17 };
+  context.updateLaunchButtonState();
+  assert.equal(context.launchHint.textContent, '缺少 Java 17 · 可一键下载并启动');
+
+  context.javaReadiness = { status: 'absent', majorVersion: 17 };
+  context.updateLaunchButtonState();
+  assert.equal(context.launchHint.textContent, '未检测到 Java · 可一键下载并启动');
+
+  context.javaReadiness = { status: 'idle' };
+  context.updateLaunchButtonState();
+  assert.equal(context.launchHint.textContent, '准备进入方块世界');
+
+  context.versionSelect.value = '';
+  context.updateLaunchButtonState();
+  assert.equal(context.launchHint.textContent, '请先选择已安装版本');
+
+  context.versionSelect.value = '1.21.1';
+  context.javaFixActive = true;
+  context.launchHint.textContent = 'Java 21 · 42%';
+  context.updateLaunchButtonState();
+  assert.equal(context.launchHint.textContent, 'Java 21 · 42%');
+});
+
+test('java readiness stays quiet until the environment detection has settled', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const context = {
+    versionSelect: { value: '1.21.1' },
+    localProfiles: [{ profileId: '1.21.1', requiredJavaVersion: 21, valid: true, complete: true }],
+    savedJavaRuntimes: [], autoJavaDetection: null, javaEnvironmentKnown: false,
+    updateLaunchButtonState() {}
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(
+    source.indexOf('function selectedProfileJavaRequirement()'),
+    source.indexOf('async function chooseJavaPath(')
+  ), context);
+
+  context.refreshJavaReadiness();
+  assert.equal(context.javaReadiness.status, 'idle');
+
+  context.javaEnvironmentKnown = true;
+  context.refreshJavaReadiness();
+  assert.equal(context.javaReadiness.status, 'absent');
+  assert.equal(context.javaReadiness.majorVersion, 21);
+
+  context.savedJavaRuntimes = [{ path: 'C:\\jdk8\\bin\\java.exe', majorVersion: 8 }];
+  context.refreshJavaReadiness();
+  assert.equal(context.javaReadiness.status, 'missing');
+  assert.equal(context.javaReadiness.majorVersion, 21);
+
+  context.autoJavaDetection = { path: 'C:\\jre21\\bin\\java.exe', majorVersion: 21,
+    runtimes: [{ path: 'C:\\jre21\\bin\\java.exe', majorVersion: 21 }] };
+  context.refreshJavaReadiness();
+  assert.equal(context.javaReadiness.status, 'ready');
+
+  context.versionSelect.value = '';
+  context.refreshJavaReadiness();
+  assert.equal(context.javaReadiness.status, 'idle');
+});
+
+test('problem dialog offers a one-click Java fix wired to the download flow', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const fixCalls = [];
+  const nodes = {
+    '#problemDialog': { open: false, showModal() { this.open = true; }, close() { this.open = false; } },
+    '#problemTitle': {}, '#problemMessage': {}, '#problemAdvice': {},
+    '#problemError': {}, '#problemDetails': {}, '#problemAccountButton': {},
+    '#problemSettingsButton': {}, '#problemRetryButton': {},
+    '#problemJavaFixButton': { hidden: true }
+  };
+  const context = {
+    document: { querySelector: (selector) => nodes[selector] },
+    downloadJavaAndLaunch: (majorVersion) => fixCalls.push(majorVersion)
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('function readableError('),
+    source.indexOf('function setAccountHint(')), context);
+
+  context.showProblem(new Error('该游戏版本需要 Java 21，请在设置的 Java 环境旁下载对应运行环境'),
+    '游戏启动失败', { javaFix: 21 });
+  assert.equal(nodes['#problemJavaFixButton'].hidden, false);
+  assert.equal(nodes['#problemJavaFixButton'].textContent, '下载 Java 21 并启动');
+  assert.match(nodes['#problemAdvice'].textContent, /自动重试启动/);
+  nodes['#problemJavaFixButton'].onclick();
+  assert.deepEqual(fixCalls, [21]);
+  assert.equal(nodes['#problemDialog'].open, false);
+
+  context.showProblem(new Error('游戏文件校验失败'), '游戏启动失败');
+  assert.equal(nodes['#problemJavaFixButton'].hidden, true);
+  assert.equal(fixCalls.length, 1);
+});
+
+test('a launch failure caused by a missing Java offers the one-click fix dialog', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  let handler;
+  const problems = [];
+  const settingsOpened = [];
+  const toasts = [];
+  const context = {
+    launchButton: { addEventListener(_name, callback) { handler = callback; }, classList: { add() {} } },
+    versionSelect: { value: '1.21.1' },
+    accountState: { current: { type: 'offline', name: 'Steve' } },
+    gameStatus: {}, statusBadge: {}, launchLabel: {}, launchHint: {},
+    activeGameProfiles: new Set(),
+    minecraft: {
+      downloadJava: async () => ({ javaPath: 'C:\\jre21\\bin\\java.exe' }),
+      launchVersion: async () => {
+        throw new Error('该游戏版本需要 Java 21，请在设置的 Java 环境旁下载对应运行环境');
+      }
+    },
+    showToast: (message) => toasts.push(message),
+    readableError: (error) => error.message,
+    showProblem: (error, title, options) => problems.push({ message: error.message, title, options }),
+    openJavaSettings: (majorVersion) => settingsOpened.push(majorVersion),
+    updateVersionAction() {}, updateLaunchButtonState() {}
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(
+    source.indexOf("launchButton.addEventListener('click'"),
+    source.indexOf("versionSelect.addEventListener('change'")
+  ), context);
+
+  await handler();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0].options.javaFix, 21);
+  assert.deepEqual(settingsOpened, []);
+
+  context.minecraft = { launchVersion: async () => {
+    throw new Error('该游戏版本需要 Java 21，请在设置的 Java 环境旁下载对应运行环境');
+  } };
+  await handler();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(problems.length, 1);
+  assert.equal(settingsOpened[0], 21);
+  assert.match(toasts.at(-1), /需要 Java 21/);
+});
+
+test('one-click Java fix downloads the runtime and relaunches automatically', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  let resolveDownload;
+  const launches = [];
+  const toasts = [];
+  const stored = {};
+  const refreshCalls = [];
+  const context = {
+    minecraft: {
+      downloadJava: () => new Promise((resolve) => { resolveDownload = resolve; }),
+      cancelJavaDownload: async () => ({ cancelled: 1 })
+    },
+    launchButton: {}, launchLabel: {}, launchHint: {}, gameStatus: {}, statusBadge: {},
+    homeCancelDownloadButton: {},
+    javaFixActive: false, javaFixMajorVersion: undefined, javaFixTaskId: '',
+    javaFixCancelRequested: false, javaDownloadActive: false, launchRequestActive: false,
+    versionDownloadActive: false, modpackInstallActive: false, modImportActive: false,
+    selectedJavaPath: '', savedJavaRuntimes: [], autoJavaDetectionPromise: null,
+    javaEnvironmentKnown: false,
+    crypto: { randomUUID: () => 'fix-task-1' },
+    window: { localStorage: { setItem: (key, value) => { stored[key] = value; } } },
+    JAVA_CHECK_SKIP_KEY: 'java-skip',
+    rememberJavaPath() {}, renderJavaPathSetting() {}, renderJavaDownloadState() {},
+    applyAutoJavaDetection() {}, refreshJavaReadiness: () => refreshCalls.push('readiness'),
+    updateLaunchButtonState() { context.launchButton.disabled = false; },
+    launchSelectedVersion: async () => launches.push('relaunch'),
+    openJavaSettings() {},
+    showToast: (message) => toasts.push(message),
+    readableError: (error) => error.message,
+    showProblem: () => { throw new Error('problem dialog must not appear on success'); }
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(
+    source.indexOf('async function downloadJavaAndLaunch('),
+    source.indexOf('function setLittleSkinLoginBusy(')
+  ), context);
+
+  const pending = context.downloadJavaAndLaunch(21);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.javaFixActive, true);
+  assert.equal(context.launchButton.disabled, true);
+  assert.equal(context.launchLabel.textContent, '正在下载 Java');
+  assert.equal(context.launchHint.textContent, '正在下载 Java 21');
+  assert.equal(context.homeCancelDownloadButton.hidden, false);
+
+  resolveDownload({ javaPath: 'C:\\jre21\\bin\\java.exe', majorVersion: 21 });
+  await pending;
+  assert.equal(context.javaFixActive, false);
+  assert.equal(context.homeCancelDownloadButton.hidden, true);
+  assert.equal(context.launchButton.disabled, false);
+  assert.equal(stored['java-skip'], '1');
+  assert.equal(context.javaEnvironmentKnown, true);
+  assert.deepEqual(refreshCalls, ['readiness']);
+  assert.deepEqual(launches, ['relaunch']);
+  assert.match(toasts.at(-1), /Java 21 已就绪，正在启动游戏/);
+});
+
+test('a cancelled one-click Java fix keeps the launcher usable without a problem dialog', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const launches = [];
+  const problems = [];
+  const toasts = [];
+  const context = {
+    minecraft: {
+      downloadJava: async () => {
+        throw Object.assign(new Error('下载已取消'), { code: 'TASK_CANCELLED' });
+      },
+      cancelJavaDownload: async () => ({ cancelled: 1 })
+    },
+    launchButton: {}, launchLabel: {}, launchHint: {}, gameStatus: {}, statusBadge: {},
+    homeCancelDownloadButton: {},
+    javaFixActive: false, javaFixMajorVersion: undefined, javaFixTaskId: '',
+    javaFixCancelRequested: false, javaDownloadActive: false, launchRequestActive: false,
+    versionDownloadActive: false, modpackInstallActive: false, modImportActive: false,
+    selectedJavaPath: '', savedJavaRuntimes: [], autoJavaDetectionPromise: null,
+    javaEnvironmentKnown: true,
+    crypto: { randomUUID: () => 'fix-task-2' },
+    window: { localStorage: { setItem() {} } },
+    JAVA_CHECK_SKIP_KEY: 'java-skip',
+    rememberJavaPath() {}, renderJavaPathSetting() {}, renderJavaDownloadState() {},
+    applyAutoJavaDetection() {}, refreshJavaReadiness() {},
+    updateLaunchButtonState() { context.launchButton.disabled = false; },
+    launchSelectedVersion: async () => launches.push('relaunch'),
+    openJavaSettings() {},
+    showToast: (message) => toasts.push(message),
+    readableError: (error) => error.message,
+    showProblem: (error, title) => problems.push({ error, title })
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(
+    source.indexOf('async function downloadJavaAndLaunch('),
+    source.indexOf('function setLittleSkinLoginBusy(')
+  ), context);
+
+  await context.downloadJavaAndLaunch(17);
+  assert.deepEqual(launches, []);
+  assert.deepEqual(problems, []);
+  assert.equal(context.javaFixActive, false);
+  assert.equal(context.launchButton.disabled, false);
+  assert.match(toasts.at(-1), /已取消 Java 下载/);
 });

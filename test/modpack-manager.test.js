@@ -385,14 +385,15 @@ test('整合包安装失败保留校验后的下载，重试复用并重新检�
 
   failSecond = false;
   const retry = await manager.install(archivePath);
-  assert.deepEqual(counts, { 'first.jar': 1, 'second.jar': 2 });
+  // second.jar 每轮先试 MCIM 镜像再回退官方直链，失败轮次会各请求一次。
+  assert.deepEqual(counts, { 'first.jar': 1, 'second.jar': 3 });
   assert.equal(await fs.readFile(path.join(manager.gameDirectory, 'melody-instances',
     retry.instanceId, 'mods', 'first.jar'), 'utf8'), content['first.jar']);
 
   // Same-length tampering must cause a fresh download rather than a cache hit.
   await fs.writeFile(path.join(cacheRoot, hashes['first.jar']), 'x'.repeat(content['first.jar'].length));
   const recovered = await manager.install(archivePath);
-  assert.deepEqual(counts, { 'first.jar': 2, 'second.jar': 2 });
+  assert.deepEqual(counts, { 'first.jar': 2, 'second.jar': 3 });
   assert.equal(await fs.readFile(path.join(manager.gameDirectory, 'melody-instances',
     recovered.instanceId, 'mods', 'first.jar'), 'utf8'), content['first.jar']);
 });
@@ -464,6 +465,52 @@ test('CurseForge 文件缺少下载地址时给出受限提示', async () => {
       resolveCurseForgeFile({ projectId: 42, fileId: 100, required: true }, undefined),
       /禁止第三方自动下载/
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Modrinth 文件地址优先使用 MCIM 镜像，官方直链保留回退', () => {
+  const pack = parseModrinthIndex({
+    formatVersion: 1,
+    game: 'minecraft',
+    name: 'Mirror Pack',
+    dependencies: { minecraft: '1.21.1' },
+    files: [
+      {
+        path: 'mods/example.jar',
+        hashes: { sha1: '0123456789abcdef0123456789abcdef01234567' },
+        downloads: ['https://cdn.modrinth.com/data/example.jar'],
+        fileSize: 12
+      },
+      { path: 'mods/other.jar', downloads: ['https://example.com/other.jar'] }
+    ]
+  });
+  assert.deepEqual(pack.files[0].urls, [
+    'https://mod.mcimirror.top/data/example.jar',
+    'https://cdn.modrinth.com/data/example.jar'
+  ]);
+  assert.deepEqual(pack.files[1].urls, ['https://example.com/other.jar']);
+});
+
+test('CurseForge 文件地址同样优先使用 MCIM 镜像', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      data: {
+        fileName: 'mirror.jar',
+        downloadUrl: 'https://mediafilez.forgecdn.net/files/1234/mirror.jar',
+        hashes: []
+      }
+    })
+  });
+  try {
+    const file = await resolveCurseForgeFile({ projectId: 42, fileId: 100, required: true }, undefined);
+    assert.deepEqual(file.urls, [
+      'https://mod.mcimirror.top/files/1234/mirror.jar',
+      'https://mediafilez.forgecdn.net/files/1234/mirror.jar'
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }

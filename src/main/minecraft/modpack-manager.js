@@ -87,6 +87,26 @@ function safeDownloadUrl(value) {
   return parsed.toString();
 }
 
+// MCIM 文件镜像（https://mcimirror.top）按官方规则替换域名：cdn.modrinth.com 与
+// edge/mediafilez.forgecdn.net 的路径原样拼到 mod.mcimirror.top 下，官方直链保留在候选列表里回退。
+const MCIM_MIRROR_BASE = 'https://mod.mcimirror.top';
+const MCIM_MIRRORED_HOSTS = Object.freeze(['cdn.modrinth.com', 'edge.forgecdn.net', 'mediafilez.forgecdn.net']);
+
+function withMcimMirrorFirst(urls) {
+  const mirrored = new Set();
+  for (const url of urls) {
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      continue;
+    }
+    if (parsed.protocol !== 'https:' || !MCIM_MIRRORED_HOSTS.includes(parsed.hostname.toLowerCase())) continue;
+    mirrored.add(`${MCIM_MIRROR_BASE}${parsed.pathname}${parsed.search}`);
+  }
+  return [...mirrored, ...urls];
+}
+
 function samePath(left, right) {
   if (typeof left !== 'string' || typeof right !== 'string') return false;
   const a = path.resolve(left);
@@ -214,7 +234,7 @@ function parseModrinthIndex(index) {
       }
       return {
         path: safeRelativePath(file.path),
-        urls: file.downloads.map(safeDownloadUrl),
+        urls: withMcimMirrorFirst(file.downloads).map(safeDownloadUrl),
         sha1: file.hashes?.sha1?.toLowerCase(),
         size: Number.isSafeInteger(file.fileSize) && file.fileSize >= 0 ? file.fileSize : undefined,
         required: file.env?.client !== 'optional'
@@ -424,7 +444,7 @@ async function resolveCurseForgeMetadata(entry, signal) {
     ...entry,
     fileName: metadata.fileName,
     path: `mods/${metadata.fileName}`,
-    urls: metadata.downloadUrl ? [safeDownloadUrl(metadata.downloadUrl)] : [],
+    urls: metadata.downloadUrl ? withMcimMirrorFirst([metadata.downloadUrl]).map(safeDownloadUrl) : [],
     sha1: /^[0-9a-f]{40}$/i.test(sha1 ?? '') ? sha1.toLowerCase() : undefined,
     size: Number.isSafeInteger(metadata.fileLength) && metadata.fileLength >= 0 ? metadata.fileLength : undefined,
     officialUrl: `https://www.curseforge.com/projects/${entry.projectId}/files/${entry.fileId}`

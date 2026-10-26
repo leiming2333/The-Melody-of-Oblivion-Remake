@@ -36,6 +36,23 @@ function detectLoaderType(metadata, profileId) {
   return metadata?.inheritsFrom ? 'custom' : 'vanilla';
 }
 
+// 与 readVersionMetadata 的合并规则一致：子版本声明 javaVersion 时优先，
+// 否则沿 inheritsFrom 继承，链上都没有则默认 Java 8。
+function resolveRequiredJavaVersion(profileId, metadataById) {
+  const visited = new Set();
+  let currentId = profileId;
+  while (typeof currentId === 'string' && PROFILE_ID_PATTERN.test(currentId) && !visited.has(currentId)) {
+    visited.add(currentId);
+    const metadata = metadataById.get(currentId);
+    if (metadata?.javaVersion) {
+      const majorVersion = Number(metadata.javaVersion.majorVersion);
+      return Number.isInteger(majorVersion) && majorVersion > 0 ? majorVersion : 8;
+    }
+    currentId = metadata?.inheritsFrom;
+  }
+  return 8;
+}
+
 class MinecraftVersionManager {
   constructor({ gameDirectory, trashItem }) {
     this.gameDirectory = gameDirectory;
@@ -53,10 +70,12 @@ class MinecraftVersionManager {
       else throw error;
     }
 
+    const metadataById = new Map();
     const profiles = (await Promise.all(entries
       .filter((entry) => entry.isDirectory() && PROFILE_ID_PATTERN.test(entry.name))
       .map(async (entry) => {
         const metadata = await readProfileMetadata(versionsRoot, entry.name);
+        metadataById.set(entry.name, metadata);
         const valid = Boolean(metadata) && (!metadata.id || metadata.id === entry.name);
         const inheritsFrom = valid && PROFILE_ID_PATTERN.test(metadata.inheritsFrom ?? '')
           ? metadata.inheritsFrom
@@ -90,7 +109,8 @@ class MinecraftVersionManager {
     const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
     const publicProfiles = profiles.map(({ markerComplete: _markerComplete, ...profile }) => ({
       ...profile,
-      complete: isComplete({ ...profile, markerComplete: _markerComplete })
+      complete: isComplete({ ...profile, markerComplete: _markerComplete }),
+      requiredJavaVersion: resolveRequiredJavaVersion(profile.profileId, metadataById)
     }));
 
     const profileById = new Map(publicProfiles.map((profile) => [profile.profileId, profile]));
@@ -121,6 +141,8 @@ class MinecraftVersionManager {
             type: 'instance',
             releaseTime: metadata.installedAt,
             loaderType: metadata.loaderType ?? baseProfile?.loaderType ?? 'custom',
+            requiredJavaVersion: baseProfile?.requiredJavaVersion
+              ?? resolveRequiredJavaVersion(metadata.profileId, metadataById),
             valid,
             complete: valid && baseProfile.complete,
             isInstance: true

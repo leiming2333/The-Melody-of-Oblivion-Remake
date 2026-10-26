@@ -14,6 +14,7 @@ function fixture(importModFile = async () => {}) {
     filesApi: { getPath: file => file.path }, minecraft: { importModFile },
     versionSelect: { value: 'instance-selected' },
     versionDownloadActive: false, modpackInstallActive: false, launchRequestActive: false,
+    javaFixActive: false,
     showToast: message => messages.push(message), readableError: error => error.message,
     installDroppedModpack: async file => packs.push(file)
   };

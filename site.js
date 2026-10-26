@@ -10,16 +10,13 @@ const translations = {
   "hero.title": "Melody Launcher",
   "hero.subtitle": "Your block world starts here.",
   "hero.description": "A desert lake greets you on launch. Manage accounts, install versions, adjust Java and memory, then start your game.",
-  "hero.caption": "Actual v1.6.5 home screen · Default Desert Lake scene",
   "hero.download": "Download launcher",
-  "hero.preview": "See the launcher",
   "hero.release": "Choose a build here and download over HTTPS",
   "intro.title": "Your familiar accounts,<br>all in one place.",
   "intro.body": "Manage offline and LittleSkin accounts at the bottom left. Switch installed versions and open launch settings on the right, or change your wallpaper in settings.",
   "fact.accounts": "account types",
   "fact.threads": "download threads",
   "fact.platforms": "desktop platforms",
-  "intro.caption": "Historical v1.6.5 account management screen; the current source interface may differ",
   "features.title": "Fewer steps between install and play.",
   "features.lead": "The things you use often stay close. Download and installation progress stay visible.",
   "feature.download.title": "Downloads that keep moving",
@@ -106,14 +103,6 @@ function setLanguage(language) {
   });
   languageButton.textContent = english ? "中文" : "EN";
   languageButton.setAttribute("aria-label", english ? "切换为中文" : "Switch language");
-  document.querySelector(".launcher-figure img").alt = english
-    ? "Historical Melody Launcher v1.6.5 account management screen"
-    : "忘却的旋律 v1.6.5 启动器历史账户管理界面";
-  document.querySelector(".hero-launcher-preview img").alt = english
-    ? "Actual Melody Launcher 1.6.5 home screen with the default Desert Lake wallpaper"
-    : "忘却的旋律 1.6.5 启动器真实主界面，默认沙漠湖泊壁纸";
-  document.querySelector(".hero-launcher-preview a").setAttribute("aria-label", english
-    ? "View the launcher account screen" : "查看启动器账户界面");
   updateDownloadLink();
   try { localStorage.setItem("melody-site-language", language); } catch {}
 }

@@ -29,6 +29,9 @@ function sourceDetailsFromUrl(url) {
     } else if (hostname.endsWith('littleservice.cn')) {
       sourceId = 'lss233';
       sourceLabel = "Lss233's Mirror";
+    } else if (hostname.endsWith('mcimirror.top')) {
+      sourceId = 'mcim';
+      sourceLabel = 'MCIM 镜像';
     }
   } catch {}
   return {

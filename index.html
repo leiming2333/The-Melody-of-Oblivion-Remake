@@ -9,7 +9,6 @@
   <title>忘却的旋律启动器</title>
   <link rel="icon" type="image/png" href="./assets/app-icon.png">
   <link rel="preload" as="image" href="./assets/backgrounds/scene-04.jpg">
-  <link rel="preload" as="image" href="./assets/launcher-screenshot.png">
   <link rel="stylesheet" href="./styles.css">
   <script src="./site.js" defer></script>
 </head>
@@ -38,7 +37,6 @@
     <section class="hero" id="top">
       <div class="hero-image" aria-hidden="true"></div><div class="hero-shade" aria-hidden="true"></div>
       <div class="shell hero-inner">
-        <div class="hero-layout">
         <div class="hero-content">
           <p class="kicker"><span class="status-dot"></span><span data-i18n="hero.kicker">Minecraft 启动器 · Windows / macOS / Linux</span></p>
           <h1 data-i18n="hero.title">忘却的旋律</h1>
@@ -46,20 +44,14 @@
           <p class="hero-description" data-i18n="hero.description">沙漠湖泊，打开即见。管理账户、安装版本、调整 Java 与内存，然后启动游戏。</p>
           <div class="hero-actions">
             <a class="button button-primary" href="#download"><span aria-hidden="true">↓</span><span data-i18n="hero.download">下载启动器</span></a>
-            <a class="button button-outline" href="#launcher"><span data-i18n="hero.preview">看看界面</span><span aria-hidden="true">↘</span></a>
           </div>
           <p class="hero-release" data-i18n="hero.release">通过本站选择版本，使用 HTTPS 下载</p>
-        </div>
-        <figure class="hero-launcher-preview">
-          <a href="#launcher" aria-label="查看启动器账户界面"><img src="./assets/launcher-screenshot.png" width="950" height="584" alt="忘却的旋律 1.6.5 启动器真实主界面，默认沙漠湖泊壁纸" fetchpriority="high" decoding="async"></a>
-          <figcaption data-i18n="hero.caption">v1.6.5 实际主界面 · 沙漠湖泊默认场景</figcaption>
-        </figure>
         </div>
         <div class="hero-bottom"><span>01 / MELODY LAUNCHER</span><a href="#launcher" aria-label="向下查看"><span aria-hidden="true">↓</span></a></div>
       </div>
     </section>
     <section class="intro-band" id="launcher">
-      <div class="shell intro-layout">
+      <div class="shell">
         <div class="section-copy">
           <p class="section-label">THE LAUNCHER / 01</p>
           <h2 data-i18n="intro.title">熟悉的账户，<br>在同一个地方。</h2>
@@ -70,7 +62,6 @@
             <div><strong>3</strong><span data-i18n="fact.platforms">个桌面平台</span></div>
           </div>
         </div>
-        <figure class="launcher-figure"><img src="./assets/launcher-accounts.png" width="950" height="584" alt="忘却的旋律 v1.6.5 启动器历史账户管理界面" loading="lazy" decoding="async"><figcaption data-i18n="intro.caption">v1.6.5 历史账户管理界面，当前源码界面可能有所不同</figcaption></figure>
       </div>
     </section>
     <section class="features-section" id="features">
