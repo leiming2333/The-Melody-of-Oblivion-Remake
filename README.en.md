@@ -7,7 +7,7 @@
 
 [English](README.en.md) · [简体中文](README.md)
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Node.js](https://img.shields.io/badge/Node.js-26.10.0-green.svg)](https://nodejs.org/)
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
@@ -37,7 +37,7 @@ The current repository starts a new implementation; its version numbers and code
 - **Game versions** — browse Mojang's version manifest, detect local installations, download Vanilla versions, verify required files, and move removable profiles to the recycle bin.
 - **Mod loaders** — discover and install Fabric, Forge, NeoForge, and Quilt through a shared workflow.
 - **Resilient downloads** — choose between Mojang-hosted endpoints and BMCLAPI, probe sources in automatic mode, use configurable task concurrency, split large files with HTTP Range requests, verify SHA-1 metadata, cancel active work, and retry alternate sources.
-- **Accounts** — create offline profiles or use LittleSkin Yggdrasil; sync skin avatars, refresh LittleSkin credentials before launch, and keep tokens out of the renderer process.
+- **Accounts** — sign in with Microsoft through the device-code flow (Xbox Live → XSTS → Minecraft ownership and profile check), or create offline profiles and use LittleSkin Yggdrasil; sync skin avatars, refresh Microsoft and LittleSkin credentials before launch, and keep tokens out of the renderer process.
 - **Java management** — match the Java major version required by the selected game; scan system installations and managed runtimes. The home launch button previews Java readiness for the selected version, and a failed launch caused by a missing runtime offers a one-click download that retries automatically. Java 8, 16, 17, 21, or 25 can also be downloaded next to the Java path setting, with progress and cancellation. Downloads prefer Azul JRE and fall back to Adoptium, use parallel transfers, and verify SHA-256.
 - **Launch core** — resolve inherited version metadata, apply platform rules, assemble arguments and classpaths, extract native libraries safely, launch the Java process, and report its status. LittleSkin accounts automatically provision a SHA-256-verified authlib-injector.
 - **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instances with overrides, Fabric, Forge, NeoForge, and Quilt. A single confirmation shows the game, loader, and file counts; optional files are unchecked by default. Only remote resolution or download failures allow optional files to be skipped with a warning. Disk, permission, and security errors stop installation; required-file failures support retry. Restricted CurseForge files can be downloaded from their official pages, selected locally, and verified against trusted hashes before installation continues.
@@ -154,6 +154,6 @@ These links document historical context; they do not imply endorsement of this r
 
 ## License and trademarks
 
-The project is distributed under the [GNU Affero General Public License v3.0](LICENSE). Third-party names, trademarks, and assets remain subject to their respective owners' terms.
+The project is distributed under the [GNU General Public License v3.0](LICENSE). Third-party names, trademarks, and assets remain subject to their respective owners' terms.
 
 Minecraft is a trademark of Microsoft. This project is unofficial and is not affiliated with or endorsed by Microsoft or Mojang Studios. The “忘却的旋律” name is used here as a reference and tribute to the historical launcher; no ownership of the original project is claimed.

@@ -7,7 +7,7 @@
 
 [English](README.en.md) · 简体中文
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Node.js](https://img.shields.io/badge/Node.js-26.10.0-green.svg)](https://nodejs.org/)
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
@@ -37,7 +37,7 @@
 - **游戏版本**：浏览 Mojang 版本清单、识别本地安装、下载原版游戏、验证所需文件，并将可移除的配置移动到回收站。
 - **模组加载器**：通过统一流程查询并安装 Fabric、Forge、NeoForge 与 Quilt。
 - **可靠下载**：在 Mojang 官方源与 BMCLAPI 之间选择；自动模式会测速；支持任务并发、大文件 HTTP Range 分段、SHA-1 校验、取消下载及失败后切换来源重试。
-- **账户系统**：支持离线账户及 LittleSkin Yggdrasil；可同步皮肤头像、启动前刷新 LittleSkin 凭据，并阻止令牌进入渲染进程。
+- **账户系统**：支持 Microsoft 设备代码登录（Xbox Live → XSTS → Minecraft 所有权与档案校验）、离线账户及 LittleSkin Yggdrasil；可同步皮肤头像，启动前自动刷新 Microsoft 与 LittleSkin 凭据，并阻止令牌进入渲染进程。可同步皮肤头像、启动前刷新 LittleSkin 凭据，并阻止令牌进入渲染进程。
 - **Java 管理**：匹配游戏所需的 Java 主版本，检测系统安装与启动器托管环境。首页启动按钮实时显示所选版本的 Java 就绪状态；启动时缺少所需 Java 会提供一键下载并自动重试，也可在 Java 路径设置旁手动下载 Java 8、16、17、21 或 25（支持进度与取消；优先 Azul JRE，失败后切换 Adoptium，使用并行下载与 SHA-256 校验）。
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
 - **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides、Fabric、Forge、NeoForge 与 Quilt。导入确认显示游戏、加载器和文件数，可选文件默认不安装；可选文件的远端解析或下载失败仅警告，必需文件失败可重试；磁盘、权限或安全检查错误会中止安装。CurseForge 受限文件可从官方页面下载后选择本地文件，通过可信摘要校验再继续安装。
@@ -158,6 +158,6 @@ Java 的标准输出和错误输出保存到游戏根目录的 `launcher-cache/g
 
 ## 许可证与商标
 
-本项目采用 [GNU Affero General Public License v3.0](LICENSE) 许可。第三方名称、商标及素材仍受各自权利人的条款约束。
+本项目采用 [GNU General Public License v3.0](LICENSE) 许可。第三方名称、商标及素材仍受各自权利人的条款约束。
 
 Minecraft 是 Microsoft 的商标。本项目为非官方项目，与 Microsoft 或 Mojang Studios 无隶属或认可关系。“忘却的旋律”名称仅用于指代和致敬历史启动器，本项目不主张拥有原项目。

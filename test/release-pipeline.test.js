@@ -169,7 +169,7 @@ test('publication rejects a moved or unrelated tag before creating or changing a
   assert.match(commands[0][1], /\/commits\//);
 });
 
-test('Blob latest only changes after every Windows package digest is verified and stale objects are pruned', async t => {
+test('Blob latest only changes after every package digest is verified', async t => {
   const { syncRelease } = await import('../scripts/sync-release-to-blob.mjs');
   const f = await fixture(t);
   await f.prepare();
@@ -177,7 +177,6 @@ test('Blob latest only changes after every Windows package digest is verified an
   await fs.writeFile(metadataPath, JSON.stringify({ tagName: `v${version}`, name: 'test' }));
   const blobs = new Map();
   blobs.set('releases/v0.0.1/The-Melody-of-Oblivion-Remake-Windows-x64.exe', Buffer.from('old tag'));
-  blobs.set(`releases/v${version}/${targets[3].filename}`, Buffer.from('non-windows leftover'));
   const deleted = [];
   let fail = true;
   const options = {
@@ -193,14 +192,13 @@ test('Blob latest only changes after every Windows package digest is verified an
   };
   await assert.rejects(syncRelease(f.output, `v${version}`, metadataPath, options), /digest mismatch/);
   assert.equal(blobs.has('releases/latest.json'), false);
-  assert.ok(deleted.includes('releases/v0.0.1/The-Melody-of-Oblivion-Remake-Windows-x64.exe'));
-  assert.ok(deleted.includes(`releases/v${version}/${targets[3].filename}`));
+  assert.deepEqual(deleted, []);
   fail = false;
   assert.equal((await syncRelease(f.output, `v${version}`, metadataPath, options)).latestUpdated, true);
-  assert.equal(JSON.parse(blobs.get('releases/latest.json')).assets.length, 3);
-  assert.equal(JSON.parse(blobs.get('releases/latest.json')).assets.every(asset => /^Windows-/.test(asset.platform)), true);
-  assert.deepEqual([...blobs.keys()].filter(key => /\.(?:exe|zip|AppImage)$/.test(key)),
-    targets.filter(target => target.platform === 'win32').map(target => `releases/v${version}/${target.filename}`));
+  assert.equal(JSON.parse(blobs.get('releases/latest.json')).assets.length, 8);
+  assert.deepEqual([...blobs.keys()].filter(key => key.startsWith(`releases/v${version}/`) && /\.(?:exe|zip|AppImage)$/.test(key)).sort(),
+    targets.map(target => `releases/v${version}/${target.filename}`).sort());
+  assert.deepEqual(blobs.get('releases/v0.0.1/The-Melody-of-Oblivion-Remake-Windows-x64.exe'), Buffer.from('old tag'));
   blobs.set('releases/latest.json', Buffer.from(JSON.stringify({ tag_name: 'v999.0.0' })));
   assert.equal((await syncRelease(f.output, `v${version}`, metadataPath, options)).latestUpdated, false);
   assert.equal(JSON.parse(blobs.get('releases/latest.json')).tag_name, 'v999.0.0');

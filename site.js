@@ -48,7 +48,7 @@ const translations = {
   "download.title": "Your next adventure starts here.",
   "download.body": "Choose your system and architecture to get the latest build.",
   "download.github": "GitHub repository ↗",
-  "download.license": "GNU AGPL-3.0 license",
+  "download.license": "GNU GPL-3.0 license",
   "download.latest": "Latest release",
   "download.changelog": "Latest update",
   "download.changelogLoading": "Loading release notes…",

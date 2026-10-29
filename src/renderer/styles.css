@@ -4,6 +4,20 @@
   --control-border: rgba(255, 255, 255, 0.62);
   --control-ink: #302e2b;
   --control-muted: #6f6b66;
+  --control-radius: 2px;
+  --control-surface: linear-gradient(180deg, var(--control-surface-start), var(--control-surface-end));
+  --control-highlight: linear-gradient(135deg, rgba(255, 255, 255, 0.65), transparent 48%);
+  --control-shadow: inset 0 0 0 1px rgba(25, 25, 25, 0.14), 0 5px 12px rgba(0, 0, 0, 0.22);
+  --panel-border: rgba(255, 255, 255, 0.16);
+  --panel-ink: #f4f1ea;
+  --panel-muted: rgba(244, 241, 234, 0.6);
+  --panel-card: rgba(17, 14, 16, 0.46);
+  --panel-card-highlight: linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 48%);
+  --panel-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 12px 32px rgba(0, 0, 0, 0.22);
+  --panel-scene-shade: linear-gradient(100deg, rgba(19, 13, 15, 0.94), rgba(19, 13, 15, 0.8));
+  --focus-ring: rgba(239, 155, 109, 0.65);
+  --danger-ink: #efaaa4;
+  --danger-border: rgba(224, 104, 95, 0.58);
   --launcher-accent: #dd916b;
   color-scheme: dark;
   font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
@@ -514,12 +528,12 @@ textarea {
   align-items: center;
   gap: 12px;
   padding: 9px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.13);
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 48%),
-    rgba(17, 14, 16, 0.46);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 12px 32px rgba(0, 0, 0, 0.22);
+    var(--panel-card-highlight),
+    var(--panel-card);
+  box-shadow: var(--panel-shadow);
   cursor: pointer;
   text-align: left;
   -webkit-backdrop-filter: blur(16px) saturate(1.16);
@@ -667,11 +681,11 @@ textarea {
   position: relative;
   overflow: hidden;
   border: 1px solid var(--control-border);
-  border-radius: 2px;
+  border-radius: var(--control-radius);
   color: var(--control-ink);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.65), transparent 48%),
-    linear-gradient(180deg, var(--control-surface-start), var(--control-surface-end));
+    var(--control-highlight),
+    var(--control-surface);
   box-shadow: inset 0 0 0 1px rgba(25, 25, 25, 0.14), 0 12px 28px rgba(0, 0, 0, 0.38);
   cursor: pointer;
   transition: filter 160ms ease, transform 160ms ease, box-shadow 160ms ease;
@@ -840,10 +854,11 @@ textarea {
   appearance: none;
   padding: 0 30px 0 9px;
   border: 1px solid var(--control-border);
-  border-radius: 2px;
+  border-radius: var(--control-radius);
   outline: none;
   color: var(--control-ink);
-  background: linear-gradient(180deg, var(--control-surface-start), var(--control-surface-end));
+  color-scheme: light;
+  background: var(--control-surface);
   box-shadow: inset 0 0 0 1px rgba(30, 30, 30, 0.12), 0 7px 18px rgba(0, 0, 0, 0.25);
   font-size: 9px;
 }
@@ -856,10 +871,9 @@ textarea {
   height: 26px;
   padding: 0 9px;
   border: 1px solid var(--control-border);
-  border-radius: 2px;
-  color: #242220;
-  background-color: #e7e3da;
-  background-image: linear-gradient(180deg, #fffdf7, #d6d0c6);
+  border-radius: var(--control-radius);
+  color: var(--control-ink);
+  background: var(--control-highlight), var(--control-surface);
   box-shadow: inset 0 0 0 1px rgba(30, 30, 30, 0.12), 0 7px 18px rgba(0, 0, 0, 0.25);
   cursor: pointer;
   font-size: 9px;
@@ -990,19 +1004,75 @@ textarea {
   color: #efaa83;
 }
 
+/* Dialog controls share the home screen's ivory surface and warm focus ring. */
+dialog :where(button, input[type="text"], input[type="search"], input[type="password"], select) {
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  outline: none;
+  color: var(--control-ink);
+  color-scheme: light;
+  background: var(--control-highlight), var(--control-surface);
+  box-shadow: var(--control-shadow);
+  transition: filter 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+dialog button {
+  cursor: pointer;
+}
+
+dialog input[type="checkbox"],
+dialog input[type="radio"] {
+  accent-color: var(--launcher-accent);
+  color-scheme: light;
+}
+
+dialog button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+dialog :where(input[type="text"], input[type="search"], input[type="password"])::placeholder {
+  color: var(--control-muted);
+  opacity: 1;
+}
+
+dialog :where(button, input, select, summary, a):focus-visible,
+.launch-button:focus-visible,
+.utility-button:focus-visible,
+.text-button:focus-visible,
+.account-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+dialog :where(button, input, select):disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  filter: saturate(0.5);
+}
+
+dialog :where(select) option,
+dialog :where(select) optgroup {
+  color: var(--control-ink);
+  background: var(--control-surface-start);
+}
+
 .settings-dialog,
 .account-dialog,
-.version-dialog {
+.version-dialog,
+.problem-dialog,
+.rename-dialog {
   width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 40px);
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
   overflow: hidden;
-  color: #f2ede7;
+  color: var(--panel-ink);
   background:
-    linear-gradient(100deg, rgba(19, 13, 15, 0.94), rgba(19, 13, 15, 0.76)),
+    var(--panel-scene-shade),
     var(--launcher-dialog-scene) center / cover;
-  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.42);
+  box-shadow: var(--panel-shadow), 0 22px 58px rgba(0, 0, 0, 0.42);
+  -webkit-app-region: no-drag;
 }
 
 .version-dialog {
@@ -1015,26 +1085,23 @@ textarea {
 
 .settings-dialog::backdrop,
 .account-dialog::backdrop,
-.version-dialog::backdrop {
-  border-radius: 10px;
+.version-dialog::backdrop,
+.problem-dialog::backdrop,
+.rename-dialog::backdrop {
+  border-radius: var(--launcher-corner-radius);
   background: rgba(8, 6, 7, 0.48);
-  clip-path: inset(0 round 10px);
+  clip-path: inset(0 round var(--launcher-corner-radius));
+  -webkit-backdrop-filter: blur(5px);
   backdrop-filter: blur(5px);
 }
 
 .settings-dialog form,
 .account-dialog form,
-.version-dialog form {
-  padding: 28px;
-}
-
-.settings-dialog {
-  max-height: calc(100vh - 48px);
-  -webkit-app-region: no-drag;
-}
-
-.settings-dialog form {
-  max-height: calc(100vh - 50px);
+.version-dialog form,
+.problem-dialog form,
+.rename-dialog form {
+  max-height: calc(100vh - 42px);
+  padding: 22px 24px 20px;
   overflow-y: auto;
   overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
@@ -1042,28 +1109,21 @@ textarea {
   scrollbar-width: thin;
 }
 
-.settings-dialog form::-webkit-scrollbar,
-.account-dialog form::-webkit-scrollbar {
+dialog ::-webkit-scrollbar {
   width: 6px;
 }
 
-.settings-dialog form::-webkit-scrollbar-thumb,
-.account-dialog form::-webkit-scrollbar-thumb {
+dialog ::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(221, 145, 107, 0.48);
 }
 
 .version-dialog form {
-  padding: 22px 24px 20px;
-  max-height: calc(100vh - 40px);
-  overflow-y: auto;
-  scrollbar-width: thin;
+  padding: 20px 22px 18px;
 }
 
 .account-dialog form {
-  max-height: calc(100vh - 48px);
-  padding: 22px 24px 18px;
-  overflow-y: auto;
+  padding-bottom: 18px;
 }
 
 .dialog-header,
@@ -1075,7 +1135,10 @@ textarea {
 }
 
 .dialog-header {
-  margin-bottom: 26px;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--panel-border);
 }
 
 .version-dialog-header {
@@ -1100,14 +1163,15 @@ textarea {
   gap: 8px;
   min-height: 44px;
   padding: 5px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--panel-border);
   border-radius: 3px;
-  background: #242022;
+  background: var(--panel-card-highlight), var(--panel-card);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .account-row.is-current {
-  border-color: rgba(221, 145, 107, 0.62);
-  background: #2b2424;
+  border-color: var(--launcher-accent);
+  background: var(--panel-card-highlight), rgba(60, 40, 35, 0.64);
 }
 
 .account-row-avatar {
@@ -1152,9 +1216,9 @@ textarea {
 
 .account-row-copy small {
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.34);
+  color: var(--panel-muted);
   font-family: Consolas, monospace;
-  font-size: 8px;
+  font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1162,11 +1226,8 @@ textarea {
 .account-row button {
   height: 23px;
   padding: 0 6px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 2px;
-  background: transparent;
   cursor: pointer;
-  font-size: 8px;
+  font-size: 9px;
 }
 
 .account-row button:hover {
@@ -1174,11 +1235,14 @@ textarea {
 }
 
 .account-row .remove-account-button {
-  color: rgba(255, 255, 255, 0.38);
+  color: var(--danger-ink);
+  border-color: var(--danger-border);
+  background: rgba(114, 43, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .account-row .skin-model-button {
-  color: #e4a37f;
+  color: var(--control-ink);
 }
 
 .account-row-actions {
@@ -1194,36 +1258,122 @@ textarea {
   max-width: 160px;
   height: 20px;
   padding: 0 4px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #f2ede7;
   font-size: 11px;
   font-family: Consolas, monospace;
-  outline: none;
 }
 
 .account-row-name-input:focus {
-  border-color: rgba(221, 145, 107, 0.6);
-  background: rgba(255, 255, 255, 0.08);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .account-empty {
   margin: 8px 0 0;
-  color: rgba(255, 255, 255, 0.34);
-  font-size: 9px;
+  color: var(--panel-muted);
+  font-size: 10px;
+  line-height: 1.6;
 }
 
 .account-empty[hidden] {
   display: none;
 }
 
+.account-help {
+  margin: 6px 0 0;
+  color: var(--panel-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.microsoft-account-form {
+  margin-bottom: 12px;
+}
+
+.microsoft-account-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.microsoft-mark {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+}
+
+.microsoft-mark i:nth-child(1) { background: #f25022; }
+.microsoft-mark i:nth-child(2) { background: #7fba00; }
+.microsoft-mark i:nth-child(3) { background: #00a4ef; }
+.microsoft-mark i:nth-child(4) { background: #ffb900; }
+
+.microsoft-account-button > span:nth-child(2) {
+  display: grid;
+  gap: 3px;
+}
+
+.microsoft-account-button strong {
+  font-size: 11px;
+}
+
+.microsoft-account-button small,
+.microsoft-account-button b {
+  color: var(--control-muted);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.microsoft-account-button b {
+  margin-left: auto;
+}
+
+.microsoft-device-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  color: var(--panel-muted);
+  background: var(--panel-card-highlight), var(--panel-card);
+  font-size: 10px;
+}
+
+.microsoft-device-panel[hidden] {
+  display: none;
+}
+
+.microsoft-device-code-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.microsoft-device-code-row strong {
+  color: var(--panel-ink);
+  font-family: Consolas, monospace;
+  font-size: 18px;
+  letter-spacing: 0.16em;
+}
+
+.microsoft-device-panel button {
+  width: fit-content;
+  min-height: 26px;
+  padding: 0 10px;
+}
+
 .offline-account-form {
   margin-top: 14px;
   padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--panel-border);
   border-radius: 3px;
-  background: #171517;
+  background: var(--panel-card-highlight), var(--panel-card);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .account-section-title {
@@ -1240,21 +1390,21 @@ textarea {
 
 .account-section-title span,
 .offline-account-form > p {
-  color: rgba(255, 255, 255, 0.34);
-  font-size: 8px;
+  color: var(--panel-muted);
+  font-size: 9px;
 }
 
 .offline-account-input {
   display: grid;
-  grid-template-columns: 1fr 100px;
+  grid-template-columns: minmax(0, 1fr) 100px;
   gap: 7px;
 }
 
 .offline-account-input input,
 .offline-account-input button {
   height: 30px;
-  border-radius: 3px;
-  font-size: 9px;
+  border-radius: var(--control-radius);
+  font-size: 10px;
 }
 
 .offline-skin-choice {
@@ -1266,8 +1416,8 @@ textarea {
 }
 
 .offline-skin-choice > span {
-  color: rgba(255, 255, 255, 0.38);
-  font-size: 8px;
+  color: var(--panel-muted);
+  font-size: 9px;
 }
 
 .offline-skin-choice label {
@@ -1285,35 +1435,42 @@ textarea {
   display: grid;
   height: 25px;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 3px;
-  color: rgba(255, 255, 255, 0.52);
-  background: #242022;
-  font-size: 8px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  color: var(--control-ink);
+  background: var(--control-highlight), var(--control-surface);
+  font-size: 9px;
+  box-shadow: var(--control-shadow);
 }
 
 .offline-skin-choice input:checked + span {
-  border-color: rgba(221, 145, 107, 0.72);
-  color: #f1b18c;
-  background: rgba(105, 63, 51, 0.38);
+  border-color: var(--launcher-accent);
+  color: var(--control-ink);
+  background: var(--control-highlight), var(--control-surface);
+  box-shadow: var(--control-shadow), inset 0 -2px 0 var(--launcher-accent);
+  font-weight: 700;
+}
+
+.offline-skin-choice input:focus-visible + span,
+.check-setting input:focus-visible + span {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.offline-skin-choice label:hover span {
+  filter: brightness(1.08);
 }
 
 .offline-account-input input {
   padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  outline: none;
-  color: #eee8e2;
-  background: #292426;
 }
 
 .offline-account-input input:focus {
-  border-color: rgba(221, 145, 107, 0.78);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .offline-account-input button {
-  border: 1px solid #dd916b;
-  color: #211714;
-  background: #dd916b;
   cursor: pointer;
 }
 
@@ -1329,9 +1486,10 @@ textarea {
 .standard-account-methods {
   margin-top: 14px;
   padding: 8px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--panel-border);
   border-radius: 3px;
-  background: #171517;
+  background: var(--panel-card-highlight), var(--panel-card);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .standard-account-methods .offline-account-form {
@@ -1344,9 +1502,10 @@ textarea {
 .yggdrasil-account-form {
   margin-top: 10px;
   padding: 10px;
-  border: 1px solid rgba(116, 190, 156, 0.24);
+  border: 1px solid var(--panel-border);
   border-radius: 3px;
-  background: linear-gradient(145deg, rgba(27, 42, 35, 0.46), #171517 62%);
+  background: var(--panel-card-highlight), var(--panel-card);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .yggdrasil-section-title {
@@ -1361,13 +1520,14 @@ textarea {
   width: 25px;
   height: 25px;
   place-items: center;
-  border: 1px solid rgba(132, 221, 179, 0.48);
-  border-radius: 5px;
-  color: #a9e8c9;
-  background: linear-gradient(145deg, rgba(55, 139, 103, 0.42), rgba(24, 66, 49, 0.2));
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  color: var(--control-ink);
+  background: var(--control-highlight), var(--control-surface);
   font-family: Consolas, monospace;
   font-size: 8px;
   font-weight: 800;
+  box-shadow: var(--control-shadow);
 }
 
 .yggdrasil-title-copy {
@@ -1377,15 +1537,15 @@ textarea {
 }
 
 .yggdrasil-title-copy strong {
-  color: rgba(238, 247, 242, 0.9);
+  color: var(--panel-ink);
   font-size: 10px;
 }
 
 .yggdrasil-title-copy small,
 .yggdrasil-server,
 .yggdrasil-account-form > p {
-  color: rgba(207, 232, 219, 0.4);
-  font-size: 8px;
+  color: var(--panel-muted);
+  font-size: 9px;
 }
 
 .yggdrasil-server {
@@ -1403,22 +1563,19 @@ textarea {
 .yggdrasil-login-grid button {
   min-width: 0;
   height: 29px;
-  border-radius: 3px;
-  font-size: 8px;
+  border-radius: var(--control-radius);
+  font-size: 9px;
 }
 
 .yggdrasil-login-grid input,
 .yggdrasil-login-grid select {
   padding: 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  outline: none;
-  color: #e9f1ed;
-  background: #292426;
 }
 
 .yggdrasil-login-grid input:focus,
 .yggdrasil-login-grid select:focus {
-  border-color: rgba(132, 221, 179, 0.58);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .yggdrasil-login-grid select:not([hidden]) {
@@ -1426,9 +1583,6 @@ textarea {
 }
 
 .yggdrasil-login-grid button {
-  border: 1px solid rgba(132, 221, 179, 0.58);
-  color: #14251d;
-  background: linear-gradient(180deg, #b7e4cd, #7fbd9f);
   cursor: pointer;
   font-weight: 700;
 }
@@ -1465,7 +1619,7 @@ textarea {
 
 .dialog-header p {
   margin: 0 0 4px;
-  color: #d98a63;
+  color: var(--launcher-accent);
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.25em;
@@ -1473,21 +1627,27 @@ textarea {
 
 .dialog-header h2 {
   margin: 0;
-  font-size: 25px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
 .dialog-close {
   width: 32px;
   height: 32px;
-  border: 0;
+  border: 1px solid var(--panel-border);
   color: rgba(255, 255, 255, 0.55);
-  background: transparent;
+  background: rgba(17, 14, 16, 0.3);
   cursor: pointer;
   font-size: 22px;
+  border-radius: var(--control-radius);
+  box-shadow: none;
+  flex-shrink: 0;
 }
 
 .dialog-close:hover {
   color: #fff;
+  background: rgba(255, 255, 255, 0.09);
 }
 
 .version-toolbar {
@@ -1511,14 +1671,14 @@ textarea {
   gap: 8px;
   min-width: 0;
   padding-left: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--panel-border);
   border-radius: 3px;
-  background: #211d1f;
+  background: var(--panel-card-highlight), var(--panel-card);
 }
 
 .loader-toolbar span {
-  color: rgba(255, 255, 255, 0.38);
-  font-size: 8px;
+  color: var(--panel-muted);
+  font-size: 9px;
   white-space: nowrap;
 }
 
@@ -1526,25 +1686,16 @@ textarea {
   min-width: 0;
   height: 32px;
   padding: 0 7px;
-  border: 0;
-  outline: none;
-  color: #eee7e0;
-  background: #2b2528;
   font-size: 10px;
 }
 
 .loader-toolbar select:disabled {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--control-muted);
 }
 
 .version-toolbar input,
 .version-toolbar select {
   height: 34px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
-  outline: none;
-  color: #e8e2dc;
-  background: #292426;
   font-size: 11px;
 }
 
@@ -1567,13 +1718,10 @@ textarea {
   width: 100%;
   height: 118px;
   padding: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-  outline: none;
-  color: rgba(255, 255, 255, 0.82);
-  background: #151315;
   font-family: Consolas, "Microsoft YaHei UI", monospace;
   font-size: 11px;
+  background: var(--control-surface);
+  color-scheme: light;
 }
 
 .version-catalog option {
@@ -1581,8 +1729,8 @@ textarea {
 }
 
 .version-catalog optgroup {
-  background: #1d191b;
-  color: #ef9b6d;
+  background: var(--control-surface-start);
+  color: var(--control-muted);
   font-style: normal;
   font-weight: 700;
   font-size: 9px;
@@ -1591,20 +1739,31 @@ textarea {
 }
 
 .version-catalog optgroup option {
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--control-ink);
   font-weight: 400;
   padding: 5px 12px;
+}
+
+.version-catalog option:checked {
+  color: var(--control-ink);
+  background: #e3bea4 linear-gradient(#e3bea4, #e3bea4);
+  box-shadow: inset 2px 0 0 var(--launcher-accent);
 }
 
 .version-empty {
   min-height: 14px;
   margin: 7px 0 0;
-  color: rgba(255, 255, 255, 0.34);
+  color: var(--panel-muted);
   font-size: 9px;
+  line-height: 1.6;
 }
 
 .download-status {
   margin-top: 9px;
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: var(--panel-card-highlight), var(--panel-card);
 }
 
 .download-status[hidden] {
@@ -1617,8 +1776,8 @@ textarea {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 6px;
-  color: rgba(255, 255, 255, 0.54);
-  font-size: 9px;
+  color: var(--panel-muted);
+  font-size: 10px;
 }
 
 .download-status-line span {
@@ -1641,7 +1800,7 @@ textarea {
   width: 100%;
   height: 6px;
   border: 0;
-  accent-color: #d6815a;
+  accent-color: var(--launcher-accent);
 }
 
 .download-metrics {
@@ -1649,9 +1808,9 @@ textarea {
   grid-template-columns: 0.8fr 1fr;
   gap: 8px;
   margin-top: 5px;
-  color: rgba(255, 255, 255, 0.38);
+  color: var(--panel-muted);
   font-family: Consolas, "Microsoft YaHei UI", monospace;
-  font-size: 8px;
+  font-size: 9px;
 }
 
 .download-metrics span {
@@ -1676,25 +1835,25 @@ textarea {
   font-size: 12px;
 }
 
+.setting-group > .check-setting {
+  display: flex;
+  margin-top: 12px;
+  color: var(--panel-muted);
+  font-size: 11px;
+}
+
 .setting-group select {
   width: 100%;
-  height: 42px;
+  height: 36px;
   padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 5px;
-  outline: none;
-  color: #e8e2dc;
   appearance: none;
   padding-right: 38px;
-  background-color: rgba(34, 29, 31, 0.92);
-  background-image:
-    linear-gradient(45deg, transparent 50%, rgba(239, 170, 131, 0.82) 50%),
-    linear-gradient(135deg, rgba(239, 170, 131, 0.82) 50%, transparent 50%);
-  background-position:
-    calc(100% - 17px) 18px,
-    calc(100% - 12px) 18px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--control-muted) 50%),
+    linear-gradient(135deg, var(--control-muted) 50%, transparent 50%),
+    var(--control-surface);
+  background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%, 0 0;
   background-repeat: no-repeat;
-  background-size: 5px 5px;
+  background-size: 5px 5px, 5px 5px, 100% 100%;
   font-size: 12px;
 }
 
@@ -1728,15 +1887,17 @@ textarea {
 }
 
 .java-download-picker button {
-  height: 42px;
+  height: 36px;
   white-space: nowrap;
+  padding: 0 12px;
+  font-size: 11px;
 }
 
 .java-download-panel progress {
   width: 100%;
   height: 6px;
   margin-top: 8px;
-  accent-color: #d6815a;
+  accent-color: var(--launcher-accent);
 }
 
 .java-download-panel p {
@@ -1787,17 +1948,17 @@ progress::-webkit-progress-bar {
 }
 
 progress::-webkit-progress-value {
-  background: #d6815a;
+  background: var(--launcher-accent);
 }
 
 progress::-moz-progress-bar {
-  background: #d6815a;
+  background: var(--launcher-accent);
 }
 
 #downloadProgress:indeterminate,
 #javaDownloadProgress:indeterminate,
 #launcherUpdateProgress:indeterminate {
-  background-image: linear-gradient(#d6815a, #d6815a);
+  background-image: linear-gradient(var(--launcher-accent), var(--launcher-accent));
   background-size: 32% 100%;
   background-repeat: no-repeat;
   animation: progress-waiting 1.3s linear infinite;
@@ -1819,19 +1980,15 @@ progress:indeterminate::-moz-progress-bar {
 
 .java-path-picker button {
   min-width: 66px;
-  height: 42px;
+  height: 36px;
   padding: 0 14px;
-  border: 1px solid rgba(221, 145, 107, 0.42);
-  border-radius: 5px;
-  color: #efaa83;
-  background: rgba(221, 145, 107, 0.08);
   cursor: pointer;
   font-size: 11px;
 }
 
 .java-path-picker button:hover:not(:disabled) {
-  border-color: rgba(239, 170, 131, 0.82);
-  background: rgba(221, 145, 107, 0.14);
+  border-color: var(--launcher-accent);
+  filter: brightness(1.08);
 }
 
 .java-path-picker button:disabled {
@@ -1841,8 +1998,9 @@ progress:indeterminate::-moz-progress-bar {
 
 .setting-group p {
   margin: 8px 0 0;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--panel-muted);
   font-size: 10px;
+  line-height: 1.7;
 }
 
 .text-link-button {
@@ -1908,10 +2066,10 @@ progress:indeterminate::-moz-progress-bar {
   gap: 7px;
   min-width: 0;
   padding-left: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 5px;
-  color: rgba(255, 255, 255, 0.42);
-  background: #252123;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  color: var(--panel-muted);
+  background: var(--panel-card-highlight), var(--panel-card);
   font-size: 9px;
 }
 
@@ -1919,8 +2077,6 @@ progress:indeterminate::-moz-progress-bar {
   min-width: 0;
   height: 36px;
   padding: 0 28px 0 7px;
-  border: 0;
-  background-color: #292426;
   font-size: 10px;
 }
 
@@ -1941,20 +2097,24 @@ progress:indeterminate::-moz-progress-bar {
 .memory-setting input {
   width: 100%;
   margin-top: 16px;
-  accent-color: #ce7953;
+  accent-color: var(--launcher-accent);
 }
 
 .check-setting {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: rgba(255, 255, 255, 0.64);
+  color: var(--panel-muted);
   cursor: pointer;
   font-size: 11px;
+  line-height: 1.6;
 }
 
 .check-setting input {
   position: absolute;
+  width: 17px;
+  height: 17px;
+  margin: 0;
   opacity: 0;
 }
 
@@ -1962,14 +2122,17 @@ progress:indeterminate::-moz-progress-bar {
   position: relative;
   width: 17px;
   height: 17px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 2px;
-  background: #292426;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--control-surface);
+  flex-shrink: 0;
+  box-shadow: var(--control-shadow);
 }
 
 .check-setting input:checked + span {
-  border-color: #c97954;
-  background: #c97954;
+  border-color: var(--launcher-accent);
+  background: var(--control-surface);
+  box-shadow: var(--control-shadow), inset 0 -2px 0 var(--launcher-accent);
 }
 
 .check-setting input:checked + span::after {
@@ -1978,8 +2141,8 @@ progress:indeterminate::-moz-progress-bar {
   left: 5px;
   width: 4px;
   height: 8px;
-  border-right: 2px solid white;
-  border-bottom: 2px solid white;
+  border-right: 2px solid var(--control-ink);
+  border-bottom: 2px solid var(--control-ink);
   content: "";
   transform: rotate(45deg);
 }
@@ -1990,9 +2153,10 @@ progress:indeterminate::-moz-progress-bar {
   gap: 16px;
   margin: 24px 0 12px;
   padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 5px;
-  background: rgba(20, 17, 18, 0.48);
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: var(--panel-card-highlight), var(--panel-card);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .launcher-update-copy {
@@ -2015,16 +2179,12 @@ progress:indeterminate::-moz-progress-bar {
   width: 100%;
   height: 4px;
   margin-top: 8px;
-  accent-color: #ce7953;
+  accent-color: var(--launcher-accent);
 }
 
 .launcher-update-setting > button {
   min-width: 88px;
   height: 32px;
-  border: 1px solid rgba(239, 170, 131, 0.45);
-  border-radius: 3px;
-  color: #efaa83;
-  background: rgba(206, 121, 83, 0.12);
   cursor: pointer;
   font-size: 10px;
 }
@@ -2038,7 +2198,7 @@ progress:indeterminate::-moz-progress-bar {
 .modpack-recovery[hidden], .history-files[hidden], .setting-group[hidden] { display: none; }
 .launcher-update-setting { flex-wrap: wrap; }
 .task-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.modpack-recovery { margin: 12px 0; padding: 12px; border: 1px solid rgba(239,170,131,.35); border-radius: 5px; }
+.modpack-recovery { margin: 12px 0; padding: 12px; border: 1px solid var(--panel-border); border-radius: 3px; background: var(--panel-card-highlight), var(--panel-card); }
 .modpack-recovery > strong { font-size: 12px; color: #efaa83; }
 .modpack-recovery p { font-size: 11px; line-height: 1.7; color: rgba(255,255,255,.7); }
 .modpack-recovery ul, .history-files { list-style: none; margin: 10px 0; padding: 0; max-height: 150px; overflow-y: auto; }
@@ -2058,21 +2218,25 @@ progress:indeterminate::-moz-progress-bar {
   margin: 8px 0 0;
   padding: 10px 12px;
   overflow: visible;
-  border: 1px solid rgba(221, 145, 107, 0.28);
-  border-radius: 5px;
-  color: rgba(255, 255, 255, 0.62);
-  background: rgba(20, 17, 18, 0.48);
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  color: var(--panel-muted);
+  background: var(--panel-card-highlight), var(--panel-card);
   font-size: 11px;
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: "Microsoft YaHei UI", sans-serif;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .dialog-actions {
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 30px;
+  gap: 8px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px solid var(--panel-border);
 }
 
 .version-dialog-actions {
@@ -2085,12 +2249,14 @@ progress:indeterminate::-moz-progress-bar {
 
 .dialog-actions button,
 .task-actions button,
-#launcherHistoryButton {
-  min-width: 78px;
+#launcherHistoryButton,
+#launcherHistoryCleanupButton {
+  min-width: 68px;
   height: 32px;
-  border-radius: 3px;
+  border-radius: var(--control-radius);
   cursor: pointer;
   font-size: 10px;
+  padding: 0 10px;
 }
 
 .task-actions button, #launcherHistoryButton { padding: 0 12px; }
@@ -2102,26 +2268,26 @@ progress:indeterminate::-moz-progress-bar {
 }
 
 .secondary-dialog-button {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: transparent;
+  font-weight: 400;
 }
 
 .primary-dialog-button {
-  border: 1px solid #dd916b;
-  color: #211714;
-  background: #dd916b;
+  font-weight: 600;
+  box-shadow: var(--control-shadow), inset 0 -2px 0 var(--launcher-accent);
 }
 
 .cancel-download-button {
-  border: 1px solid rgba(224, 104, 95, 0.58);
-  color: #efaaa4;
+  border: 1px solid var(--danger-border);
+  color: var(--danger-ink);
   background: rgba(114, 43, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .delete-version-button {
-  border: 1px solid rgba(224, 104, 95, 0.38);
-  color: #e99d97;
-  background: transparent;
+  border: 1px solid var(--danger-border);
+  color: var(--danger-ink);
+  background: rgba(114, 43, 42, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .delete-version-button:hover:not(:disabled) {
@@ -2144,19 +2310,7 @@ progress:indeterminate::-moz-progress-bar {
 }
 
 .problem-dialog {
-  width: min(460px, calc(100vw - 32px));
-  max-height: calc(100vh - 40px);
-  padding: 24px;
-  overflow-y: auto;
-  border: 1px solid rgba(239, 155, 109, 0.4);
-  border-radius: 8px;
-  color: #eee;
-  background: #201b1b;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-}
-
-.problem-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.6);
+  width: min(460px, calc(100vw - 48px));
 }
 
 .problem-message,
@@ -2195,16 +2349,18 @@ progress:indeterminate::-moz-progress-bar {
   overflow: hidden;
   overflow-wrap: anywhere;
   padding: 12px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--panel-border);
   border-radius: 3px;
-  background: rgba(18, 16, 17, 0.92);
-  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.35);
-  color: rgba(255, 255, 255, 0.84);
+  background: var(--panel-card-highlight), rgba(17, 14, 16, 0.88);
+  box-shadow: var(--panel-shadow);
+  color: var(--panel-ink);
   font-size: 11px;
   opacity: 0;
   pointer-events: none;
   transform: translateY(12px);
   transition: opacity 180ms ease, transform 180ms ease;
+  -webkit-backdrop-filter: blur(16px) saturate(1.16);
+  backdrop-filter: blur(16px) saturate(1.16);
 }
 
 .toast.is-error {
@@ -2225,12 +2381,14 @@ progress:indeterminate::-moz-progress-bar {
   place-content: center;
   justify-items: center;
   gap: 8px;
-  border: 2px dashed rgba(239, 155, 109, 0.84);
-  border-radius: 8px;
-  color: #f5c1a2;
-  background: rgba(18, 13, 15, 0.9);
-  backdrop-filter: blur(10px);
+  border: 1px dashed var(--launcher-accent);
+  border-radius: 4px;
+  color: var(--panel-ink);
+  background: var(--panel-card-highlight), rgba(17, 14, 16, 0.86);
+  backdrop-filter: blur(16px) saturate(1.16);
   pointer-events: none;
+  box-shadow: var(--panel-shadow);
+  -webkit-backdrop-filter: blur(16px) saturate(1.16);
 }
 
 .modpack-drop-overlay[hidden] {
@@ -2242,9 +2400,12 @@ progress:indeterminate::-moz-progress-bar {
   width: 44px;
   height: 44px;
   place-items: center;
-  border: 1px solid rgba(239, 155, 109, 0.52);
-  border-radius: 50%;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
   font-size: 26px;
+  color: var(--control-ink);
+  background: var(--control-highlight), var(--control-surface);
+  box-shadow: var(--control-shadow);
 }
 
 .modpack-drop-overlay strong {
@@ -2320,50 +2481,30 @@ progress:indeterminate::-moz-progress-bar {
 
 .rename-dialog {
   width: min(360px, calc(100vw - 48px));
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 8px;
-  overflow: hidden;
-  color: #f2ede7;
-  background:
-    linear-gradient(100deg, rgba(19, 13, 15, 0.94), rgba(19, 13, 15, 0.76)),
-    var(--launcher-dialog-scene) center / cover;
-  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.42);
-}
-
-.rename-dialog::backdrop {
-  border-radius: 10px;
-  background: rgba(8, 6, 7, 0.48);
-  clip-path: inset(0 round 10px);
-  backdrop-filter: blur(5px);
 }
 
 .rename-dialog form {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 24px 28px;
+  padding: 22px 24px 20px;
 }
 
 .rename-field input {
   width: 100%;
   height: 38px;
   padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #f2ede7;
   font-size: 14px;
-  outline: none;
 }
 
 .rename-field input:focus {
-  border-color: rgba(221, 145, 107, 0.6);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .rename-hint {
   margin: 0;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--panel-muted);
   font-size: 11px;
 }
 
