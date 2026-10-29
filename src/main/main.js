@@ -190,11 +190,6 @@ const services = createLazyServices({
     const { SettingsStore } = require('./settings/settings-store');
     return new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
   },
-  microsoftAuth: () => {
-    const { MicrosoftAuthManager } = require('./accounts/microsoft-auth');
-    const { clientId } = require('./accounts/microsoft-client-id.json');
-    return new MicrosoftAuthManager({ accountStore: getAccountStore(), clientId: process.env.MELODY_MICROSOFT_CLIENT_ID || clientId });
-  },
   yggdrasilAuth: () => {
     const { YggdrasilAuthManager } = require('./accounts/yggdrasil-auth');
     return new YggdrasilAuthManager({ accountStore: getAccountStore() });
@@ -277,7 +272,6 @@ ipcMain.on('diagnostics:error', (_event, message) => {
 
 function getAccountStore() { return services.accountStore; }
 function getSettingsStore() { return services.settingsStore; }
-function getMicrosoftAuth() { return services.microsoftAuth; }
 function getYggdrasilAuth() { return services.yggdrasilAuth; }
 function getJavaProbeCache() { return services.javaProbeCache; }
 function getUpdateManager() { return services.updateManager; }
@@ -296,10 +290,10 @@ async function initializeBackgroundServices() {
 if (hasSingleInstanceLock) app.whenReady().then(() => {
   startupMetrics.attach(app.getPath('userData'));
   startupMetrics.mark('electron-ready');
-  require('./accounts/ipc').registerAccountIpc({ app, ipcMain, shell, clipboard, getAccountStore, getMicrosoftAuth, getYggdrasilAuth });
+  require('./accounts/ipc').registerAccountIpc({ app, ipcMain, getAccountStore, getYggdrasilAuth });
   require('./settings/ipc').registerSettingsIpc({ BrowserWindow, dialog, ipcMain, getSettingsStore, getJavaProbeCache });
   require('./minecraft/ipc').registerMinecraftIpc({
-    app, ipcMain, shell, dialog, BrowserWindow, getSettingsStore, getAccountStore, getMicrosoftAuth, getYggdrasilAuth, getJavaProbeCache
+    app, ipcMain, shell, dialog, BrowserWindow, getSettingsStore, getAccountStore, getYggdrasilAuth, getJavaProbeCache
   });
   require('./updater/ipc').registerUpdateIpc({ ipcMain, getUpdateManager });
   startupMetrics.mark('services-registered');

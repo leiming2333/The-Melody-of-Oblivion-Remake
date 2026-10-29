@@ -55,9 +55,9 @@ test('Linux basic_text refuses login persistence and keeps offline accounts usab
   const store = new AccountStore(file, { secretCodec: createSecretCodec(storage('basic_text'), 'linux') });
   await store.addOffline('Steve');
   const before = await fs.readFile(file, 'utf8');
-  await assert.rejects(store.upsertMicrosoft({
+  await assert.rejects(store.upsertYggdrasil({
     uuid: '01234567-89ab-cdef-0123-456789abcdef', name: 'Player_01',
-    accessToken: 'access-secret', microsoftRefreshToken: 'refresh-secret'
+    accessToken: 'access-secret', clientToken: 'client-secret'
   }), /密钥后端/);
   assert.equal(await fs.readFile(file, 'utf8'), before);
   assert.equal((await store.getCurrentAccount()).name, 'Steve');
