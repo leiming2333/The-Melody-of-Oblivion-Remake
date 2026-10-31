@@ -1,8 +1,9 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { findJavaExecutable, javaMajorVersion, installedJavaExecutable, SUPPORTED_JAVA_MAJORS } = require('./java-runtime');
+const { findJavaExecutable, javaMajorVersion, javaRuntimeDetails, installedJavaExecutable, SUPPORTED_JAVA_MAJORS } = require('./java-runtime');
 const { DEFAULT_SEGMENT_CONCURRENCY, downloadFile, throwIfAborted } = require('./downloader');
+const { userAgent } = require('../../shared/build-info');
 
 const ADOPTIUM_API = 'https://api.adoptium.net/v3';
 const AZUL_API = 'https://api.azul.com/metadata/v1/zulu';
@@ -17,12 +18,20 @@ function adoptiumPlatform(platform = process.platform) {
 function adoptiumArchitecture(architecture = process.arch) {
   if (architecture === 'x64') return 'x64';
   if (architecture === 'arm64') return 'aarch64';
+  if (architecture === 'ia32') return 'x86';
+  if (architecture === 'arm' || architecture === 'armv7l') return 'arm';
   return undefined;
 }
 
-function selectRuntimePackage(assets, requiredMajorVersion, platform = process.platform) {
+function unavailableRuntime(majorVersion, platform, architecture, provider = '') {
+  return Object.assign(new Error(`未找到适用于 ${platform}/${architecture} 的 ${provider ? `${provider} ` : ''}Java ${majorVersion} JRE，请手动安装对应架构的 Java，并在设置中选择 Java 路径`), {
+    code: 'JAVA_RUNTIME_UNAVAILABLE', retryable: false, details: { majorVersion, platform, architecture, provider }
+  });
+}
+
+function selectRuntimePackage(assets, requiredMajorVersion, platform = process.platform, architecture = process.arch) {
   const expectedOs = adoptiumPlatform(platform);
-  const expectedArchitecture = adoptiumArchitecture();
+  const expectedArchitecture = adoptiumArchitecture(architecture);
   const asset = Array.isArray(assets) ? assets.find((entry) => (
     Number(entry?.version?.major) === requiredMajorVersion
     && entry?.binary?.os === expectedOs
@@ -30,7 +39,7 @@ function selectRuntimePackage(assets, requiredMajorVersion, platform = process.p
     && entry?.binary?.image_type === 'jre'
     && entry?.binary?.package?.link
   )) : undefined;
-  if (!asset) throw new Error(`未找到适用于当前系统的 Java ${requiredMajorVersion} 运行时`);
+  if (!expectedOs || !expectedArchitecture || !asset) throw unavailableRuntime(requiredMajorVersion, platform, architecture, 'Adoptium');
   const link = new URL(String(asset.binary.package.link));
   if (link.protocol !== 'https:') throw new Error('Java 运行时下载地址不安全');
   const packageName = path.basename(String(asset.binary.package.name ?? `java-${requiredMajorVersion}.${platform === 'win32' ? 'zip' : 'tar.gz'}`));
@@ -54,18 +63,20 @@ function azulPlatform(platform = process.platform) {
 }
 
 function azulArchitecture(architecture = process.arch) {
-  return architecture === 'x64' ? 'x86_64' : adoptiumArchitecture(architecture);
+  if (architecture === 'x64') return 'x86_64';
+  if (architecture === 'ia32') return 'i686';
+  return adoptiumArchitecture(architecture);
 }
 
 function isZuluRuntimePackage(entry, majorVersion, platform, architecture) {
   const osName = { win32: 'win', darwin: 'macosx', linux: 'linux' }[platform];
-  const archName = { x64: 'x64', arm64: 'aarch64' }[architecture];
+  const archNames = { x64: ['x64'], arm64: ['aarch64'], ia32: ['i686', 'x86'], arm: ['aarch32hf', 'aarch32', 'arm32hf', 'armv7'], armv7l: ['aarch32hf', 'aarch32', 'arm32hf', 'armv7'] }[architecture];
   const extension = platform === 'win32' ? '.zip' : '.tar.gz';
   const name = String(entry?.name ?? '');
   return Number(entry?.java_version?.[0]) === majorVersion
     && name.includes(`-jre${majorVersion}.`)
-    && Boolean(osName && archName)
-    && name.endsWith(`-${osName}_${archName}${extension}`)
+    && Boolean(osName && archNames)
+    && archNames.some((archName) => name.endsWith(`-${osName}_${archName}${extension}`))
     && (entry.java_package_type === undefined || entry.java_package_type === 'jre')
     && (entry.javafx_bundled === undefined || entry.javafx_bundled === false);
 }
@@ -75,10 +86,11 @@ function selectZuluRuntimePackage(assets, majorVersion, platform = process.platf
     isZuluRuntimePackage(entry, majorVersion, platform, architecture)
     && entry.java_package_type === 'jre'
     && entry.os === azulPlatform(platform)
-    && entry.arch === (architecture === 'x64' ? 'x86' : 'aarch64')
-    && entry.hw_bitness === 64
+    && (['x64', 'ia32'].includes(architecture) ? entry.arch === 'x86'
+      : architecture === 'arm64' ? entry.arch === 'aarch64' : ['arm', 'aarch32'].includes(entry.arch))
+    && entry.hw_bitness === (['ia32', 'arm', 'armv7l'].includes(architecture) ? 32 : 64)
   )) : undefined;
-  if (!asset) throw new Error(`未找到适用于当前系统的 Azul Java ${majorVersion} JRE`);
+  if (!asset) throw unavailableRuntime(majorVersion, platform, architecture, 'Azul');
   const link = new URL(String(asset.download_url));
   if (link.protocol !== 'https:' || link.hostname !== 'cdn.azul.com'
     || link.pathname !== `/zulu/bin/${asset.name}` || link.username || link.password) {
@@ -100,7 +112,7 @@ function selectZuluRuntimePackage(assets, majorVersion, platform = process.platf
 
 async function fetchJson(url, signal) {
   const response = await fetch(url, {
-    headers: { Accept: 'application/json', 'User-Agent': 'Melody-of-Oblivion-Launcher/0.1' },
+    headers: { Accept: 'application/json', 'User-Agent': userAgent },
     redirect: 'follow',
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000)
   });
@@ -109,7 +121,7 @@ async function fetchJson(url, signal) {
 }
 
 async function downloadArchive(url, destination, {
-  signal, size, segmentConcurrency, onProgress = () => {}
+  signal, size, sha256, segmentConcurrency, onProgress = () => {}
 } = {}) {
   let expectedSize = size;
   // Official metadata can lag the CDN file size; SHA-256 still verifies the archive.
@@ -119,7 +131,7 @@ async function downloadArchive(url, destination, {
       ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
       : AbortSignal.timeout(10000);
     const response = await fetch(url, {
-      headers: { Range: 'bytes=0-0', 'Accept-Encoding': 'identity' },
+      headers: { Range: 'bytes=0-0', 'Accept-Encoding': 'identity', 'User-Agent': userAgent },
       redirect: 'follow',
       signal: probeSignal
     });
@@ -142,6 +154,7 @@ async function downloadArchive(url, destination, {
     urls: [url],
     destination,
     size: expectedSize,
+    sha256,
     signal,
     segmentConcurrency,
     onBytes: (receivedBytes) => onProgress({ receivedBytes, totalBytes: expectedSize })
@@ -180,26 +193,34 @@ class ManagedJavaRuntime {
     extractArchive,
     findSystemJava = findJavaExecutable,
     probeJava = javaMajorVersion,
+    probeJavaDetails,
     fetchRuntimeAssets = fetchJson,
     download = downloadArchive,
-    segmentConcurrency = DEFAULT_SEGMENT_CONCURRENCY
+    segmentConcurrency = DEFAULT_SEGMENT_CONCURRENCY,
+    platform = process.platform,
+    architecture = process.arch
   } = {}) {
     this.gameDirectory = gameDirectory;
     this.extractArchive = extractArchive;
     this.findSystemJava = findSystemJava;
     this.probeJava = probeJava;
+    this.probeJavaDetails = probeJavaDetails ?? (probeJava === javaMajorVersion ? javaRuntimeDetails : undefined);
     this.fetchRuntimeAssets = fetchRuntimeAssets;
     this.download = download;
     this.segmentConcurrency = segmentConcurrency;
+    this.platform = platform;
+    this.architecture = architecture === 'armv7l' ? 'arm' : architecture;
     this.installing = new Map();
   }
 
   runtimeRoot(majorVersion) {
-    return path.join(this.gameDirectory, 'runtime', 'melody', `java-${majorVersion}`);
+    return path.join(this.gameDirectory, 'runtime', 'melody', `java-${majorVersion}-${this.architecture}`);
   }
 
   async installedExecutable(majorVersion) {
-    return installedJavaExecutable(this.gameDirectory, majorVersion, this.probeJava);
+    return installedJavaExecutable(this.gameDirectory, majorVersion, this.probeJava, {
+      architecture: this.architecture, platform: this.platform
+    });
   }
 
   async resolveForGame(explicitPath, requiredMajorVersion, savedRuntimes = [], onProgress = () => {}, signal) {
@@ -226,7 +247,7 @@ class ManagedJavaRuntime {
     return executable;
   }
 
-  async resolve(explicitPath, requiredMajorVersion, onProgress = () => {}, signal) {
+  async resolve(explicitPath, requiredMajorVersion, _onProgress = () => {}, signal) {
     throwIfAborted(signal);
     if (!Number.isInteger(requiredMajorVersion)) {
       const executable = await this.findSystemJava(explicitPath, requiredMajorVersion);
@@ -269,9 +290,10 @@ class ManagedJavaRuntime {
     if (provider === 'azul') {
       const query = new URLSearchParams({
         java_version: String(majorVersion),
-        os: azulPlatform(),
-        arch: azulArchitecture(),
-        archive_type: process.platform === 'win32' ? 'zip' : 'tar.gz',
+        os: azulPlatform(this.platform),
+        arch: azulArchitecture(this.architecture),
+        hw_bitness: String(['ia32', 'arm'].includes(this.architecture) ? 32 : 64),
+        archive_type: this.platform === 'win32' ? 'zip' : 'tar.gz',
         java_package_type: 'jre',
         javafx_bundled: 'false',
         release_status: 'ga',
@@ -281,41 +303,42 @@ class ManagedJavaRuntime {
       const assets = await this.fetchRuntimeAssets(`${AZUL_API}/packages/?${query}`, signal);
       throwIfAborted(signal);
       const candidate = Array.isArray(assets) ? assets.find((entry) => (
-        isZuluRuntimePackage(entry, majorVersion, process.platform, process.arch)
+        isZuluRuntimePackage(entry, majorVersion, this.platform, this.architecture)
         && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(String(entry.package_uuid ?? ''))
       )) : undefined;
-      if (!candidate) throw new Error(`Azul 暂无适用的 Java ${majorVersion} JRE`);
+      if (!candidate) throw unavailableRuntime(majorVersion, this.platform, this.architecture, 'Azul');
       const details = await this.fetchRuntimeAssets(`${AZUL_API}/packages/${candidate.package_uuid}/`, signal);
       throwIfAborted(signal);
-      return selectZuluRuntimePackage([details], majorVersion);
+      return selectZuluRuntimePackage([details], majorVersion, this.platform, this.architecture);
     }
-    const apiUrl = `${ADOPTIUM_API}/assets/latest/${majorVersion}/hotspot?architecture=${adoptiumArchitecture()}&image_type=jre&os=${adoptiumPlatform()}&vendor=eclipse`;
+    const apiUrl = `${ADOPTIUM_API}/assets/latest/${majorVersion}/hotspot?architecture=${adoptiumArchitecture(this.architecture)}&image_type=jre&os=${adoptiumPlatform(this.platform)}&vendor=eclipse`;
     const assets = await this.fetchRuntimeAssets(apiUrl, signal);
     throwIfAborted(signal);
-    return selectRuntimePackage(assets, majorVersion);
+    return selectRuntimePackage(assets, majorVersion, this.platform, this.architecture);
   }
 
   async install(majorVersion, onProgress, signal) {
     throwIfAborted(signal);
     if (typeof this.extractArchive !== 'function') throw new Error('Java 运行时解压服务不可用');
-    const os = adoptiumPlatform();
-    const architecture = adoptiumArchitecture();
-    if (!os || !architecture) throw new Error('当前系统不支持自动安装 Java');
+    const os = adoptiumPlatform(this.platform);
+    const architecture = adoptiumArchitecture(this.architecture);
+    if (!os || !architecture) throw unavailableRuntime(majorVersion, this.platform, this.architecture);
     onProgress({ message: `正在获取 Java ${majorVersion} 运行时…`, majorVersion });
     const baseRoot = path.join(this.gameDirectory, 'runtime', 'melody');
     let archivePath;
     let runtimePackage;
-    const temporaryRoot = path.join(baseRoot, `.java-${majorVersion}-${process.pid}-${Date.now()}`);
+    const temporaryRoot = path.join(baseRoot, `.java-${majorVersion}-${this.architecture}-${process.pid}-${crypto.randomUUID()}`);
     await fs.mkdir(baseRoot, { recursive: true });
     try {
       for (const provider of ['azul', 'adoptium']) {
         try {
           runtimePackage = await this.runtimePackage(majorVersion, provider, signal);
-          archivePath = path.join(baseRoot, `.java-${majorVersion}-${runtimePackage.name}`);
+          archivePath = path.join(baseRoot, `.java-${majorVersion}-${this.architecture}-${crypto.randomUUID()}-${runtimePackage.name}`);
           onProgress({ message: `正在下载 Java ${majorVersion} JRE…`, majorVersion, totalBytes: runtimePackage.size });
           const downloadResult = await this.download(runtimePackage.link, archivePath, {
             signal,
             size: runtimePackage.size,
+            sha256: runtimePackage.checksum,
             segmentConcurrency: this.segmentConcurrency,
             onProgress: (progress) => onProgress({
               message: `正在下载 Java ${majorVersion} JRE…`,
@@ -338,7 +361,7 @@ class ManagedJavaRuntime {
         } catch (error) {
           if (archivePath) await fs.rm(archivePath, { force: true }).catch(() => {});
           throwIfAborted(signal);
-          if (error?.name === 'AbortError' || provider === 'adoptium') throw error;
+          if (error?.name === 'AbortError' || ['ENOSPC', 'EACCES', 'EPERM', 'EROFS'].includes(error.code) || provider === 'adoptium') throw error;
           onProgress({ message: `Azul 源暂不可用，正在切换 Adoptium Java ${majorVersion} JRE…`, majorVersion });
         }
       }
@@ -347,17 +370,27 @@ class ManagedJavaRuntime {
       await fs.mkdir(temporaryRoot, { recursive: true });
       await this.extractArchive(archivePath, temporaryRoot);
       throwIfAborted(signal);
-      const executableName = process.platform === 'win32' ? 'java.exe' : 'java';
+      const executableName = this.platform === 'win32' ? 'java.exe' : 'java';
       const executable = await findJavaInDirectory(temporaryRoot, executableName);
       throwIfAborted(signal);
       if (!executable || await this.probeJava(executable) !== majorVersion) {
         throw new Error(`下载的运行时不是有效的 Java ${majorVersion}`);
+      }
+      if (this.probeJavaDetails) {
+        const details = await this.probeJavaDetails(executable);
+        throwIfAborted(signal);
+        if (details?.architecture !== this.architecture) {
+          throw Object.assign(new Error(`下载的 Java 架构不匹配：需要 ${this.architecture}，实际为 ${details?.architecture ?? '未知'}，请手动安装对应架构的 Java`), {
+            code: 'JAVA_ARCHITECTURE_MISMATCH', retryable: false
+          });
+        }
       }
       throwIfAborted(signal);
       const relativeExecutable = path.relative(temporaryRoot, executable);
       await fs.writeFile(path.join(temporaryRoot, '.melody-runtime.json'), `${JSON.stringify({
         schemaVersion: 1,
         majorVersion,
+        architecture: this.architecture,
         releaseName: runtimePackage.releaseName,
         executable: relativeExecutable
       }, null, 2)}\n`, 'utf8');
@@ -382,6 +415,7 @@ module.exports = {
   SUPPORTED_JAVA_MAJORS,
   adoptiumArchitecture,
   adoptiumPlatform,
+  azulArchitecture,
   selectRuntimePackage,
   selectZuluRuntimePackage
 };

@@ -77,6 +77,25 @@ test('matching Blob assets keep fast download URLs and official metadata', async
   assert.equal(result.body.assets[0].digest, asset.digest);
 });
 
+test('Windows-only Blob metadata preserves GitHub downloads for macOS and Linux', async () => {
+  const otherAssets = ['macOS-arm64.zip', 'Linux-x64.AppImage'].map((suffix) => {
+    const name = `The-Melody-of-Oblivion-Remake-${suffix}`;
+    return { ...asset, name,
+      browser_download_url: `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/v1.6.5/${name}` };
+  });
+  const github = { tag_name: 'v1.6.5', assets: [asset, ...otherAssets] };
+  const blobAsset = { ...asset,
+    browser_download_url: 'https://fixture.public.blob.vercel-storage.com/releases/v1.6.5/launcher.exe' };
+  const result = response();
+  await releaseHandler(github, { tag_name: github.tag_name, assets: [blobAsset] })({}, result);
+
+  assert.equal(result.code, 200);
+  assert.equal(result.body.assets.length, github.assets.length);
+  assert.deepEqual(result.body.assets[0], { ...asset,
+    browser_download_url: blobAsset.browser_download_url, github_download_url: asset.browser_download_url });
+  assert.deepEqual(result.body.assets.slice(1), otherAssets);
+});
+
 test('mismatched Blob bytes never override the official download source', async () => {
   const github = { tag_name: 'v1.6.5', assets: [asset] };
   for (const change of [{ size: 99 }, { size: null }, { digest: null }, { digest: 'sha256:invalid' },

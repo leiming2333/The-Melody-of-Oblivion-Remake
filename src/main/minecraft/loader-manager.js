@@ -22,6 +22,8 @@ const {
 } = require('./downloader');
 const { runJavaInstaller } = require('./java-runtime');
 const { ManagedJavaRuntime } = require('./managed-java-runtime');
+const { createGameLog } = require('./game-log');
+const { ensureLauncherProfiles, fetchTrustedInstallerChecksum, verifyInstallerChecksum } = require('./installer-support');
 
 const FABRIC_META_BASES = Object.freeze({
   bmclapi: `${BMCLAPI_BASE}/fabric-meta/v2`,
@@ -32,6 +34,7 @@ const FORGE_MAVEN_BASE = 'https://maven.minecraftforge.net';
 const NEOFORGE_MAVEN_BASE = 'https://maven.neoforged.net/releases';
 const FORGE_METADATA_PATH = 'net/minecraftforge/forge/maven-metadata.xml';
 const NEOFORGE_METADATA_PATH = 'net/neoforged/neoforge/maven-metadata.xml';
+const LEGACY_NEOFORGE_METADATA_PATH = 'net/neoforged/forge/maven-metadata.xml';
 const LOADER_TYPES = Object.freeze(['vanilla', 'fabric', 'forge', 'neoforge', 'quilt']);
 const VERSION_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 const LOADER_METADATA_TIMEOUT_MS = 10000;
@@ -76,6 +79,7 @@ function neoForgeVersionPrefix(gameVersion) {
 }
 
 function neoForgeLoaderVersions(gameVersion, versions) {
+  if (gameVersion === '1.20.1') return forgeLoaderVersions(gameVersion, versions);
   const prefix = neoForgeVersionPrefix(gameVersion);
   return versions
     .filter((version) => version.startsWith(prefix))
@@ -112,6 +116,8 @@ function loaderProfileCandidates(loaderType, gameVersion, loaderVersion) {
   if (loaderType === 'quilt') return [`quilt-loader-${loaderVersion}-${gameVersion}`];
   if (loaderType === 'fabric') return [`fabric-loader-${loaderVersion}-${gameVersion}`];
   if (loaderType === 'forge') return [`${gameVersion}-forge-${loaderVersion}`];
+  // NeoForge's 1.20.1 installers retained Forge's artifact and profile names.
+  if (gameVersion === '1.20.1') return [`${gameVersion}-forge-${loaderVersion}`];
   return [`${gameVersion}-neoforge-${loaderVersion}`, `neoforge-${loaderVersion}`];
 }
 
@@ -127,6 +133,11 @@ function loaderArtifact(loaderType, gameVersion, loaderVersion) {
   }
 
   if (loaderType === 'neoforge') {
+    if (gameVersion === '1.20.1') {
+      const artifactVersion = `${gameVersion}-${loaderVersion}`;
+      const pathName = `net/neoforged/forge/${artifactVersion}/forge-${artifactVersion}-installer.jar`;
+      return { artifactVersion, path: pathName, officialUrl: `${NEOFORGE_MAVEN_BASE}/${pathName}` };
+    }
     const pathName = `net/neoforged/neoforge/${loaderVersion}/neoforge-${loaderVersion}-installer.jar`;
     return {
       artifactVersion: loaderVersion,
@@ -219,6 +230,7 @@ class MinecraftLoaderManager {
     downloader,
     javaRuntime,
     runInstaller = runJavaInstaller,
+    fetchInstallerChecksum = fetchTrustedInstallerChecksum,
     concurrency = DEFAULT_FILE_CONCURRENCY,
     segmentConcurrency = DEFAULT_SEGMENT_CONCURRENCY
   }) {
@@ -227,6 +239,7 @@ class MinecraftLoaderManager {
     this.downloader = downloader;
     this.javaRuntime = javaRuntime ?? new ManagedJavaRuntime({ gameDirectory });
     this.runInstaller = runInstaller;
+    this.fetchInstallerChecksum = fetchInstallerChecksum;
     this.concurrency = concurrency;
     this.segmentConcurrency = segmentConcurrency;
     this.javaPath = '';
@@ -346,13 +359,12 @@ class MinecraftLoaderManager {
       );
       versions = fetched.data;
     } else {
-      const metadataPath = loaderType === 'forge' ? FORGE_METADATA_PATH : NEOFORGE_METADATA_PATH;
-      const officialBase = loaderType === 'forge' ? FORGE_MAVEN_BASE : NEOFORGE_MAVEN_BASE;
+      const metadataPath = gameVersion === '1.20.1' ? LEGACY_NEOFORGE_METADATA_PATH : NEOFORGE_METADATA_PATH;
       fetched = await this.fetchMetadata(
         this.sourceCandidates(
           (sourceId) => sourceId === 'bmclapi'
             ? `${BMCLAPI_BASE}/maven/${metadataPath}`
-            : `${officialBase}/${metadataPath}`,
+            : `${NEOFORGE_MAVEN_BASE}/${metadataPath}`,
           preferred.id
         ),
         (response) => response.text(),
@@ -464,13 +476,37 @@ class MinecraftLoaderManager {
     loaderType,
     loaderVersion,
     preferredSourceId,
-    expectedSha1,
     javaPath,
     onProgress,
     signal
   ) {
     throwIfAborted(signal);
+    const log = await createGameLog(this.gameDirectory, `${loaderType} installer ${gameVersion}/${loaderVersion}`);
+    let outcome = 'Installer completed';
+    try {
+      const result = await this.installVerifiedInstaller(
+        gameVersion, loaderType, loaderVersion, preferredSourceId, javaPath, onProgress, signal, log
+      );
+      return { ...result, logPath: log.filePath };
+    } catch (error) {
+      outcome = `Installer failed: ${error.message}`;
+      error.details = { ...error.details, logPath: log.filePath, loaderType, gameVersion, loaderVersion,
+        ...(error.exitCode === undefined ? {} : { exitCode: error.exitCode }) };
+      if (error.name !== 'AbortError') error.message = `${error.message}\n安装日志：${log.filePath}`;
+      throw error;
+    } finally {
+      await log.close(outcome);
+    }
+  }
+
+  async installVerifiedInstaller(
+    gameVersion, loaderType, loaderVersion, preferredSourceId, javaPath, onProgress, signal, log
+  ) {
+    throwIfAborted(signal);
     const artifact = loaderArtifact(loaderType, gameVersion, loaderVersion);
+    onProgress({ phase: 'verifying-installer', loaderType, message: '正在获取安装器官方校验信息…', logPath: log.filePath });
+    const checksum = await this.fetchInstallerChecksum(artifact.officialUrl, signal);
+    log.append(`[launcher] Official ${checksum.algorithm}: ${checksum.digest}; artifact: ${artifact.officialUrl}`);
     const fileName = path.basename(artifact.path);
     const installerPath = safePath(
       this.gameDirectory,
@@ -485,11 +521,17 @@ class MinecraftLoaderManager {
       { originalUrl: artifact.officialUrl, path: artifact.path },
       preferredSourceId
     );
+    try {
+      await verifyInstallerChecksum(installerPath, checksum, signal);
+    } catch (error) {
+      if (!['ENOENT', 'CHECKSUM_MISMATCH'].includes(error.code)) throw error;
+      if (error.code === 'CHECKSUM_MISMATCH') log.append('[launcher] Removed corrupt installer cache before download');
+    }
     const installerTask = {
       label: `${loaderType} ${loaderVersion} 安装器`,
       destination: installerPath,
       urls: installerUrls,
-      sha1: expectedSha1
+      [checksum.algorithm]: checksum.digest
     };
     const progressTracker = createDownloadProgressTracker({
       tasks: [installerTask],
@@ -507,6 +549,7 @@ class MinecraftLoaderManager {
       segmentConcurrency: this.segmentConcurrency,
       ...progressTracker.hooks(installerTask)
     });
+    await verifyInstallerChecksum(installerPath, checksum, signal);
     progressTracker.complete(installerTask, installerResult);
     onProgress({
       phase: 'installing-loader',
@@ -527,12 +570,17 @@ class MinecraftLoaderManager {
       signal
     );
     throwIfAborted(signal);
+    await ensureLauncherProfiles(this.gameDirectory, signal);
+    // Check again immediately before executing, including reused cached JARs.
+    await verifyInstallerChecksum(installerPath, checksum, signal);
+    log.append(`[launcher] Java: ${javaExecutable}; loader: ${loaderType} ${loaderVersion}; Minecraft: ${gameVersion}`);
     let lastMessageAt = 0;
     await this.runInstaller({
       javaExecutable,
       installerPath,
       gameDirectory: this.gameDirectory,
       signal,
+      onLog: (channel, chunk) => log.write(channel, chunk),
       onOutput: (line) => {
         if (Date.now() - lastMessageAt < 250) return;
         lastMessageAt = Date.now();
@@ -575,7 +623,7 @@ class MinecraftLoaderManager {
       throw new Error('加载器版本号格式无效');
     }
 
-    const { entry, source } = await this.validateLoaderVersion(gameVersion, loaderType, loaderVersion, signal);
+    const { source } = await this.validateLoaderVersion(gameVersion, loaderType, loaderVersion, signal);
     throwIfAborted(signal);
     onProgress({
       phase: 'preparing',
@@ -606,7 +654,6 @@ class MinecraftLoaderManager {
         loaderType,
         loaderVersion,
         preferredDownloadSourceId,
-        entry.sha1,
         javaPath ?? this.javaPath,
         onProgress,
         signal
@@ -636,6 +683,7 @@ module.exports = {
   FABRIC_META_BASES,
   FORGE_METADATA_PATH,
   LOADER_TYPES,
+  LEGACY_NEOFORGE_METADATA_PATH,
   MinecraftLoaderManager,
   NEOFORGE_METADATA_PATH,
   forgeLoaderVersions,

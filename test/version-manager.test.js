@@ -22,7 +22,8 @@ async function writeProfile(gameDirectory, profileId, metadata) {
 async function writeMarker(gameDirectory, profileId) {
   await fs.writeFile(
     path.join(gameDirectory, 'versions', profileId, '.melody-installed.json'),
-    JSON.stringify({ schemaVersion: 1, profileId, files: [] }),
+    JSON.stringify({ schemaVersion: 1, profileId,
+      files: [{ path: `versions/${profileId}/${profileId}.json` }] }),
     'utf8'
   );
 }

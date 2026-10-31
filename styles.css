@@ -1,8 +1,7 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap");
 :root{color-scheme:dark;--ink:#f5f2ee;--muted:#b3ada8;--bg:#191b20;--line:#454043;--accent:#e3a17a}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:"DM Sans","Noto Sans SC",sans-serif;letter-spacing:0}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;letter-spacing:0}
 button,a{font:inherit}
 a{color:inherit;text-decoration:none}
 button{cursor:pointer}

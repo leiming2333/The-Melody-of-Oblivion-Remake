@@ -7,6 +7,7 @@ import releaseAssets from './release-assets.cjs';
 import releaseTargets from './release-targets.cjs';
 
 const { assertTag, hashFile, walk } = releaseAssets;
+const windowsTargets = releaseTargets.targets.filter(target => target.platform === 'win32');
 
 function newerVersion(left, right) {
   const a = String(left).replace(/^v/, '').split('.').map(Number);
@@ -17,9 +18,9 @@ function newerVersion(left, right) {
 
 async function collectReleasePackages(directory, manifest) {
   if (manifest.assets?.length !== releaseTargets.targets.length) throw new Error('Incomplete release manifest');
-  const files = (await walk(directory)).filter(file => /\.(?:exe|zip|AppImage)$/i.test(file));
+  const files = (await walk(directory)).filter(file => /\.exe$/i.test(file));
   const packages = [];
-  for (const target of releaseTargets.targets) {
+  for (const target of windowsTargets) {
     const matches = files.filter(file => path.basename(file) === target.filename);
     if (matches.length !== 1) throw new Error(`Missing or duplicate package: ${target.filename}`);
     const info = await stat(matches[0]);
@@ -72,7 +73,7 @@ export async function syncRelease(assetDirectory, tag, metadataPath, {
     for await (const chunk of response.body) { hash.update(chunk); size += chunk.length; }
     if (size !== item.size || hash.digest('hex') !== item.sha256) throw new Error(`Blob digest mismatch: ${item.name}`);
     assets.push({ name: item.name, size: item.size,
-      platform: item.name.match(/(Windows-(?:x64|ia32|arm64)|macOS-(?:x64|arm64)|Linux-(?:x64|arm64|armv7l))/i)?.[1],
+      platform: `Windows-${item.target.arch}`,
       digest: `sha256:${item.sha256}`, browser_download_url: blob.url,
       github_download_url: `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(item.name)}` });
   }
@@ -94,6 +95,6 @@ export async function syncRelease(assetDirectory, tag, metadataPath, {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const [assetDirectory, tag, metadataPath] = process.argv.slice(2);
   syncRelease(assetDirectory, tag, metadataPath)
-    .then(result => console.log(`Verified ${result.assets.length} Blob packages for ${tag}; latest updated: ${result.latestUpdated}.`))
+    .then(result => console.log(`Verified ${result.assets.length} Windows Blob packages for ${tag}; latest updated: ${result.latestUpdated}.`))
     .catch(error => { console.error(error); process.exitCode = 1; });
 }

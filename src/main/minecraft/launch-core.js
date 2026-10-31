@@ -1,6 +1,6 @@
 const fs = require('node:fs/promises');
-const os = require('node:os');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { spawn } = require('node:child_process');
 const zlib = require('node:zlib');
 const { promisify } = require('node:util');
@@ -8,17 +8,19 @@ const {
   mavenPathFromName,
   safePath
 } = require('./downloader');
-const { findJavaExecutable } = require('./java-runtime');
+const { findJavaExecutable, javaRuntimeDetails } = require('./java-runtime');
 const { ManagedJavaRuntime } = require('./managed-java-runtime');
 const { validateProfileId } = require('./version-manager');
 const { offlineUuidForSkinModel } = require('../accounts/account-store');
 const { copyCachedNativeArchive } = require('./native-cache');
 const { createGameLog, gameLogSecrets, redactGameOutput } = require('./game-log');
+const { prepareJavaArguments } = require('./java-launch-arguments');
 
 const inflateRaw = promisify(zlib.inflateRaw);
 const gunzip = promisify(zlib.gunzip);
 const LAUNCHER_NAME = 'melody-of-oblivion';
-const LAUNCHER_VERSION = '1.1.2';
+const LAUNCHER_VERSION = require('../../shared/build-info').version;
+const { platformName: minecraftPlatform, ruleMatches, rulesAllow } = require('./platform-rules');
 const DEFAULT_FEATURES = Object.freeze({
   has_custom_resolution: false,
   has_quick_plays_support: false,
@@ -27,48 +29,6 @@ const DEFAULT_FEATURES = Object.freeze({
   is_quick_play_realms: false,
   is_quick_play_singleplayer: false
 });
-
-function minecraftPlatform() {
-  if (process.platform === 'win32') return 'windows';
-  if (process.platform === 'darwin') return 'osx';
-  return 'linux';
-}
-
-function minecraftArchitecture() {
-  if (process.arch === 'ia32') return 'x86';
-  if (process.arch === 'arm64') return 'arm64';
-  return 'x64';
-}
-
-function ruleMatches(rule, features = DEFAULT_FEATURES) {
-  if (rule?.os) {
-    if (rule.os.name && rule.os.name !== minecraftPlatform()) return false;
-    if (rule.os.arch && rule.os.arch !== minecraftArchitecture()) return false;
-    if (rule.os.version) {
-      try {
-        if (!new RegExp(rule.os.version).test(os.release())) return false;
-      } catch {
-        return false;
-      }
-    }
-  }
-
-  if (rule?.features) {
-    return Object.entries(rule.features).every(
-      ([name, required]) => Boolean(features[name]) === Boolean(required)
-    );
-  }
-  return true;
-}
-
-function rulesAllow(rules, features = DEFAULT_FEATURES) {
-  if (!Array.isArray(rules) || rules.length === 0) return true;
-  let allowed = false;
-  for (const rule of rules) {
-    if (ruleMatches(rule, features)) allowed = rule.action === 'allow';
-  }
-  return allowed;
-}
 
 function expandArgumentEntries(entries, features = DEFAULT_FEATURES) {
   const result = [];
@@ -88,29 +48,30 @@ function splitLegacyArguments(value) {
   const result = [];
   let current = '';
   let quote = '';
-  let escaping = false;
-  for (const character of String(value ?? '')) {
-    if (escaping) {
-      current += character;
-      escaping = false;
-    } else if (character === '\\' && quote) {
-      escaping = true;
+  let started = false;
+  const input = String(value ?? '');
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
+    if (character === '\\' && quote && input[index + 1] === quote) {
+      current += input[++index];
     } else if (quote) {
       if (character === quote) quote = '';
       else current += character;
     } else if (character === '"' || character === "'") {
       quote = character;
+      started = true;
     } else if (/\s/.test(character)) {
-      if (current) {
+      if (current || started) {
         result.push(current);
         current = '';
+        started = false;
       }
     } else {
       current += character;
     }
   }
-  if (escaping) current += '\\';
-  if (current) result.push(current);
+  if (quote) throw new Error('旧版启动参数中的引号未闭合');
+  if (current || started) result.push(current);
   return result;
 }
 
@@ -465,12 +426,34 @@ async function prepareLaunch({
   javaPath,
   instanceDirectory,
   authlibInjector,
-  findJava = findJavaExecutable
+  findJava = findJavaExecutable,
+  inspectJava = findJava === findJavaExecutable ? javaRuntimeDetails : undefined,
+  verifyFiles,
+  onVerifyProgress = () => {}
 }) {
   const validatedId = validateProfileId(profileId);
   const metadata = await readVersionMetadata(gameDirectory, validatedId);
   if (!metadata.mainClass) throw new Error(`游戏版本 ${validatedId} 缺少启动主类`);
   const requiredJavaVersion = metadata.javaVersion?.majorVersion ?? 8;
+  const verify = verifyFiles ?? ((id, onProgress) => {
+    const { MinecraftDownloader } = require('./downloader');
+    const { MinecraftSourceManager } = require('./source-manager');
+    return new MinecraftDownloader({ gameDirectory, sourceManager: new MinecraftSourceManager() })
+      .verifyVersion(id, onProgress);
+  });
+  const verification = await verify(validatedId, onVerifyProgress);
+  if (!verification.complete) {
+    throw Object.assign(new Error(`游戏文件不完整：${verification.missingFiles.slice(0, 4).join('、')}。请验证或补全文件后重试`), {
+      code: 'GAME_FILES_INCOMPLETE', phase: 'verifying', retryable: true,
+      details: { profileId: validatedId, missingFiles: verification.missingFiles, missingCount: verification.missingCount }
+    });
+  }
+  const javaExecutable = await findJava(javaPath, requiredJavaVersion);
+  const javaDetails = await inspectJava?.(javaExecutable);
+  if (javaDetails?.architecture && javaDetails.architecture !== process.arch) {
+    throw Object.assign(new Error(`Java 架构 ${javaDetails.architecture} 与启动器 ${process.arch} 不匹配，请在设置中选择相同架构的 Java 或使用对应架构的启动器`),
+      { code: 'JAVA_ARCHITECTURE_MISMATCH', phase: 'java', retryable: false });
+  }
 
   const allowedLibraries = (metadata.libraries ?? []).filter((library) => libraryIsAllowed(library));
   const classpathEntries = allowedLibraries
@@ -493,7 +476,7 @@ async function prepareLaunch({
     .filter((entry) => entry.archivePath);
   await assertFilesExist(nativeLibraries.map((entry) => entry.archivePath), '游戏原生库');
 
-  const launchId = `${validatedId}-${process.pid}-${Date.now()}`;
+  const launchId = randomUUID();
   const nativesDirectory = safePath(gameDirectory, 'launcher-cache', 'natives', launchId);
   await fs.mkdir(nativesDirectory, { recursive: true });
   try {
@@ -526,7 +509,8 @@ async function prepareLaunch({
         '${classpath}'
       ];
     }
-    const maximumMemory = Math.min(16384, Math.max(2048, Number(memoryMb) || 4096));
+    const is32Bit = javaDetails?.bits === 32 || ['ia32', 'arm'].includes(process.arch);
+    const maximumMemory = Math.min(is32Bit ? 1536 : 16384, Math.max(512, Number(memoryMb) || 4096));
     jvmArguments.unshift(`-Xmx${Math.round(maximumMemory)}M`, '-Xms512M');
     if (account?.type === 'yggdrasil') {
       const injectorPath = path.resolve(String(authlibInjector?.path ?? ''));
@@ -553,19 +537,21 @@ async function prepareLaunch({
       ? modernGameArguments
       : splitLegacyArguments(metadata.minecraftArguments)
     ).map((argument) => replaceVariables(argument, variables));
-    const javaExecutable = await findJava(javaPath, requiredJavaVersion);
     const workingDirectory = instanceDirectory
       ? path.resolve(instanceDirectory)
       : gameDirectory;
     await fs.mkdir(workingDirectory, { recursive: true });
     return {
       argumentsList: [...jvmArguments, metadata.mainClass, ...gameArguments],
+      jvmArgumentCount: jvmArguments.length + 1,
       gameDirectory: workingDirectory,
       javaExecutable,
       mainClass: metadata.mainClass,
       nativesDirectory,
       profileId: validatedId,
-      requiredJavaVersion
+      requiredJavaVersion,
+      javaDetails,
+      memoryMb: maximumMemory
     };
   } catch (error) {
     await fs.rm(nativesDirectory, { recursive: true, force: true }).catch(() => {});
@@ -574,18 +560,36 @@ async function prepareLaunch({
 }
 
 class MinecraftLauncher {
-  constructor({ gameDirectory, spawnProcess = spawn, findJava, javaRuntime } = {}) {
+  constructor({ gameDirectory, spawnProcess = spawn, findJava, javaRuntime,
+    inspectJava = findJava ? undefined : javaRuntimeDetails, verifyFiles, activeGames = new Map() } = {}) {
     this.gameDirectory = gameDirectory;
     this.spawnProcess = spawnProcess;
     this.findJava = findJava;
+    this.inspectJava = inspectJava;
+    this.verifyFiles = verifyFiles;
     this.javaRuntime = javaRuntime ?? new ManagedJavaRuntime({
       gameDirectory,
       extractArchive
     });
-    this.activeGames = new Map();
+    this.activeGames = activeGames;
   }
 
-  async launch({
+  async launch(options, onStatus = () => {}) {
+    const profileId = validateProfileId(options.profileId);
+    const targetId = String(options.targetId ?? profileId);
+    const existing = this.activeGames.get(targetId);
+    if (existing && existing.exitCode == null) throw new Error(`${targetId} 已经在运行中或正在准备启动`);
+    const reservation = { exitCode: null, preparing: true };
+    this.activeGames.set(targetId, reservation);
+    try {
+      return await this.startGame(options, (status) => onStatus({ ...status, gameDirectory: this.gameDirectory }));
+    } catch (error) {
+      if (this.activeGames.get(targetId) === reservation) this.activeGames.delete(targetId);
+      throw error;
+    }
+  }
+
+  async startGame({
     profileId,
     targetId = profileId,
     instanceDirectory,
@@ -597,9 +601,6 @@ class MinecraftLauncher {
   }, onStatus = () => {}) {
     const validatedId = validateProfileId(profileId);
     const launchTargetId = String(targetId ?? validatedId);
-    const existing = this.activeGames.get(launchTargetId);
-    if (existing && existing.exitCode === null) throw new Error(`${launchTargetId} 已经在运行中`);
-
     onStatus({ phase: 'preparing', profileId: validatedId, targetId: launchTargetId });
     const findJava = this.findJava ?? ((explicitPath, requiredMajorVersion) => (
       this.javaRuntime.resolveForGame(explicitPath, requiredMajorVersion, javaRuntimes, (progress) => {
@@ -619,7 +620,11 @@ class MinecraftLauncher {
       javaPath,
       instanceDirectory,
       authlibInjector,
-      findJava
+      findJava,
+      inspectJava: this.inspectJava,
+      verifyFiles: this.verifyFiles,
+      onVerifyProgress: (progress) => onStatus({ phase: 'verifying', profileId: validatedId,
+        targetId: launchTargetId, message: `正在检查游戏文件 ${progress.checkedFiles ?? 0}/${progress.totalFiles ?? 0}`, ...progress })
     });
     onStatus({
       phase: 'launching',
@@ -639,7 +644,12 @@ class MinecraftLauncher {
     let child;
     let started = false;
     try {
-      child = this.spawnProcess(prepared.javaExecutable, prepared.argumentsList, {
+      const commandArguments = await prepareJavaArguments({
+        javaExecutable: prepared.javaExecutable, argumentsList: prepared.argumentsList,
+        requiredJavaVersion: prepared.requiredJavaVersion, directory: prepared.nativesDirectory,
+        javaDetails: prepared.javaDetails, jvmArgumentCount: prepared.jvmArgumentCount
+      });
+      child = this.spawnProcess(prepared.javaExecutable, commandArguments, {
         cwd: prepared.gameDirectory,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -671,7 +681,10 @@ class MinecraftLauncher {
       await gameLog?.close(`Unable to start Java: ${error.message}`);
       await fs.rm(prepared.nativesDirectory, { recursive: true, force: true }).catch(() => {});
       const message = redactGameOutput(error.message, gameLogSecrets(account));
-      throw new Error(`无法启动 Java：${message}${gameLog ? `\n游戏日志：${gameLog.filePath}` : ''}`);
+      throw Object.assign(new Error(`无法启动 Java：${message}${gameLog ? `\n游戏日志：${gameLog.filePath}` : ''}`, { cause: error }), {
+        code: error.code, phase: error.phase ?? 'launching', retryable: error.retryable,
+        details: { ...error.details, logPath: gameLog?.filePath }
+      });
     }
 
     started = true;

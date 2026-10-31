@@ -1,7 +1,5 @@
 const crypto = require('node:crypto');
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const { runFileExclusive } = require('../file-write-queue');
+const { RecoverableJsonStore, isJsonObject } = require('../recoverable-json-store');
 
 const OFFLINE_NAME_PATTERN = /^[A-Za-z0-9_]{3,16}$/;
 const SKIN_MODELS = Object.freeze(['steve', 'alex']);
@@ -139,6 +137,20 @@ function normalizeState(value) {
   return { version: 4, currentId, accounts };
 }
 
+function validateStoredState(value) {
+  if (!isJsonObject(value) || !Array.isArray(value.accounts)
+      || (value.version !== undefined && (!Number.isInteger(value.version) || value.version < 1 || value.version > 4))
+      || (value.currentId !== undefined && value.currentId !== null && typeof value.currentId !== 'string')
+      || value.accounts.some((account) => !isJsonObject(account)
+        || !['offline', ...ONLINE_ACCOUNT_TYPES].includes(account.type)
+        || typeof account.id !== 'string' || typeof account.name !== 'string' || typeof account.uuid !== 'string'
+        || [...MICROSOFT_SECRET_FIELDS, ...YGGDRASIL_SECRET_FIELDS].some((field) => (
+          account[field] !== undefined && typeof account[field] !== 'string'
+        )))) {
+    throw new Error('账户文件结构无效');
+  }
+}
+
 function skinUrlFromProfile(profile, allowedDomains = ['textures.minecraft.net']) {
   const encoded = profile?.properties?.find((property) => property?.name === 'textures')?.value;
   if (typeof encoded !== 'string') return undefined;
@@ -156,32 +168,25 @@ class AccountStore {
     this.filePath = filePath;
     this.secretCodec = secretCodec;
     this.queue = Promise.resolve();
+    this.storage = new RecoverableJsonStore(filePath, { validate: validateStoredState, label: '账户文件' });
   }
 
   async read() {
-    try {
-      const content = await fs.readFile(this.filePath, 'utf8');
-      const decoded = transformAccountSecrets(JSON.parse(content), (value) => (
-        this.secretCodec.decode(value)
-      ), { recoverErrors: true });
-      return normalizeState(decoded);
-    } catch (error) {
-      if (error.code === 'ENOENT' || error instanceof SyntaxError) {
-        return normalizeState({});
-      }
-      throw error;
-    }
+    const persisted = await this.storage.read();
+    const decoded = transformAccountSecrets(persisted, (value) => (
+      this.secretCodec.decode(value)
+    ), { recoverErrors: true });
+    return normalizeState(decoded);
   }
 
   async write(state) {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    const temporary = `${this.filePath}.part`;
     const encoded = transformAccountSecrets(normalizeState(state), (value) => (
       this.secretCodec.encode(value)
     ));
-    await fs.writeFile(temporary, `${JSON.stringify(encoded, null, 2)}\n`, 'utf8');
-    await fs.rename(temporary, this.filePath);
+    await this.storage.write(encoded);
   }
+
+  get recovery() { return this.storage.recovery; }
 
   publicState(state) {
     const publicAccount = (account) => {
@@ -208,13 +213,14 @@ class AccountStore {
   }
 
   runExclusive(operation) {
-    const next = runFileExclusive(this.filePath, operation);
+    const next = this.storage.runExclusive(operation);
     this.queue = next.catch(() => {});
     return next;
   }
 
   async getState() {
-    return this.publicState(await this.read());
+    const state = this.publicState(await this.read());
+    return this.recovery ? { ...state, recovery: { ...this.recovery } } : state;
   }
 
   async getCurrentAccount() {
@@ -299,7 +305,7 @@ class AccountStore {
     });
   }
 
-  async upsertYggdrasil(credentials) {
+  async upsertYggdrasil(credentials, { select = true } = {}) {
     const uuid = String(credentials?.uuid ?? '').toLowerCase();
     const name = String(credentials?.name ?? '');
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(uuid)) {
@@ -323,14 +329,16 @@ class AccountStore {
         authServer: 'https://littleskin.cn/api/yggdrasil',
         name,
         uuid,
-        skinUrl: normalizeSkinUrl(credentials.skinUrl, ['littleskin.cn']),
+        skinUrl: credentials.skinUrl === undefined
+          ? existing?.skinUrl : normalizeSkinUrl(credentials.skinUrl, ['littleskin.cn']),
+        skinModel: credentials.skinModel ?? existing?.skinModel ?? 'steve',
         createdAt: existing?.createdAt ?? new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
       delete account[UNREADABLE_SECRETS];
       if (existingIndex >= 0) state.accounts[existingIndex] = account;
       else state.accounts.push(account);
-      state.currentId = id;
+      if (select) state.currentId = id;
       await this.write(state);
       return this.publicState(state);
     });
@@ -344,6 +352,22 @@ class AccountStore {
       }
       state.currentId = accountId;
       await this.write(state);
+      return this.publicState(state);
+    });
+  }
+
+  async updateYggdrasilTexture(accountId, { skinUrl, skinModel }) {
+    const normalizedUrl = normalizeSkinUrl(skinUrl, ['littleskin.cn']);
+    const normalizedModel = validateSkinModel(skinModel);
+    return this.runExclusive(async () => {
+      const state = await this.read();
+      const account = state.accounts.find((item) => item.id === accountId && item.type === 'yggdrasil');
+      // Optional lookup must not resurrect a deleted account or overwrite newer tokens.
+      if (account && normalizedUrl) {
+        account.skinUrl = normalizedUrl;
+        account.skinModel = normalizedModel;
+        await this.write(state);
+      }
       return this.publicState(state);
     });
   }

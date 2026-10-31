@@ -1,6 +1,5 @@
-const fs = require('node:fs/promises');
 const path = require('node:path');
-const { runFileExclusive } = require('../file-write-queue');
+const { RecoverableJsonStore, isJsonObject } = require('../recoverable-json-store');
 
 const DOWNLOAD_CONCURRENCY_OPTIONS = Object.freeze([4, 8, 12, 16, 24, 32]);
 const DOWNLOAD_SOURCE_OPTIONS = Object.freeze(['auto', 'bmclapi', 'official']);
@@ -27,6 +26,7 @@ function normalizeLauncherUpdatePolicy(value, legacyBoolean) {
 }
 
 function normalizeSettings(value = {}) {
+  if (!isJsonObject(value)) throw new Error('设置文件结构无效');
   const requestedConcurrency = Number(value.downloadConcurrency);
   const requestedMemory = Number(value.memoryMb);
   const requestedJavaPath = typeof value.javaPath === 'string'
@@ -58,6 +58,19 @@ function normalizeSettings(value = {}) {
   };
 }
 
+function validateStoredSettings(value) {
+  const stringFields = ['javaPath', 'downloadSource', 'launcherUpdatePolicy', 'gameDirectoryMode'];
+  const booleanFields = ['isolateProfiles', 'autoUpdate', 'launcherAutoUpdate'];
+  if (!isJsonObject(value)
+      || (value.version !== undefined && (!Number.isInteger(value.version) || value.version < 1 || value.version > 3))
+      || stringFields.some((field) => value[field] !== undefined && typeof value[field] !== 'string')
+      || booleanFields.some((field) => value[field] !== undefined && typeof value[field] !== 'boolean')
+      || (value.javaRuntimes !== undefined && (!Array.isArray(value.javaRuntimes)
+        || value.javaRuntimes.some((entry) => !isJsonObject(entry) || typeof entry.path !== 'string')))) {
+    throw new Error('设置文件结构无效');
+  }
+}
+
 function normalizeJavaRuntimes(value, selectedPath = '') {
   const entries = Array.isArray(value) ? value.slice(0, 64) : [];
   const runtimes = new Map();
@@ -77,37 +90,31 @@ class SettingsStore {
   constructor(filePath) {
     this.filePath = filePath;
     this.queue = Promise.resolve();
+    this.storage = new RecoverableJsonStore(filePath, { validate: validateStoredSettings, label: '设置文件' });
   }
 
   async read() {
-    try {
-      return normalizeSettings(JSON.parse(await fs.readFile(this.filePath, 'utf8')));
-    } catch (error) {
-      if (error.code === 'ENOENT' || error instanceof SyntaxError) {
-        return normalizeSettings();
-      }
-      throw error;
-    }
+    return normalizeSettings(await this.storage.read());
   }
 
   async write(settings) {
     const normalized = normalizeSettings(settings);
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    const temporary = `${this.filePath}.part`;
-    await fs.writeFile(temporary, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
-    await fs.rename(temporary, this.filePath);
+    await this.storage.write(normalized);
     return normalized;
   }
 
   runExclusive(operation) {
-    const next = runFileExclusive(this.filePath, operation);
+    const next = this.storage.runExclusive(operation);
     this.queue = next.catch(() => {});
     return next;
   }
 
-  getState() {
-    return this.read();
+  async getState() {
+    const state = await this.read();
+    return this.recovery ? { ...state, recovery: { ...this.recovery } } : state;
   }
+
+  get recovery() { return this.storage.recovery; }
 
   update(patch = {}) {
     return this.runExclusive(async () => {

@@ -53,7 +53,7 @@ test('Microsoft account IPC forwards owned login sessions, progress and cancella
     clipboard: { writeText: (code) => copied.push(code) },
     shell: { openExternal: async (url) => opened.push(url) }
   });
-  for (const channel of ['begin-microsoft', 'complete-microsoft', 'copy-microsoft-code', 'cancel-microsoft', 'get-state', 'add-offline', 'login-littleskin', 'select-littleskin-profile', 'select', 'set-skin-model', 'rename', 'refresh-skin', 'remove']) {
+  for (const channel of ['begin-microsoft', 'complete-microsoft', 'copy-microsoft-code', 'cancel-microsoft', 'get-state', 'add-offline', 'login-littleskin', 'select', 'set-skin-model', 'rename', 'refresh-skin', 'remove']) {
     assert.equal(handlers.has(`accounts:${channel}`), true);
   }
   assert.equal(await invoke('accounts:begin-microsoft', sender), loginResult);
@@ -126,24 +126,19 @@ test('offline account IPC preserves encrypted historical Microsoft accounts and 
   assert.match(persisted, /encoded:/);
 });
 
-test('LittleSkin IPC keeps login, profile selection and sender-owned cancellation', async () => {
+test('LittleSkin IPC returns the automatic login result without registering unused profile sessions', async () => {
   const calls = [];
-  const loginResult = { sessionId: 'session', profiles: [{ id: 'profile' }] };
-  const selectedState = { currentId: 'littleskin:profile' };
-  const { invoke } = accountIpc({}, {
-    login: async (...args) => { calls.push(['login', ...args]); return loginResult; },
-    selectProfile: async (...args) => { calls.push(['selectProfile', ...args]); return selectedState; },
-    cancelOwner: (...args) => calls.push(['cancelOwner', ...args])
+  const loginResult = { state: { currentId: 'littleskin:profile' } };
+  const { handlers, invoke } = accountIpc({}, {
+    login: async (...args) => { calls.push(['login', ...args]); return loginResult; }
   });
   const sender = new EventEmitter();
   sender.id = 7;
   assert.equal(await invoke('accounts:login-littleskin', sender, 'player@example.com', 'password'), loginResult);
-  assert.equal(await invoke('accounts:select-littleskin-profile', sender, 'session', 'profile'), selectedState);
-  sender.emit('destroyed');
+  assert.equal(handlers.has('accounts:select-littleskin-profile'), false);
+  assert.equal(sender.listenerCount('destroyed'), 0);
   assert.deepEqual(calls, [
-    ['login', 7, 'player@example.com', 'password'],
-    ['selectProfile', 'session', 7, 'profile'],
-    ['cancelOwner', 7]
+    ['login', 'player@example.com', 'password']
   ]);
 });
 
@@ -172,7 +167,7 @@ test('preload exposes callable Microsoft bridges and removes progress listeners 
   environment.accounts.cancelMicrosoft('session');
   environment.accounts.addOffline('Player_01', 'alex');
   environment.accounts.loginLittleSkin('player@example.com', 'password');
-  environment.accounts.selectLittleSkinProfile('session', 'profile');
+  assert.equal(environment.accounts.selectLittleSkinProfile, undefined);
   environment.accounts.refreshSkin('microsoft:legacy');
   assert.deepEqual(calls, [
     ['accounts:begin-microsoft'],
@@ -181,7 +176,6 @@ test('preload exposes callable Microsoft bridges and removes progress listeners 
     ['accounts:cancel-microsoft', 'session'],
     ['accounts:add-offline', 'Player_01', 'alex'],
     ['accounts:login-littleskin', 'player@example.com', 'password'],
-    ['accounts:select-littleskin-profile', 'session', 'profile'],
     ['accounts:refresh-skin', 'microsoft:legacy']
   ]);
   const progress = [];

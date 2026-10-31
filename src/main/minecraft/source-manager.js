@@ -1,4 +1,6 @@
 const BMCLAPI_BASE = 'https://bmclapi2.bangbang93.com';
+const { verifyJsonBytes } = require('./metadata-schema');
+const { userAgent } = require('../../shared/build-info');
 const OFFICIAL_MANIFEST = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
 const BMCLAPI_MANIFEST = `${BMCLAPI_BASE}/mc/game/version_manifest_v2.json`;
 const OFFICIAL_ASSETS = 'https://resources.download.minecraft.net';
@@ -19,7 +21,7 @@ const SOURCES = Object.freeze({
 
 const DEFAULT_HEADERS = Object.freeze({
   Accept: 'application/json, application/octet-stream;q=0.9, */*;q=0.8',
-  'User-Agent': 'MelodyOfOblivionLauncher/1.1.2'
+  'User-Agent': userAgent
 });
 
 const DOWNLOAD_SOURCE_OPTIONS = Object.freeze(['auto', 'bmclapi', 'official']);
@@ -85,6 +87,21 @@ async function fetchJson(url, timeoutMs = 15000, signal) {
       throw new Error(`请求失败：HTTP ${response.status} ${url}`);
     }
     return response.json();
+  });
+}
+
+async function fetchJsonDocument(url, timeoutMs, { signal, sha1, size, validate } = {}) {
+  throwIfAborted(signal);
+  return fetchWithTimeout(url, { signal }, timeoutMs, async (response) => {
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`请求失败：HTTP ${response.status} ${url}`);
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    verifyJsonBytes(bytes, { sha1, size });
+    const data = JSON.parse(bytes.toString('utf8'));
+    validate?.(data);
+    return { data, bytes };
   });
 }
 
@@ -374,7 +391,7 @@ class MinecraftSourceManager {
     return unique([...libraryUrls, lss233Url]);
   }
 
-  async fetchJsonFromSources(type, context, preferredSourceId, { signal } = {}) {
+  async fetchJsonFromSources(type, context, preferredSourceId, { signal, sha1, size, validate } = {}) {
     throwIfAborted(signal);
     const sourceOrder = this.sourceOrder(preferredSourceId);
     const errors = [];
@@ -388,7 +405,7 @@ class MinecraftSourceManager {
 
       try {
         return {
-          data: await fetchJson(url, this.metadataTimeoutMs, signal),
+          ...await fetchJsonDocument(url, this.metadataTimeoutMs, { signal, sha1, size, validate }),
           source: SOURCES[sourceId],
           url
         };

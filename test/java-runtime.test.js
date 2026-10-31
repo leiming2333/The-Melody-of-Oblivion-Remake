@@ -16,6 +16,7 @@ const {
   AZUL_API,
   adoptiumArchitecture,
   adoptiumPlatform,
+  azulArchitecture,
   selectRuntimePackage,
   selectZuluRuntimePackage
 } = require('../src/main/minecraft/managed-java-runtime');
@@ -145,33 +146,33 @@ test('可以从 Adoptium 元数据选择当前平台的 Java 25 JRE', () => {
 const archiveContents = Buffer.from('test archive');
 const archiveChecksum = crypto.createHash('sha256').update(archiveContents).digest('hex');
 
-function zuluPackage(majorVersion = 25) {
-  const platform = { win32: 'win', darwin: 'macosx', linux: 'linux' }[process.platform];
-  const architecture = process.arch === 'x64' ? 'x64' : 'aarch64';
-  const name = `zulu-test-ca-jre${majorVersion}.0.1-${platform}_${architecture}${process.platform === 'win32' ? '.zip' : '.tar.gz'}`;
+function zuluPackage(majorVersion = 25, targetPlatform = process.platform, targetArchitecture = process.arch) {
+  const platform = { win32: 'win', darwin: 'macosx', linux: 'linux' }[targetPlatform];
+  const architecture = { x64: 'x64', arm64: 'aarch64', ia32: 'i686', arm: 'aarch32hf' }[targetArchitecture];
+  const name = `zulu-test-ca-jre${majorVersion}.0.1-${platform}_${architecture}${targetPlatform === 'win32' ? '.zip' : '.tar.gz'}`;
   return {
     package_uuid: '55b71f6b-cb92-4a1f-8d96-dcb5bc680881',
     name,
     java_version: [majorVersion, 0, 1],
     java_package_type: 'jre',
     javafx_bundled: false,
-    os: process.platform === 'darwin' ? 'macos' : adoptiumPlatform(),
-    arch: process.arch === 'x64' ? 'x86' : 'aarch64',
-    hw_bitness: 64,
+    os: targetPlatform === 'darwin' ? 'macos' : adoptiumPlatform(targetPlatform),
+    arch: ['x64', 'ia32'].includes(targetArchitecture) ? 'x86' : targetArchitecture === 'arm64' ? 'aarch64' : 'arm',
+    hw_bitness: ['ia32', 'arm'].includes(targetArchitecture) ? 32 : 64,
     download_url: `https://cdn.azul.com/zulu/bin/${name}`,
     size: archiveContents.length,
     sha256_hash: archiveChecksum
   };
 }
 
-function adoptiumPackage(majorVersion) {
-  const name = `java-${majorVersion}${process.platform === 'win32' ? '.zip' : '.tar.gz'}`;
+function adoptiumPackage(majorVersion, platform = process.platform, architecture = process.arch) {
+  const name = `java-${majorVersion}${platform === 'win32' ? '.zip' : '.tar.gz'}`;
   return {
     release_name: `jdk-${majorVersion}-test`,
     version: { major: majorVersion },
     binary: {
-      os: adoptiumPlatform(),
-      architecture: adoptiumArchitecture(),
+      os: adoptiumPlatform(platform),
+      architecture: adoptiumArchitecture(architecture),
       image_type: 'jre',
       package: {
         link: `https://example.com/${name}`,
@@ -188,7 +189,9 @@ async function runtimeFixture(t, majorVersion = 25, overrides = {}) {
   t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
   const metadataRequests = [];
   const downloads = [];
-  const executableName = process.platform === 'win32' ? 'java.exe' : 'java';
+  const targetPlatform = overrides.platform ?? process.platform;
+  const targetArchitecture = overrides.architecture ?? process.arch;
+  const executableName = targetPlatform === 'win32' ? 'java.exe' : 'java';
   const manager = new ManagedJavaRuntime({
     gameDirectory,
     findSystemJava: async () => { throw new Error('missing'); },
@@ -199,9 +202,10 @@ async function runtimeFixture(t, majorVersion = 25, overrides = {}) {
     fetchRuntimeAssets: async (url) => {
       metadataRequests.push(url);
       if (url.startsWith(AZUL_API)) {
-        return url.includes('?') ? [zuluPackage(majorVersion)] : zuluPackage(majorVersion);
+        return url.includes('?') ? [zuluPackage(majorVersion, targetPlatform, targetArchitecture)]
+          : zuluPackage(majorVersion, targetPlatform, targetArchitecture);
       }
-      return [adoptiumPackage(majorVersion)];
+      return [adoptiumPackage(majorVersion, targetPlatform, targetArchitecture)];
     },
     download: async (url, destination, options) => {
       downloads.push({ url, options });
@@ -521,4 +525,126 @@ test('Java 探测时取消会阻止提交安装目录', async (t) => {
   });
   await assert.rejects(manager.ensureInstalled(25, undefined, controller.signal), { name: 'AbortError' });
   assert.deepEqual(await fs.readdir(path.join(gameDirectory, 'runtime', 'melody')), []);
+});
+
+test('32-bit launcher architectures map to the actual vendor API names', () => {
+  assert.equal(adoptiumArchitecture('ia32'), 'x86');
+  assert.equal(adoptiumArchitecture('arm'), 'arm');
+  assert.equal(adoptiumArchitecture('armv7l'), 'arm');
+  assert.equal(azulArchitecture('ia32'), 'i686');
+  assert.equal(azulArchitecture('arm'), 'arm');
+  assert.equal(adoptiumArchitecture('mips'), undefined);
+});
+
+test('Adoptium selection checks the requested 32-bit architecture rather than the host process', () => {
+  const windows32 = adoptiumPackage(8, 'win32', 'ia32');
+  const windows64 = { ...adoptiumPackage(8, 'win32', 'x64'), release_name: 'wrong-x64-package' };
+  assert.equal(selectRuntimePackage([windows64, windows32], 8, 'win32', 'ia32').releaseName, 'jdk-8-test');
+  const linuxArm = adoptiumPackage(17, 'linux', 'arm');
+  assert.equal(selectRuntimePackage([linuxArm], 17, 'linux', 'arm').checksum, archiveChecksum);
+  assert.throws(() => selectRuntimePackage([windows64], 8, 'win32', 'ia32'), { code: 'JAVA_RUNTIME_UNAVAILABLE' });
+});
+
+test('Azul x86 results must match the i686 filename and 32-bit package details', () => {
+  const windows32 = zuluPackage(8, 'win32', 'ia32');
+  const windows64 = zuluPackage(8, 'win32', 'x64');
+  assert.equal(selectZuluRuntimePackage([windows64, windows32], 8, 'win32', 'ia32').name, windows32.name);
+  for (const change of [{ hw_bitness: 64 }, { arch: 'aarch64' }, { name: windows64.name }]) {
+    assert.throws(() => selectZuluRuntimePackage([{ ...windows32, ...change }], 8, 'win32', 'ia32'),
+      { code: 'JAVA_RUNTIME_UNAVAILABLE' });
+  }
+});
+
+test('Windows ia32 installs a real vendor-shaped i686 JRE and records an architecture-specific runtime', async (t) => {
+  const { manager, metadataRequests } = await runtimeFixture(t, 8, { platform: 'win32', architecture: 'ia32' });
+  const executable = await manager.ensureInstalled(8);
+  assert.ok(executable.startsWith(manager.runtimeRoot(8)));
+  assert.equal(path.basename(manager.runtimeRoot(8)), 'java-8-ia32');
+  assert.equal(path.basename(executable), 'java.exe');
+  assert.equal(await manager.ensureInstalled(8), executable);
+  const query = new URL(metadataRequests[0]).searchParams;
+  assert.equal(query.get('arch'), 'i686');
+  assert.equal(query.get('hw_bitness'), '32');
+  const marker = JSON.parse(await fs.readFile(path.join(manager.runtimeRoot(8), '.melody-runtime.json'), 'utf8'));
+  assert.equal(marker.architecture, 'ia32');
+  assert.equal(marker.majorVersion, 8);
+  assert.equal(metadataRequests.length, 2, 'verified cached runtime does not fetch metadata again');
+});
+
+test('Linux ARMv7 tries Adoptium ARM when Azul has no matching JRE', async (t) => {
+  const requested = [];
+  const { manager, downloads } = await runtimeFixture(t, 17, {
+    platform: 'linux', architecture: 'arm',
+    fetchRuntimeAssets: async (url) => {
+      requested.push(url);
+      if (url.startsWith(AZUL_API)) return [];
+      return [adoptiumPackage(17, 'linux', 'arm')];
+    }
+  });
+  const executable = await manager.ensureInstalled(17);
+  assert.equal(path.basename(executable), 'java');
+  assert.equal(path.basename(manager.runtimeRoot(17)), 'java-17-arm');
+  assert.equal(new URL(requested[1]).searchParams.get('architecture'), 'arm');
+  assert.equal(new URL(requested[1]).searchParams.get('os'), 'linux');
+  assert.equal(downloads.length, 1);
+});
+
+test('unavailable Java and architecture combinations offer a manual installation path after trying both providers', async (t) => {
+  const requested = [];
+  const { manager, downloads } = await runtimeFixture(t, 25, {
+    platform: 'linux', architecture: 'arm',
+    fetchRuntimeAssets: async (url) => { requested.push(url); return []; }
+  });
+  await assert.rejects(manager.ensureInstalled(25), (error) => {
+    assert.equal(error.code, 'JAVA_RUNTIME_UNAVAILABLE');
+    assert.match(error.message, /linux\/arm.*Java 25.*手动安装.*设置/);
+    return true;
+  });
+  assert.equal(requested.length, 2);
+  assert.equal(downloads.length, 0);
+});
+
+test('same-major Java installations for x64 and ia32 cannot replace or reuse each other', async (t) => {
+  const x64 = await runtimeFixture(t, 8, { platform: 'win32', architecture: 'x64' });
+  const x86 = await runtimeFixture(t, 8, { platform: 'win32', architecture: 'ia32', gameDirectory: x64.gameDirectory });
+  const [first, second] = await Promise.all([x64.manager.ensureInstalled(8), x86.manager.ensureInstalled(8)]);
+  assert.notEqual(first, second);
+  assert.equal(await x64.manager.ensureInstalled(8), first);
+  assert.equal(await x86.manager.ensureInstalled(8), second);
+  assert.equal(x64.downloads.length, 1);
+  assert.equal(x86.downloads.length, 1);
+  await fs.access(first);
+  await fs.access(second);
+});
+
+test('an extracted JVM with the wrong architecture is never committed even with a matching Java major', async (t) => {
+  const { manager, gameDirectory } = await runtimeFixture(t, 8, {
+    platform: 'win32', architecture: 'ia32',
+    probeJavaDetails: async () => ({ majorVersion: 8, architecture: 'x64', bits: 64 })
+  });
+  await assert.rejects(manager.ensureInstalled(8), { code: 'JAVA_ARCHITECTURE_MISMATCH' });
+  assert.equal(await manager.installedExecutable(8), undefined);
+  assert.deepEqual(await fs.readdir(path.join(gameDirectory, 'runtime', 'melody')), []);
+});
+
+test('Java archive disk failures remain actionable and do not trigger another provider download', async (t) => {
+  const { manager, metadataRequests } = await runtimeFixture(t, 8, {
+    download: async () => { throw Object.assign(new Error('disk full'), { code: 'ENOSPC' }); }
+  });
+  await assert.rejects(manager.ensureInstalled(8), { code: 'ENOSPC' });
+  assert.equal(metadataRequests.length, 2);
+});
+
+test('Java metadata requests identify the actual launcher version', async (t) => {
+  const { userAgent } = require('../src/shared/build-info');
+  const entry = zuluPackage(8);
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    requests.push(url);
+    assert.equal(new Headers(options.headers).get('user-agent'), userAgent);
+    return Response.json(String(url).includes('?') ? [entry] : entry);
+  });
+  const manager = new ManagedJavaRuntime({ gameDirectory: 'unused' });
+  assert.equal((await manager.runtimePackage(8, 'azul')).checksum, archiveChecksum);
+  assert.equal(requests.length, 2);
 });

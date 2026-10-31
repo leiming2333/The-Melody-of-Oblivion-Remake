@@ -81,16 +81,10 @@ function registerAccountIpc({
     if (!sessionId) { auth?.cancelOwner(event.sender.id); return { cancelled: true }; }
     return auth?.cancel(sessionId, event.sender.id) ?? { cancelled: false };
   });
-  ipcMain.handle('accounts:login-littleskin', (event, username, password) => {
+  ipcMain.handle('accounts:login-littleskin', (_event, username, password) => {
     const yggdrasilAuth = getYggdrasilAuth();
     if (!yggdrasilAuth) throw new Error('LittleSkin 登录服务不可用');
-    event.sender.once('destroyed', () => yggdrasilAuth.cancelOwner(event.sender.id));
-    return yggdrasilAuth.login(event.sender.id, username, password);
-  });
-  ipcMain.handle('accounts:select-littleskin-profile', (event, sessionId, profileId) => {
-    const yggdrasilAuth = getYggdrasilAuth();
-    if (!yggdrasilAuth) throw new Error('LittleSkin 登录服务不可用');
-    return yggdrasilAuth.selectProfile(sessionId, event.sender.id, profileId);
+    return yggdrasilAuth.login(username, password);
   });
   ipcMain.handle('accounts:select', (_event, accountId) => getAccountStore().select(accountId));
   ipcMain.handle('accounts:set-skin-model', (_event, accountId, skinModel) => (

@@ -462,10 +462,34 @@
           <footer class="dialog-actions">
             <button class="secondary-dialog-button" value="cancel" type="submit">关闭</button>
             <button id="problemCopyButton" class="secondary-dialog-button" type="button">复制错误详情</button>
+            <button id="problemExportReportButton" class="secondary-dialog-button" type="button">导出诊断报告</button>
             <button id="problemJavaFixButton" class="primary-dialog-button" type="button" hidden>下载 Java 并启动</button>
             <button id="problemRetryButton" class="primary-dialog-button" type="button" hidden>重试</button>
             <button id="problemAccountButton" class="primary-dialog-button" type="button" hidden>前往账户管理</button>
             <button id="problemSettingsButton" class="primary-dialog-button" type="button" hidden>打开启动设置</button>
+          </footer>
+        </form>
+      </dialog>
+      <dialog id="fabricApiDialog" class="problem-dialog fabric-api-dialog" aria-labelledby="fabricApiTitle" aria-describedby="fabricApiTarget fabricApiStatus">
+        <form method="dialog">
+          <header class="dialog-header">
+            <div><p>安装 FABRIC</p><h2 id="fabricApiTitle">同时安装 Fabric API？</h2></div>
+            <button class="dialog-close" data-fabric-api-cancel aria-label="取消安装 Fabric" type="button">×</button>
+          </header>
+          <p id="fabricApiTarget" class="fabric-api-target"></p>
+          <p class="fabric-api-description">许多 Fabric 模组需要 Fabric API，可一起安装，也可稍后添加。</p>
+          <label class="check-setting fabric-api-check">
+            <input id="fabricApiInclude" type="checkbox" checked />
+            <span aria-hidden="true"></span>同时安装 Fabric API
+          </label>
+          <label class="fabric-api-version" for="fabricApiVersionSelect">兼容的 API 版本</label>
+          <select id="fabricApiVersionSelect" disabled aria-describedby="fabricApiStatus"></select>
+          <p id="fabricApiStatus" class="fabric-api-status" role="status" aria-live="polite"></p>
+          <button id="fabricApiRetryButton" class="secondary-dialog-button" type="button" hidden>重新查询</button>
+          <footer class="dialog-actions">
+            <button class="secondary-dialog-button" data-fabric-api-cancel type="button">取消</button>
+            <button id="fabricApiSkipButton" class="secondary-dialog-button" type="button">不添加，仅安装 Fabric</button>
+            <button id="fabricApiInstallButton" class="primary-dialog-button" type="button" disabled>安装 Fabric + API</button>
           </footer>
         </form>
       </dialog>

@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#平台支持与使用前提)
-[![Source](https://img.shields.io/badge/Source-v1.7.1-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.9.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.7.1`，支持离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://melodyoblivion.xyz/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.9.0`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://melodyoblivion.xyz/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -35,9 +35,9 @@
 ## 已实现功能
 
 - **游戏版本**：浏览 Mojang 版本清单、识别本地安装、下载原版游戏、验证所需文件，并将可移除的配置移动到回收站。
-- **模组加载器**：通过统一流程查询并安装 Fabric、Forge、NeoForge 与 Quilt。
+- **模组加载器**：通过统一流程查询并安装 Fabric、Forge、NeoForge 与 Quilt。新装 Fabric 时可在确认框中选择与 Minecraft 版本兼容的 Fabric API，也可跳过；所选 API 经摘要校验后安装到该版本使用的 `mods` 目录。
 - **可靠下载**：在 Mojang 官方源与 BMCLAPI 之间选择；自动模式会测速；支持任务并发、大文件 HTTP Range 分段、SHA-1 校验、取消下载及失败后切换来源重试。
-- **账户系统**：支持离线账户及 LittleSkin Yggdrasil；可同步皮肤头像、启动前刷新 LittleSkin 凭据，并阻止令牌进入渲染进程。
+- **账户系统**：支持 Microsoft 设备代码登录、离线账户及 LittleSkin Yggdrasil；启动前刷新在线凭据，并阻止令牌进入渲染进程。LittleSkin 皮肤同步失败不影响已成功的登录。
 - **Java 管理**：匹配游戏所需的 Java 主版本，检测系统安装与启动器托管环境。首页启动按钮实时显示所选版本的 Java 就绪状态；启动时缺少所需 Java 会提供一键下载并自动重试，也可在 Java 路径设置旁手动下载 Java 8、16、17、21 或 25（支持进度与取消；优先 Azul JRE，失败后切换 Adoptium，使用并行下载与 SHA-256 校验）。
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
 - **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides、Fabric、Forge、NeoForge 与 Quilt。导入确认显示游戏、加载器和文件数，可选文件默认不安装；可选文件的远端解析或下载失败仅警告，必需文件失败可重试；磁盘、权限或安全检查错误会中止安装。CurseForge 受限文件可从官方页面下载后选择本地文件，通过可信摘要校验再继续安装。
@@ -68,7 +68,7 @@
 
 ## 运行要求
 
-- Windows 10/11、macOS 或 Linux，安装包架构需与设备匹配
+- Windows 10/11、macOS 或 Linux，安装包架构需与设备匹配；Electron 43 不支持 Windows 7/8/8.1
 - 源码开发与构建固定使用 Node.js `26.10.0`、npm `11.13.0`
 - Vercel 网站使用 Node.js `24.x`。`engines.node` 兼容网站与启动器两个环境；启动器构建仍由 `.node-version` 和工具链检查固定为 `26.10.0`。
 - 用于元数据、游戏文件、账户验证及托管 Java 下载的网络连接
@@ -98,7 +98,8 @@ Java 检测结果保存在用户数据目录的 `java-cache.json`，可执行文
 | 命令 | 用途 |
 | --- | --- |
 | `npm run dev` | 以开发模式启动 Electron 应用 |
-| `npm run check` | 检查主进程、预加载脚本与渲染脚本语法 |
+| `npm run check` | 检查 JavaScript 语法及未使用变量、不可达分支、危险 finally 等错误 |
+| `npm run lint` | 运行完整 ESLint 检查 |
 | `npm test` | 运行 Node.js 自动化测试 |
 | `npm run smoke` | 使用临时用户数据加载 Electron 窗口并退出 |
 | `npm run verify:toolchain` | 验证固定 Node、npm、Electron 和 electron-builder 版本 |
@@ -114,7 +115,7 @@ Java 检测结果保存在用户数据目录的 `java-cache.json`，可执行文
 ```text
 src/
 ├── main/                 Electron 主进程
-│   ├── accounts/         离线与 LittleSkin 账户
+│   ├── accounts/         Microsoft、离线与 LittleSkin 账户
 │   ├── minecraft/        下载、Java、加载器、启动与整合包
 │   └── settings/         持久化设置
 ├── preload/              沙箱化的渲染进程桥接层
@@ -140,6 +141,16 @@ styles.css                落地页样式
 提交安全问题时，请勿包含账户文件、访问令牌、刷新令牌、设备代码或个人 Minecraft 数据。
 
 ## 诊断与安装重试
+
+启动前会验证客户端、继承依赖、原生库、日志配置及资源对象；文件缺失时，问题对话框提供「补全文件并启动」。补全只修复运行文件，不覆盖版本 JSON、存档、Mod 或实例配置。版本 JSON 自身损坏时需重新安装对应版本。验证会读取资源文件，首次启动或大型资源包的检查耗时取决于磁盘速度。
+
+账户和设置以原子写入方式保存，保留上一份有效的 `.bak`；损坏文件会保留为 `.corrupt-摘要`。有效备份可自动恢复并显示提示；无有效备份时停止写入并展示恢复路径，不静默重置账户。备份中的在线凭据仍使用原有加密格式。
+
+问题对话框可以导出 JSON 诊断报告，包含版本、系统、白名单设置、当前错误及启动阶段记录。报告不会读取账户文件或自动附加游戏日志，常见凭据字段会脱敏；路径等个人信息仍应在分享前检查。
+
+Windows 超长命令使用 Java 9+ 参数文件或 Java 8 类路径清单。Java 9+ 参数文件按所选 Java 的本地编码写入，游戏令牌不写入参数文件；路径无法无损编码时明确提示更换目录。普通长度参数继续通过原生进程参数传递。32 位 Java 的实际堆上限为 1536 MiB；托管运行时按架构隔离，无可用的 ARM32/其他架构发行包时需手动安装兼容 Java。
+
+本轮修复范围、验证结果和后续路线见[可靠性改进记录](docs/reliability-improvements-2026-10-31.md)。
 
 Java 的标准输出和错误输出保存到游戏根目录的 `launcher-cache/game-logs`，单个日志最多 2 MiB，默认保留最近 5 次；正在运行游戏的日志不会被清理。日志隐藏已知账户令牌和常见凭据字段，不记录完整启动命令。异常退出提示提供日志路径；分享前仍应检查日志中的用户名、服务器地址等个人信息。
 

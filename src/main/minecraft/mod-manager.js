@@ -56,7 +56,14 @@ class ModManager {
         try { await fs.link(source, path.join(directory, targetName)); }
         catch (error) {
           if (error.code === 'EEXIST') throw new Error('同名 Mod 已存在，请先检查两个文件');
-          throw error;
+          if (!['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EPERM', 'EXDEV'].includes(error.code)) throw error;
+          // FAT/exFAT and some network shares do not support hard links.
+          // COPYFILE_EXCL preserves the no-overwrite contract on those volumes.
+          try { await fs.copyFile(source, path.join(directory, targetName), constants.COPYFILE_EXCL); }
+          catch (copyError) {
+            if (copyError.code === 'EEXIST') throw new Error('同名 Mod 已存在，请先检查两个文件');
+            throw copyError;
+          }
         }
         try { await fs.unlink(source); }
         catch (error) { await fs.unlink(path.join(directory, targetName)).catch(() => {}); throw error; }

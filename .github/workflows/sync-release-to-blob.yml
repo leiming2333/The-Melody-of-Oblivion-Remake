@@ -26,7 +26,7 @@ jobs:
         with:
           omit-dev: 'true'
 
-      - name: Download GitHub Release assets
+      - name: Download Windows executables and release manifest
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -36,11 +36,11 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           mkdir -p release-published
           gh release download "$RELEASE_TAG" --repo "$GH_REPO" --dir release-published \
-            --pattern '*.exe' --pattern '*.zip' --pattern '*.AppImage' --pattern 'release-manifest.json'
+            --pattern '*-Windows-*.exe' --pattern 'release-manifest.json'
           gh release view "$RELEASE_TAG" --repo "$GH_REPO" \
             --json tagName,name,url,body,publishedAt > release-published/release.json
 
-      - name: Upload assets and publish Blob manifest
+      - name: Upload Windows executables and publish Blob manifest
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}

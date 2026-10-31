@@ -49,8 +49,7 @@ test('account requests share a lazy store, retry failures, and resolve auth only
     },
     auth: () => {
       created.push('auth');
-      return { login: async () => ({ sessionId: 'session' }),
-        selectProfile: async (...args) => args, cancelOwner: (id) => created.push(id) };
+      return { login: async () => ({ state: { currentId: 'littleskin:profile' } }) };
     }
   });
   const handlers = new Map();
@@ -64,10 +63,9 @@ test('account requests share a lazy store, retry failures, and resolve auth only
   const sender = new EventEmitter();
   sender.id = 7;
   await handlers.get('accounts:login-littleskin')({ sender }, 'user', 'password');
-  assert.deepEqual(await handlers.get('accounts:select-littleskin-profile')({ sender }, 'session', 'profile'),
-    ['session', 7, 'profile']);
+  assert.equal(handlers.has('accounts:select-littleskin-profile'), false);
   sender.emit('destroyed');
-  assert.deepEqual(created, ['store', 'store', 'auth', 7]);
+  assert.deepEqual(created, ['store', 'store', 'auth']);
 });
 
 test('lazy service load callback runs once after successful instantiation', () => {
@@ -88,7 +86,9 @@ test('an expired Microsoft refresh signs out the active account before launch', 
   const calls = [];
   const account = { id: 'microsoft:expired', type: 'microsoft' };
   registerMinecraftIpc({
-    app: {}, ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
+    app: { isPackaged: false, getAppPath: () => path.join(os.tmpdir(), 'melody-expired-auth-fixture'),
+      getPath: () => os.tmpdir() },
+    ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
     getAccountStore: () => ({
       getCurrentAccount: async () => account,
       signOut: async (id) => calls.push(['signOut', id])
@@ -98,7 +98,8 @@ test('an expired Microsoft refresh signs out the active account before launch', 
     })
   });
   const sender = { isDestroyed: () => false, send() {} };
-  await assert.rejects(handlers.get('minecraft:launch-version')({ sender }, '1.21.1'), /已自动退出/);
+  const result = await handlers.get('minecraft:launch-version')({ sender }, '1.21.1');
+  assert.match(result.__launcherTaskError.message, /已自动退出/);
   assert.deepEqual(calls, [['signOut', account.id]]);
 });
 

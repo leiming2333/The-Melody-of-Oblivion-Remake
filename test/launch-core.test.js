@@ -92,6 +92,29 @@ test('legacy loader arguments replace inherited arguments while modern arrays me
   assert.equal(mergeMetadata(parent, {}).minecraftArguments, parent.minecraftArguments);
 });
 
+test('legacy argument parsing preserves Windows paths, Chinese text and empty quoted values', () => {
+  assert.deepEqual(splitLegacyArguments(String.raw`--gameDir "C:\游戏目录\Minecraft 1.12" --assetsDir C:\资源 --empty "" --name 'Player One'`),
+    ['--gameDir', String.raw`C:\游戏目录\Minecraft 1.12`, '--assetsDir', String.raw`C:\资源`, '--empty', '', '--name', 'Player One']);
+  assert.deepEqual(splitLegacyArguments(String.raw`--label "a\"b"`), ['--label', 'a"b']);
+  assert.throws(() => splitLegacyArguments('--gameDir "unfinished'), /引号未闭合/);
+});
+
+test('launch rejects incompatible native architecture before extraction and caps a 32-bit Java heap', async (t) => {
+  const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-java-bits-'));
+  t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
+  await writeVersion(gameDirectory, '中文 测试', { mainClass: 'Main', libraries: [] });
+  await writeFile(path.join(gameDirectory, 'versions', '中文 测试', '中文 测试.jar'));
+  const options = { gameDirectory, profileId: '中文 测试', memoryMb: 8192,
+    account: { type: 'offline', name: 'Steve', uuid: offlineUuid('Steve') },
+    findJava: async () => 'java-fixture' };
+  await assert.rejects(prepareLaunch({ ...options,
+    inspectJava: async () => ({ architecture: process.arch === 'x64' ? 'arm64' : 'x64', bits: 64 }) }),
+  { code: 'JAVA_ARCHITECTURE_MISMATCH', phase: 'java' });
+  const prepared = await prepareLaunch({ ...options, inspectJava: async () => ({ architecture: process.arch, bits: 32 }) });
+  assert.ok(prepared.argumentsList.includes('-Xmx1536M'));
+  assert.ok(!prepared.argumentsList.includes('-Xmx8192M'));
+});
+
 test('native archives are cached, verified and copied separately for concurrent games', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-native-cache-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -207,7 +230,7 @@ function paxRecord(key, value) {
   return `${length}${suffix}`;
 }
 
-async function writeFile(filePath, content = '') {
+async function writeFile(filePath, content = 'fixture') {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, content);
 }
@@ -321,6 +344,7 @@ test('完整启动参数包含内存、继承类路径与离线账户信息', as
   await writeFile(path.join(gameDirectory, 'libraries/example/shared/1.0/shared-1.0.jar'));
   await writeFile(path.join(gameDirectory, 'libraries/example/loader/1.0/loader-1.0.jar'));
   await writeFile(path.join(gameDirectory, 'versions/1.20.1/1.20.1.jar'));
+  await writeFile(path.join(gameDirectory, 'assets/indexes/5.json'), JSON.stringify({ objects: {} }));
 
   const configuredJavaPath = path.resolve(gameDirectory, 'custom-java', 'bin', 'java.exe');
   let requestedJavaPath;

@@ -153,6 +153,10 @@ let versionCatalogLoaded = false;
 let versionCatalogLoading = false;
 let versionCatalogLoadToken = 0;
 let versionDownloadActive = false;
+let fabricApiConfirmationActive = false;
+let fabricApiConfirmationToken = 0;
+let fabricApiUiModule;
+let fabricApiUi;
 let lastDownloadFailed = false;
 let versionDeleteActive = false;
 let versionVerifyActive = false;
@@ -168,6 +172,22 @@ let loaderVersions = [];
 let loaderCatalogLoading = false;
 let loaderLoadToken = 0;
 const activeGameProfiles = new Set();
+let currentGameDirectory = '';
+function gameProcessKey(targetId, directory = currentGameDirectory) {
+  let normalized = String(directory).replaceAll('\\', '/').replace(/\/+$/, '');
+  if (/^(?:[a-z]:|\/\/)/i.test(normalized)) normalized = normalized.toLowerCase();
+  return JSON.stringify([normalized, targetId]);
+}
+const reportedRecoveryFiles = new Set();
+function notifyStorageRecovery(state) {
+  const recovery = state?.recovery;
+  if (!recovery || reportedRecoveryFiles.has(recovery.filePath)) return;
+  reportedRecoveryFiles.add(recovery.filePath);
+  globalThis.window?.launcherEnvironment?.diagnostics?.reportError?.(
+    `配置已从备份恢复：${recovery.filePath}\n备份：${recovery.backupPath}\n损坏副本：${recovery.quarantinePath ?? '原文件缺失'}`
+  );
+  showToast('检测到配置损坏，已从上次备份恢复；损坏原件已保留。请核对账户和启动设置。', true);
+}
 let accountState = { currentId: null, current: null, accounts: [] };
 let launcherSettings = {
   wallpaperIndex: 3,
@@ -348,6 +368,10 @@ function readableError(error) {
 }
 
 function problemGuidance(message, code, domain) {
+  if (code === 'CONFIG_CORRUPT' || /已损坏，且没有有效备份/.test(message)) {
+    return { title: '配置文件需要恢复', message: '账户或设置文件已损坏，原文件已保留。',
+      advice: '请展开错误详情查看原文件和备份路径，恢复有效备份后重试；不要删除账户文件来尝试修复。' };
+  }
   if (code === 'ENOSPC' || /ENOSPC|空间不足|磁盘已满/.test(message)) {
     return { title: '存储空间不足', message: '当前目录没有足够空间完成操作。',
       advice: '释放磁盘空间后重试。已通过校验的整合包缓存会保留；请勿删除存档来处理此问题。' };
@@ -446,6 +470,7 @@ function showProblem(error, title = '操作未完成', options = {}) {
   }
   const retryButton = document.querySelector('#problemRetryButton');
   if (retryButton) {
+    retryButton.textContent = options.retryLabel ?? '重试';
     retryButton.hidden = typeof options.retry !== 'function';
     retryButton.onclick = typeof options.retry !== 'function' ? null : () => {
       dialog.close(); void options.retry();
@@ -578,6 +603,7 @@ async function loadAccountState() {
   try {
     if (accountsApi) {
       accountState = await accountsApi.getState();
+      notifyStorageRecovery(accountState);
     }
     updateAccountCard();
     renderAccountList();
@@ -745,6 +771,7 @@ async function chooseJavaPath() {
 async function loadLauncherSettings() {
   try {
     if (settingsApi) launcherSettings = await settingsApi.getState();
+    notifyStorageRecovery(launcherSettings);
     launcherSettingsLoaded = true;
     applySettingsToForm();
     void refreshAutoJavaDetection();
@@ -1327,7 +1354,7 @@ function selectedRemoteVersion() {
 
 function renderLocalProfileOptions() {
   const previousProfileId = versionSelect.value;
-  const installedProfiles = localProfiles.filter((profile) => profile.valid && profile.complete);
+  const installedProfiles = localProfiles.filter((profile) => profile.valid);
   versionSelect.replaceChildren();
   const placeholder = document.createElement('option');
   placeholder.value = '';
@@ -1344,6 +1371,7 @@ function renderLocalProfileOptions() {
     option.textContent = profile.loaderType === 'vanilla'
       ? displayName
       : `${displayName} · ${loaderLabel}`;
+    if (!profile.complete) option.textContent += ' · 待验证或修复';
     versionSelect.append(option);
   }
 
@@ -1360,7 +1388,7 @@ function renderLocalProfileOptions() {
       (profile.targetId ?? profile.profileId) === selectedOption.value
     ));
     gameStatus.textContent = `已选择 ${selectedProfile?.displayName ?? selectedProfile?.profileId ?? selectedOption.value}`;
-    statusBadge.textContent = activeGameProfiles.has(selectedOption.value) ? 'RUNNING' : 'SELECTED';
+    statusBadge.textContent = activeGameProfiles.has(gameProcessKey(selectedOption.value)) ? 'RUNNING' : 'SELECTED';
   } else {
     gameStatus.textContent = installedProfiles.length > 0 ? '请选择游戏版本' : '尚无已安装游戏，可在「切换版本」中下载';
     statusBadge.textContent = 'READY';
@@ -1379,6 +1407,7 @@ async function loadLocalProfiles(force = false) {
       ? await minecraft.listLocalVersions()
       : await delay(80).then(fallbackLocalVersionResult);
     localProfiles = result.profiles ?? [];
+    currentGameDirectory = result.gameDirectory ?? currentGameDirectory;
     localProfilesLoaded = true;
     renderLocalProfileOptions();
     return localProfiles;
@@ -1571,7 +1600,7 @@ function updateVersionAction() {
   const version = selectedRemoteVersion();
   const loaderType = loaderTypeSelect.value;
   const loader = selectedLoaderVersion();
-  const busy = versionDownloadActive || versionDeleteActive || versionVerifyActive || versionCatalogLoading;
+  const busy = versionDownloadActive || fabricApiConfirmationActive || versionDeleteActive || versionVerifyActive || versionCatalogLoading;
   downloadVersionButton.disabled = !version || !loader || busy || loaderCatalogLoading;
   deleteVersionButton.disabled = !loader?.installed || busy;
   clearVersionSelectionButton.disabled = !versionSelect.value || busy || launchRequestActive;
@@ -1581,6 +1610,10 @@ function updateVersionAction() {
   }
   if (!loader) {
     downloadVersionButton.textContent = loaderCatalogLoading ? '正在获取加载器' : '暂无可用版本';
+    return;
+  }
+  if (fabricApiConfirmationActive) {
+    downloadVersionButton.textContent = '等待安装确认';
     return;
   }
   if (loader.installed) {
@@ -1594,47 +1627,6 @@ function updateVersionAction() {
   downloadVersionButton.textContent = loaderType === 'vanilla'
     ? '下载原版'
     : `安装 ${loaderNames[loaderType]}`;
-}
-
-async function verifyLocalVersionsAfterLoad() {
-  const localVersions = remoteVersions.filter((version) => (
-    version.localFilesPresent || version.installed
-  ));
-  if (localVersions.length === 0) return;
-
-  const preferredId = versionCatalog.value || versionSelect.value;
-  let completeCount = 0;
-  let incompleteCount = 0;
-  let failedCount = 0;
-  versionVerifyActive = true;
-  versionCatalog.disabled = true;
-  versionSearch.disabled = true;
-  versionTypeFilter.disabled = true;
-  refreshVersionsButton.disabled = true;
-  updateVersionAction();
-
-  for (let index = 0; index < localVersions.length; index += 1) {
-    const version = localVersions[index];
-    versionEmpty.textContent = `正在自动检测 Minecraft ${version.id}（${index + 1}/${localVersions.length}）…`;
-    try {
-      const result = minecraft?.verifyVersion
-        ? await minecraft.verifyVersion(version.id)
-        : { complete: version.installed };
-      version.installed = result.complete;
-      if (result.complete) completeCount += 1;
-      else incompleteCount += 1;
-    } catch {
-      failedCount += 1;
-    }
-  }
-
-  versionVerifyActive = false;
-  renderVersionCatalog(preferredId);
-  const details = [`${completeCount} 个完整`];
-  if (incompleteCount > 0) details.push(`${incompleteCount} 个待补齐`);
-  if (failedCount > 0) details.push(`${failedCount} 个检测失败`);
-  versionEmpty.textContent = `文件自动检测完成：${details.join('，')}`;
-  updateVersionAction();
 }
 
 function renderVersionCatalog(preferredId) {
@@ -1694,6 +1686,7 @@ function renderVersionCatalog(preferredId) {
 }
 
 function invalidateVersionCatalogForDirectoryChange() {
+  cancelFabricApiConfirmation();
   // 安装状态只对当前游戏目录有效。切换目录后不能继续复用上一个目录的
   // 版本和加载器状态，否则旧目录中的版本会被错误显示为“已安装”。
   loaderLoadToken += 1;
@@ -1800,11 +1793,39 @@ function clearVersionSelection() {
   showToast('已取消当前游戏版本选择');
 }
 
+function cancelFabricApiConfirmation() {
+  fabricApiConfirmationToken += 1;
+  fabricApiConfirmationActive = false;
+  fabricApiUi?.cancel();
+  updateVersionAction();
+}
+
+async function requestFabricApiChoice(gameVersion, loaderVersion, token) {
+  fabricApiUiModule ??= import('./modules/fabric-api-ui.mjs').then(({ createFabricApiUi }) => {
+    const dialog = document.querySelector('#fabricApiDialog');
+    fabricApiUi = createFabricApiUi({ minecraft, readableError, elements: {
+      dialog,
+      target: document.querySelector('#fabricApiTarget'),
+      includeApi: document.querySelector('#fabricApiInclude'),
+      versionSelect: document.querySelector('#fabricApiVersionSelect'),
+      status: document.querySelector('#fabricApiStatus'),
+      retryButton: document.querySelector('#fabricApiRetryButton'),
+      installButton: document.querySelector('#fabricApiInstallButton'),
+      skipButton: document.querySelector('#fabricApiSkipButton'),
+      cancelButtons: [...dialog.querySelectorAll('[data-fabric-api-cancel]')]
+    } });
+    return fabricApiUi;
+  }).catch((error) => { fabricApiUiModule = undefined; throw error; });
+  const ui = await fabricApiUiModule;
+  if (token !== fabricApiConfirmationToken) return null;
+  return ui.confirm({ gameVersion, loaderVersion });
+}
+
 async function installSelectedVersion() {
   const version = selectedRemoteVersion();
   const loaderType = loaderTypeSelect.value;
   const loader = selectedLoaderVersion();
-  if (!version || !loader || versionDownloadActive) {
+  if (!version || !loader || versionDownloadActive || fabricApiConfirmationActive) {
     return;
   }
 
@@ -1816,6 +1837,33 @@ async function installSelectedVersion() {
     useVersion(loader.profileId ?? version.id, loaderLabel);
     versionDialog.close();
     return;
+  }
+
+  const expectedGameDirectory = currentGameDirectory;
+  const directoryMode = launcherSettings.gameDirectoryMode;
+  const isolateProfiles = launcherSettings.isolateProfiles;
+  let fabricApiVersionId;
+  if (loaderType === 'fabric') {
+    const token = ++fabricApiConfirmationToken;
+    fabricApiConfirmationActive = true;
+    updateVersionAction();
+    try {
+      const choice = await requestFabricApiChoice(version.id, loader.version, token);
+      if (!choice || token !== fabricApiConfirmationToken || versionDownloadActive
+        || selectedRemoteVersion()?.id !== version.id || loaderTypeSelect.value !== loaderType
+        || selectedLoaderVersion()?.version !== loader.version
+        || currentGameDirectory !== expectedGameDirectory || launcherSettings.gameDirectoryMode !== directoryMode
+        || launcherSettings.isolateProfiles !== isolateProfiles) return;
+      fabricApiVersionId = choice.fabricApiVersionId;
+    } catch (error) {
+      if (token === fabricApiConfirmationToken) showProblem(error, 'Fabric 安装尚未开始', { retry: installSelectedVersion });
+      return;
+    } finally {
+      if (token === fabricApiConfirmationToken) {
+        fabricApiConfirmationActive = false;
+        updateVersionAction();
+      }
+    }
   }
 
   versionDownloadActive = true;
@@ -1845,7 +1893,9 @@ async function installSelectedVersion() {
         taskId: activeTaskId,
         gameVersion: version.id,
         loaderType,
-        loaderVersion: loader.version
+        loaderVersion: loader.version,
+        ...(expectedGameDirectory ? { expectedGameDirectory } : {}),
+        ...(loaderType === 'fabric' ? { fabricApiVersionId } : {})
       });
     } else {
       for (let completedFiles = 0; completedFiles <= 20; completedFiles += 1) {
@@ -1867,7 +1917,9 @@ async function installSelectedVersion() {
     renderVersionCatalog(version.id);
     renderLoaderCatalog(loader.version);
     useVersion(result.profileId ?? version.id, loaderLabel);
-    updateDownloadProgress({ phase: 'complete', message: `${loaderLabel} 安装完成` });
+    const apiLabel = result.fabricApi?.version ? ` + Fabric API ${result.fabricApi.version}` : '';
+    updateDownloadProgress({ phase: 'complete', message: `${loaderLabel}${apiLabel} 安装完成` });
+    if (result.fabricApi?.cleanupWarning) showToast(result.fabricApi.cleanupWarning, true);
     statusBadge.textContent = 'READY';
   } catch (error) {
     const message = readableError(error);
@@ -1998,6 +2050,20 @@ document.querySelector('#problemCopyButton').addEventListener('click', async () 
     showToast('已复制脱敏后的错误详情');
   } catch (error) { showToast(`复制失败：${readableError(error)}`, true); }
 });
+document.querySelector('#problemExportReportButton').addEventListener('click', async (event) => {
+  if (!environment?.diagnostics?.exportReport) {
+    showToast('当前环境不支持导出诊断报告', true);
+    return;
+  }
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await environment.diagnostics.exportReport(document.querySelector('#problemError').textContent);
+    if (!result.canceled) showToast(`诊断报告已保存：${result.filePath}`);
+  } catch (error) {
+    showToast(`导出失败：${readableError(error)}`, true);
+  } finally { button.disabled = false; }
+});
 
 function openActiveTask() {
   if (!versionDialog.open) versionDialog.showModal();
@@ -2068,6 +2134,7 @@ settingsDialog.addEventListener('close', async () => {
   if (saveRequested) {
     try {
       const previousDirectoryMode = launcherSettings.gameDirectoryMode ?? 'local';
+      const previousIsolation = launcherSettings.isolateProfiles;
       const patch = {
         wallpaperIndex: Number(wallpaperSelect.value),
         javaPath: selectedJavaPath,
@@ -2082,6 +2149,7 @@ settingsDialog.addEventListener('close', async () => {
       };
       launcherSettings = settingsApi ? await settingsApi.update(patch) : patch;
       applySettingsToForm();
+      if (launcherSettings.isolateProfiles !== previousIsolation) cancelFabricApiConfirmation();
       if (launcherSettings.gameDirectoryMode !== previousDirectoryMode) {
         autoJavaDetection = null;
         autoJavaDetectionPromise = null;
@@ -2179,6 +2247,7 @@ versionDialog.addEventListener('cancel', (event) => {
     event.preventDefault();
   }
 });
+versionDialog.addEventListener('close', cancelFabricApiConfirmation);
 
 memoryRange.addEventListener('input', () => {
   memoryValue.value = `${memoryRange.value} MB`;
@@ -2188,15 +2257,16 @@ function filterVersionCatalog() {
   const previousVersion = versionCatalog.value;
   renderVersionCatalog();
   if (versionCatalog.value !== previousVersion) {
+    cancelFabricApiConfirmation();
     loadLoaderCatalog();
   }
 }
 
 versionSearch.addEventListener('input', filterVersionCatalog);
 versionTypeFilter.addEventListener('change', filterVersionCatalog);
-versionCatalog.addEventListener('change', () => { lastDownloadFailed = false; loadLoaderCatalog(); });
-loaderTypeSelect.addEventListener('change', () => { lastDownloadFailed = false; loadLoaderCatalog(); });
-loaderVersionSelect.addEventListener('change', () => { lastDownloadFailed = false; updateVersionAction(); });
+versionCatalog.addEventListener('change', () => { cancelFabricApiConfirmation(); lastDownloadFailed = false; loadLoaderCatalog(); });
+loaderTypeSelect.addEventListener('change', () => { cancelFabricApiConfirmation(); lastDownloadFailed = false; loadLoaderCatalog(); });
+loaderVersionSelect.addEventListener('change', () => { cancelFabricApiConfirmation(); lastDownloadFailed = false; updateVersionAction(); });
 refreshVersionsButton.addEventListener('click', () => loadVersionCatalog(true));
 deleteVersionButton.addEventListener('click', deleteSelectedVersion);
 clearVersionSelectionButton.addEventListener('click', clearVersionSelection);
@@ -2240,7 +2310,7 @@ if (minecraft?.onVerifyProgress) {
 function updateLaunchButtonState() {
   const selectedProfile = versionSelect.value;
   if (launchRequestActive || javaFixActive) return;
-  if (selectedProfile && activeGameProfiles.has(selectedProfile)) {
+  if (selectedProfile && activeGameProfiles.has(gameProcessKey(selectedProfile))) {
     launchButton.disabled = true;
     launchButton.classList.remove('is-launching');
     launchLabel.textContent = '游戏运行中';
@@ -2268,14 +2338,17 @@ function updateLaunchButtonState() {
 if (minecraft?.onLaunchStatus) {
   minecraft.onLaunchStatus((status) => {
     const launchTargetId = status.targetId ?? status.profileId;
+    const processKey = gameProcessKey(launchTargetId, status.gameDirectory ?? currentGameDirectory);
+    if (status.phase === 'running') activeGameProfiles.add(processKey);
+    if (status.phase === 'exited') activeGameProfiles.delete(processKey);
+    if (status.gameDirectory && gameProcessKey('', status.gameDirectory) !== gameProcessKey('')) return;
     if (status.phase === 'running') {
-      activeGameProfiles.add(launchTargetId);
       if (versionSelect.value === launchTargetId) {
         gameStatus.textContent = `${launchTargetId} 正在运行`;
         gameStatus.title = status.logPath ? `游戏日志：${status.logPath}` : '';
         statusBadge.textContent = 'RUNNING';
       }
-    } else if (status.phase === 'java' || status.phase === 'launching') {
+    } else if (status.phase === 'verifying' || status.phase === 'java' || status.phase === 'launching') {
       if (versionSelect.value === launchTargetId) {
         gameStatus.textContent = status.message ?? `使用 Java ${status.requiredJavaVersion} 启动游戏`;
         gameStatus.title = status.javaPath ?? '';
@@ -2287,7 +2360,6 @@ if (minecraft?.onLaunchStatus) {
         launchHint.textContent = '校验 authlib-injector';
       }
     } else if (status.phase === 'exited') {
-      activeGameProfiles.delete(launchTargetId);
       if (versionSelect.value === launchTargetId) {
         const normalExit = status.code === 0;
         gameStatus.textContent = normalExit
@@ -2435,7 +2507,35 @@ launchButton.addEventListener('click', () => {
   void launchSelectedVersion();
 });
 
+async function repairSelectedVersion(profileId, directory = currentGameDirectory) {
+  if (!minecraft?.repairVersion || launchRequestActive) return;
+  if (gameProcessKey('', directory) !== gameProcessKey('')) {
+    showToast('游戏目录已改变，请切回原目录后补全文件', true);
+    return;
+  }
+  launchRequestActive = true;
+  launchButton.disabled = true;
+  launchLabel.textContent = '正在补全文件';
+  launchHint.textContent = '保留存档、Mod 和实例配置';
+  try {
+    await minecraft.repairVersion(profileId);
+    if (gameProcessKey('', directory) !== gameProcessKey('')) return;
+    await loadLocalProfiles(true);
+    if ([...versionSelect.options].some((option) => option.value === profileId)) versionSelect.value = profileId;
+  } catch (error) {
+    if (gameProcessKey('', directory) === gameProcessKey('')) {
+      showProblem(error, '游戏文件补全失败', { retry: () => repairSelectedVersion(profileId, directory) });
+    }
+    return;
+  } finally {
+    launchRequestActive = false;
+    updateLaunchButtonState();
+  }
+  if (versionSelect.value === profileId) await launchSelectedVersion();
+}
+
 async function launchSelectedVersion() {
+  if (launchRequestActive) return;
   if (!versionSelect.value) {
     gameStatus.textContent = '请先安装并选择游戏版本';
     statusBadge.textContent = 'READY';
@@ -2451,6 +2551,7 @@ async function launchSelectedVersion() {
     return;
   }
   const profileId = versionSelect.value;
+  const launchDirectory = currentGameDirectory;
   launchRequestActive = true;
   launchButton.disabled = true;
   launchButton.classList.add('is-launching');
@@ -2464,13 +2565,14 @@ async function launchSelectedVersion() {
     const result = minecraft?.launchVersion
       ? await minecraft.launchVersion(profileId)
       : await delay(300).then(() => {
-        activeGameProfiles.add(profileId);
+        activeGameProfiles.add(gameProcessKey(profileId));
         gameStatus.textContent = `${profileId} 正在运行`;
         statusBadge.textContent = 'RUNNING';
         return { profileId, pid: 0 };
       });
     showToast(result.pid ? `游戏已启动（PID ${result.pid}）` : '游戏启动参数已生成');
   } catch (error) {
+    if (gameProcessKey('', launchDirectory) !== gameProcessKey('')) return;
     const message = readableError(error);
     gameStatus.textContent = '游戏启动失败';
     statusBadge.textContent = 'ERROR';
@@ -2483,6 +2585,10 @@ async function launchSelectedVersion() {
     } else if (requiredJava) {
       showToast(message, true);
       void openJavaSettings(Number(requiredJava[1]));
+    } else if ((error.code === 'GAME_FILES_INCOMPLETE' || /游戏文件不完整/.test(message)) && minecraft?.repairVersion) {
+      showProblem(error, '游戏文件需要补全', {
+        retryLabel: '补全文件并启动', retry: () => repairSelectedVersion(profileId, launchDirectory)
+      });
     } else {
       showProblem(error, '游戏启动失败');
     }
@@ -2502,7 +2608,7 @@ versionSelect.addEventListener('change', () => {
   refreshJavaReadiness();
   if (versionSelect.value) {
     gameStatus.textContent = `已选择 Minecraft ${versionSelect.value}`;
-    statusBadge.textContent = activeGameProfiles.has(versionSelect.value) ? 'RUNNING' : 'SELECTED';
+    statusBadge.textContent = activeGameProfiles.has(gameProcessKey(versionSelect.value)) ? 'RUNNING' : 'SELECTED';
     showToast(`已选择 Minecraft ${versionSelect.value}`);
   } else {
     gameStatus.textContent = '请选择游戏版本';

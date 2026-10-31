@@ -110,7 +110,7 @@ jobs:
           path: release-published
       - name: Publish verified draft or verify immutable existing release
         run: node scripts/publish-release.cjs release-published
-      - name: Sync all verified packages before changing Blob latest
+      - name: Sync verified Windows executables before changing Blob latest
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
         shell: bash

@@ -4,6 +4,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+function loadGameProcessKey(source, context) {
+  context.currentGameDirectory ??= '';
+  vm.runInContext(source.slice(source.indexOf('function gameProcessKey('),
+    source.indexOf('const reportedRecoveryFiles =')), context);
+}
+
 test('问题提示提供重新登录入口、保留错误信息并重置上次展开状态', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
   let shown = 0;
@@ -53,7 +59,7 @@ function loaderFixture() {
     loaderNames: { fabric: 'Fabric', vanilla: 'Vanilla' },
     minecraft: { listLoaders: () => new Promise((resolve) => { finish = resolve; }) },
     selectedRemoteVersion: () => context.gameVersion,
-    versionDownloadActive: false, versionDeleteActive: false, versionVerifyActive: false,
+    versionDownloadActive: false, fabricApiConfirmationActive: false, versionDeleteActive: false, versionVerifyActive: false,
     launchRequestActive: false, lastDownloadFailed: false,
     versionSelect: { value: '' }, versionEmpty: {},
     downloadVersionButton: {}, deleteVersionButton: {}, clearVersionSelectionButton: {},
@@ -62,7 +68,7 @@ function loaderFixture() {
   vm.createContext(context);
   vm.runInContext(source.slice(
     source.indexOf('function selectedLoaderVersion()'),
-    source.indexOf('async function verifyLocalVersionsAfterLoad()')
+    source.indexOf('function renderVersionCatalog(')
   ), context);
   return { context, finish: (versions) => finish({ versions }) };
 }
@@ -229,6 +235,7 @@ test('a game crash displays the saved diagnostic log while normal exit stays non
     showToast: (message) => toasts.push(message)
   };
   vm.createContext(context);
+  loadGameProcessKey(source, context);
   vm.runInContext(source.slice(source.indexOf('function updateLaunchButtonState()'),
     source.indexOf('let modpackUiModule;')), context);
   receive({ phase: 'running', targetId: 'game', logPath: '/logs/game.log' });
@@ -241,6 +248,68 @@ test('a game crash displays the saved diagnostic log while normal exit stays non
   assert.deepEqual(toasts, ['游戏已退出']);
   receive({ phase: 'exited', targetId: 'game', signal: 'SIGTERM', logError: 'EACCES' });
   assert.match(problems[1].message, /SIGTERM.*\n游戏日志保存失败（EACCES）/);
+
+  context.currentGameDirectory = 'C:\\游戏 B';
+  receive({ phase: 'running', targetId: 'game', gameDirectory: 'C:\\游戏 A' });
+  assert.equal(context.activeGameProfiles.has(context.gameProcessKey('game', 'c:/游戏 a/')), true);
+  context.updateLaunchButtonState();
+  assert.equal(context.launchButton.disabled, false, 'another directory must remain launchable');
+  receive({ phase: 'running', targetId: 'game', gameDirectory: 'C:\\游戏 B' });
+  assert.equal(context.launchButton.disabled, true);
+  const before = context.gameStatus.textContent;
+  receive({ phase: 'exited', targetId: 'game', gameDirectory: 'C:\\游戏 A', code: 1 });
+  assert.equal(context.gameStatus.textContent, before, 'another directory cannot overwrite the visible game status');
+  assert.equal(problems.length, 2, 'another directory cannot open a crash dialog over the current game');
+  assert.equal(context.activeGameProfiles.has(context.gameProcessKey('game', 'C:\\游戏 A')), false);
+  assert.equal(context.launchButton.disabled, true);
+});
+
+test('recovered storage is reported once with backup locations and a visible notice', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const errors = [];
+  const toasts = [];
+  const context = { window: { launcherEnvironment: { diagnostics: { reportError: (text) => errors.push(text) } } },
+    showToast: (text) => toasts.push(text) };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('const reportedRecoveryFiles ='), source.indexOf('let accountState =')), context);
+  const state = { recovery: { filePath: 'settings.json', backupPath: 'settings.json.bak', quarantinePath: 'settings.json.corrupt' } };
+  context.notifyStorageRecovery(state);
+  context.notifyStorageRecovery(state);
+  context.notifyStorageRecovery({ accounts: [] });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /settings.json.bak.*\n.*settings.json.corrupt/);
+  assert.equal(toasts.length, 1);
+  assert.match(toasts[0], /已从上次备份恢复/);
+});
+
+test('diagnostic export restores the button on success, cancellation and failure', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  let click;
+  let result = { canceled: true };
+  const messages = [];
+  const button = { disabled: false, addEventListener(_event, callback) { click = callback; } };
+  const context = {
+    document: { querySelector: (selector) => selector === '#problemExportReportButton'
+      ? button : { textContent: '错误代码：GAME_FILES_INCOMPLETE' } },
+    environment: { diagnostics: { exportReport: async (message) => {
+      assert.match(message, /GAME_FILES_INCOMPLETE/);
+      if (result instanceof Error) throw result;
+      return result;
+    } } },
+    showToast: (text) => messages.push(text), readableError: (error) => error.message
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf("document.querySelector('#problemExportReportButton')"),
+    source.indexOf('function openActiveTask()')), context);
+  await click({ currentTarget: button });
+  assert.equal(messages.length, 0);
+  result = { canceled: false, filePath: 'C:\\诊断报告.json' };
+  await click({ currentTarget: button });
+  assert.match(messages[0], /诊断报告已保存/);
+  result = new Error('ENOSPC');
+  await click({ currentTarget: button });
+  assert.match(messages[1], /导出失败.*ENOSPC/);
+  assert.equal(button.disabled, false);
 });
 
 test('saving once then reopening settings and pressing Esc never saves the new draft', async () => {
@@ -267,6 +336,7 @@ test('saving once then reopening settings and pressing Esc never saves the new d
     autoUpdateCheck: { checked: true }, launcherUpdatePolicySelect: { value: 'off' },
     settingsApi: { update: async (patch) => { updates.push(patch); return patch; } },
     applySettingsToForm() { context.memoryRange.value = String(context.launcherSettings.memoryMb); },
+    cancelFabricApiConfirmation() {},
     showToast() {}, readableError: (error) => error.message
   };
   vm.createContext(context);
@@ -325,7 +395,8 @@ function catalogFixture() {
     loaderTypeSelect: { value: 'vanilla' }, refreshVersionsButton: {}, versionEmpty: {},
     loaderVersions: [], loaderLoadToken: 0, loaderCatalogLoading: false,
     loaderNames: { vanilla: '原版', fabric: 'Fabric' },
-    versionDownloadActive: false, versionDeleteActive: false, versionVerifyActive: false,
+    versionDownloadActive: false, fabricApiConfirmationActive: false, fabricApiConfirmationToken: 0,
+    versionDeleteActive: false, versionVerifyActive: false,
     launchRequestActive: false, lastDownloadFailed: false,
     downloadVersionButton: {}, deleteVersionButton: {}, clearVersionSelectionButton: {},
     gameStatus: {}, statusBadge: {}, versionDialog: { close() {} }, versionCloseButtons: [], deleted: [],
@@ -342,7 +413,7 @@ function catalogFixture() {
   vm.createContext(context);
   for (const [start, end] of [
     ['function selectedRemoteVersion()', 'function renderLocalProfileOptions()'],
-    ['function localBaseProfiles()', 'async function verifyLocalVersionsAfterLoad()'],
+    ['function localBaseProfiles()', 'function renderVersionCatalog('],
     ['function renderVersionCatalog(', 'function invalidateVersionCatalogForDirectoryChange()'],
     ['async function loadVersionCatalog(', 'function clearVersionSelection()'],
     ['async function installSelectedVersion()', "wallpaperSelect.addEventListener('change'"]
@@ -405,6 +476,104 @@ test('local loader actions survive a failed loader request and merge without dup
   assert.equal(context.downloadVersionButton.textContent, '安装 Fabric');
 });
 
+async function installationFixture(loaderType = 'fabric') {
+  const { context } = catalogFixture();
+  await context.loadVersionCatalog();
+  context.loaderTypeSelect.value = loaderType;
+  context.loaderVersions = [{ version: '0.18.0', installed: false }];
+  context.loaderNames = { vanilla: '原版', fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' };
+  context.renderLoaderCatalog();
+  const installed = [], confirmations = [], problems = [];
+  Object.assign(context, {
+    currentGameDirectory: 'C:\\游戏 文件\\.minecraft',
+    launcherSettings: { gameDirectoryMode: 'local', isolateProfiles: true },
+    crypto: { randomUUID: () => 'test-install-task' },
+    requestFabricApiChoice: async (...args) => { confirmations.push(args); return { fabricApiVersionId: 'api-chosen' }; },
+    updateDownloadProgress() {}, showProblem: (...args) => problems.push(args)
+  });
+  for (const name of ['homeStatus', 'cancelDownloadButton', 'downloadStatus', 'downloadMessage',
+    'downloadStage', 'downloadPercent', 'homeCancelDownloadButton', 'taskButton']) context[name] = {};
+  context.downloadProgress = { hasAttribute: () => true };
+  context.minecraft.installLoader = async (request) => {
+    installed.push(request);
+    return { profileId: `${loaderType}-profile` };
+  };
+  return { context, installed, confirmations, problems };
+}
+
+test('new Fabric installation sends the chosen API or an explicit skip in the same bound-directory task', async () => {
+  for (const selected of ['api-chosen', null]) {
+    const { context, installed, confirmations } = await installationFixture();
+    if (selected === null) context.requestFabricApiChoice = async () => ({ fabricApiVersionId: null });
+    await context.installSelectedVersion();
+    assert.equal(installed.length, 1);
+    assert.equal(installed[0].fabricApiVersionId, selected);
+    assert.equal(installed[0].expectedGameDirectory, 'C:\\游戏 文件\\.minecraft');
+    assert.equal(installed[0].taskId, 'test-install-task');
+    assert.equal(installed[0].loaderType, 'fabric');
+    if (selected) assert.deepEqual(confirmations[0].slice(0, 2), ['1.21.1', '0.18.0']);
+    assert.equal(context.fabricApiConfirmationActive, false);
+    assert.equal(context.versionDownloadActive, false);
+  }
+});
+
+test('cancelling Fabric confirmation starts no download and duplicate clicks share the pending choice', async () => {
+  const { context, installed } = await installationFixture();
+  let finish, prompts = 0;
+  context.requestFabricApiChoice = () => { prompts += 1; return new Promise((resolve) => { finish = resolve; }); };
+  const pending = context.installSelectedVersion();
+  assert.equal(context.fabricApiConfirmationActive, true);
+  assert.equal(context.downloadVersionButton.disabled, true);
+  assert.equal(context.versionDownloadActive, false);
+  await context.installSelectedVersion();
+  assert.equal(prompts, 1);
+  finish(null);
+  await pending;
+  assert.equal(installed.length, 0);
+  assert.equal(context.fabricApiConfirmationActive, false);
+  assert.equal(context.downloadVersionButton.disabled, false);
+});
+
+test('Fabric choices cannot start installation after the directory, target or settings change', async () => {
+  for (const change of [
+    (context) => { context.currentGameDirectory = 'D:\\其他目录'; },
+    (context) => { context.launcherSettings.gameDirectoryMode = 'system'; },
+    (context) => { context.launcherSettings.isolateProfiles = false; },
+    (context) => { context.loaderTypeSelect.value = 'forge'; },
+    (context) => { context.loaderVersionSelect.value = 'another-loader'; },
+    (context) => { context.versionCatalog.value = 'another-game'; },
+    (context) => { context.fabricApiConfirmationToken += 1; context.fabricApiConfirmationActive = false; }
+  ]) {
+    const { context, installed } = await installationFixture();
+    let finish;
+    context.requestFabricApiChoice = () => new Promise((resolve) => { finish = resolve; });
+    const pending = context.installSelectedVersion();
+    change(context);
+    finish({ fabricApiVersionId: 'stale-choice' });
+    await pending;
+    assert.equal(installed.length, 0);
+    assert.equal(context.fabricApiConfirmationActive, false);
+  }
+});
+
+test('Fabric UI loading errors remain recoverable and other loaders never request the API prompt', async () => {
+  const { context, installed, problems } = await installationFixture();
+  context.requestFabricApiChoice = async () => { throw new Error('UI module unavailable'); };
+  await context.installSelectedVersion();
+  assert.equal(installed.length, 0);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0][1], /安装尚未开始/);
+  assert.equal(typeof problems[0][2].retry, 'function');
+  assert.equal(context.fabricApiConfirmationActive, false);
+  for (const type of ['vanilla', 'forge', 'neoforge', 'quilt']) {
+    const fixture = await installationFixture(type);
+    await fixture.context.installSelectedVersion();
+    assert.equal(fixture.confirmations.length, 0, type);
+    assert.equal(fixture.installed.length, 1, type);
+    assert.equal(Object.hasOwn(fixture.installed[0], 'fabricApiVersionId'), false, type);
+  }
+});
+
 function profileOptionsFixture({ profiles = [], remembered = '' } = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
   const options = [];
@@ -428,6 +597,7 @@ function profileOptionsFixture({ profiles = [], remembered = '' } = {}) {
     refreshJavaReadiness() {}
   };
   vm.createContext(context);
+  loadGameProcessKey(source, context);
   vm.runInContext(source.slice(
     source.indexOf('function renderLocalProfileOptions()'),
     source.indexOf('async function loadLocalProfiles(')
@@ -463,11 +633,67 @@ test('installed profiles still auto-select and honor a remembered selection', ()
   assert.match(remembered.gameStatus.textContent, /^已选择 fabric-loader/);
 });
 
+test('valid imported profiles stay selectable so launch can diagnose and repair missing files', () => {
+  const { context } = profileOptionsFixture({ profiles: [
+    { profileId: '中文 Forge 实例', valid: true, complete: false, loaderType: 'forge' },
+    { profileId: 'broken-json', valid: false, complete: false }
+  ] });
+  context.renderLocalProfileOptions();
+  assert.equal(context.versionSelect.value, '中文 Forge 实例');
+  assert.equal(context.versionSelect.options.find((option) => option.value === '中文 Forge 实例').disabled, false);
+  assert.match(context.versionSelect.options.find((option) => option.value === '中文 Forge 实例').textContent, /待验证或修复/);
+  assert.equal(context.versionSelect.options.some((option) => option.value === 'broken-json' && !option.disabled), false);
+});
+
+test('missing files offer repair and relaunch while a stale directory retry cannot repair another directory', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const calls = [];
+  const problems = [];
+  let attempts = 0;
+  const context = {
+    currentGameDirectory: 'C:\\游戏 A', launchRequestActive: false,
+    versionSelect: { value: '中文 Forge 实例', options: [{ value: '中文 Forge 实例' }] },
+    accountState: { current: { type: 'offline', name: 'Steve' } },
+    launchButton: { classList: { add() {} } },
+    launchLabel: {}, launchHint: {}, gameStatus: {}, statusBadge: {},
+    minecraft: {
+      launchVersion: async (id) => {
+        calls.push(['launch', id]);
+        if (++attempts === 1) throw Object.assign(new Error('游戏文件不完整'), { code: 'GAME_FILES_INCOMPLETE' });
+        return { pid: 123 };
+      },
+      repairVersion: async (id) => calls.push(['repair', id])
+    },
+    loadLocalProfiles: async () => calls.push(['reload']),
+    updateLaunchButtonState() {}, updateVersionAction() {},
+    readableError: (error) => error.message,
+    showProblem: (_error, _title, options) => problems.push(options),
+    showToast: (text) => calls.push(['toast', text])
+  };
+  vm.createContext(context);
+  loadGameProcessKey(source, context);
+  vm.runInContext(source.slice(source.indexOf('async function repairSelectedVersion('),
+    source.indexOf("versionSelect.addEventListener('change'")), context);
+  await context.launchSelectedVersion();
+  assert.equal(problems[0].retryLabel, '补全文件并启动');
+  await problems[0].retry();
+  assert.deepEqual(calls.slice(0, 4), [
+    ['launch', '中文 Forge 实例'], ['repair', '中文 Forge 实例'], ['reload'], ['launch', '中文 Forge 实例']
+  ]);
+  assert.equal(context.launchRequestActive, false);
+  context.currentGameDirectory = 'C:\\游戏 B';
+  const repairCount = calls.filter(([kind]) => kind === 'repair').length;
+  await problems[0].retry();
+  assert.equal(calls.filter(([kind]) => kind === 'repair').length, repairCount);
+  assert.match(calls.at(-1)[1], /目录已改变/);
+});
+
 test('launching without a version or account keeps a visible status instead of a fleeting toast', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
   let handler;
   const toasts = [];
   const context = {
+    launchRequestActive: false,
     launchButton: { addEventListener(_name, callback) { handler = callback; } },
     versionSelect: { value: '' },
     accountState: { current: null },
@@ -502,6 +728,7 @@ test('launch hint previews Java readiness for the selected version', () => {
     minecraft: undefined
   };
   vm.createContext(context);
+  loadGameProcessKey(source, context);
   vm.runInContext(source.slice(source.indexOf('function updateLaunchButtonState()'),
     source.indexOf('let modpackUiModule;')), context);
 
@@ -608,6 +835,7 @@ test('a launch failure caused by a missing Java offers the one-click fix dialog'
   const settingsOpened = [];
   const toasts = [];
   const context = {
+    launchRequestActive: false,
     launchButton: { addEventListener(_name, callback) { handler = callback; }, classList: { add() {} } },
     versionSelect: { value: '1.21.1' },
     accountState: { current: { type: 'offline', name: 'Steve' } },
@@ -626,6 +854,7 @@ test('a launch failure caused by a missing Java offers the one-click fix dialog'
     updateVersionAction() {}, updateLaunchButtonState() {}
   };
   vm.createContext(context);
+  loadGameProcessKey(source, context);
   vm.runInContext(source.slice(
     source.indexOf("launchButton.addEventListener('click'"),
     source.indexOf("versionSelect.addEventListener('change'")

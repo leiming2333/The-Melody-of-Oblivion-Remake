@@ -63,6 +63,12 @@ ipcMain.handle('diagnostics:copy-error', (_event, message) => {
   clipboard.writeText(require('./error-log').redactError(String(message)));
   return true;
 });
+ipcMain.handle('diagnostics:export-report', (event, message) => (
+  require('./diagnostics-report').exportDiagnosticsReport({
+    app, dialog, ownerWindow: BrowserWindow.fromWebContents(event.sender),
+    getSettings: () => getSettingsStore().getState(), message: String(message ?? '')
+  })
+));
 
 ipcMain.handle('shell:open-external', async (_event, url) => {
   const target = String(url ?? '');
@@ -152,14 +158,20 @@ function createWindow() {
       try {
         const valid = await mainWindow.webContents.executeJavaScript(`Boolean(
           document.querySelector('#launchButton') && document.querySelector('#accountDialog') &&
+          document.querySelector('#problemExportReportButton') &&
           !document.querySelector('#modsButton') && window.launcherEnvironment?.accounts?.getState &&
-          window.launcherEnvironment?.minecraft?.importModFile
+          window.launcherEnvironment?.minecraft?.importModFile &&
+          window.launcherEnvironment?.minecraft?.repairVersion &&
+          window.launcherEnvironment?.diagnostics?.exportReport &&
+          document.querySelector('#fabricApiDialog') &&
+          window.launcherEnvironment?.minecraft?.listFabricApiVersions
         )`);
         if (!valid) throw new Error('Smoke test: renderer or preload API missing');
         await mainWindow.webContents.executeJavaScript(`Promise.all([
           import('./modules/account-ui.mjs').then(m => typeof m.renderAccountList === 'function'),
           import('./modules/modpack-ui.mjs').then(m => typeof m.installDroppedModpack === 'function'),
-          import('./modules/launcher-update-ui.mjs').then(m => typeof m.createLauncherUpdateUi === 'function')
+          import('./modules/launcher-update-ui.mjs').then(m => typeof m.createLauncherUpdateUi === 'function'),
+          import('./modules/fabric-api-ui.mjs').then(m => typeof m.createFabricApiUi === 'function')
         ]).then(values => { if (!values.every(Boolean)) throw new Error('Missing renderer module'); })`);
         if (smokeResultPath) {
           await require('node:fs/promises').writeFile(smokeResultPath, JSON.stringify({

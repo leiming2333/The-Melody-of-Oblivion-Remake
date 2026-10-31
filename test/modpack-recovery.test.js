@@ -290,6 +290,23 @@ test('cleanup failures retain the original installation error and its retry deta
   });
 });
 
+test('cleanup failures after entering missing-file recovery remain visible and retryable', async t => {
+  const f = await fixture(t, { files: [{ projectID: 1, fileID: 11 }] });
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ data: metadata(11, 'restricted file') }));
+  const remove = fs.rm;
+  t.mock.method(fs, 'rm', async (target, options) => {
+    if (path.basename(target).startsWith('.installing-')) throw Object.assign(new Error('sharing lock'), { code: 'EPERM' });
+    return remove(target, options);
+  });
+  await assert.rejects(f.manager.install(f.archive), (error) => {
+    assert.equal(error.code, 'MODPACK_CLEANUP_FAILED');
+    assert.equal(error.phase, 'cleanup');
+    assert.equal(error.retryable, true);
+    assert.match(error.message, /清理失败/);
+    return true;
+  });
+});
+
 test('stale cleanup preserves staging owned by another live launcher process', async t => {
   const f = await fixture(t);
   const directory = await createStagingDirectory(f.gameDirectory, 'other-process');

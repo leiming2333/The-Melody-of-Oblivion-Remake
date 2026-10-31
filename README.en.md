@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#platform-coverage-and-prerequisites)
-[![Source](https://img.shields.io/badge/Source-v1.7.1-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.9.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> The current source version is `1.7.1`, with offline and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://melodyoblivion.xyz/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
+> The current source version is `1.9.0`, with Microsoft, offline, and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://melodyoblivion.xyz/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
 
 ## About this project
 
@@ -35,9 +35,9 @@ The current repository starts a new implementation; its version numbers and code
 ## What is implemented
 
 - **Game versions** — browse Mojang's version manifest, detect local installations, download Vanilla versions, verify required files, and move removable profiles to the recycle bin.
-- **Mod loaders** — discover and install Fabric, Forge, NeoForge, and Quilt through a shared workflow.
+- **Mod loaders** — discover and install Fabric, Forge, NeoForge, and Quilt through a shared workflow. A new Fabric installation offers a compatible Fabric API version selector, with an option to skip. Selected API files are checksum-verified and placed in the profile's active `mods` directory.
 - **Resilient downloads** — choose between Mojang-hosted endpoints and BMCLAPI, probe sources in automatic mode, use configurable task concurrency, split large files with HTTP Range requests, verify SHA-1 metadata, cancel active work, and retry alternate sources.
-- **Accounts** — create offline profiles or use LittleSkin Yggdrasil; sync skin avatars, refresh LittleSkin credentials before launch, and keep tokens out of the renderer process.
+- **Accounts** — use Microsoft device-code sign-in, offline profiles, or LittleSkin Yggdrasil; refresh online credentials before launch and keep tokens out of the renderer process. Optional LittleSkin skin lookup failures do not discard a successful login.
 - **Java management** — match the Java major version required by the selected game; scan system installations and managed runtimes. The home launch button previews Java readiness for the selected version, and a failed launch caused by a missing runtime offers a one-click download that retries automatically. Java 8, 16, 17, 21, or 25 can also be downloaded next to the Java path setting, with progress and cancellation. Downloads prefer Azul JRE and fall back to Adoptium, use parallel transfers, and verify SHA-256.
 - **Launch core** — resolve inherited version metadata, apply platform rules, assemble arguments and classpaths, extract native libraries safely, launch the Java process, and report its status. LittleSkin accounts automatically provision a SHA-256-verified authlib-injector.
 - **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instances with overrides, Fabric, Forge, NeoForge, and Quilt. A single confirmation shows the game, loader, and file counts; optional files are unchecked by default. Only remote resolution or download failures allow optional files to be skipped with a warning. Disk, permission, and security errors stop installation; required-file failures support retry. Restricted CurseForge files can be downloaded from their official pages, selected locally, and verified against trusted hashes before installation continues.

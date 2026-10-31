@@ -5,6 +5,10 @@ const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { setTimeout: delay } = require('node:timers/promises');
 const { SOURCES, fetchWithTimeout } = require('./source-manager');
+const { platformName, rulesAllow } = require('./platform-rules');
+const { validateProfileId } = require('./profile-id');
+const { validateVersionMetadata, validateAssetIndex, verifyJsonBytes } = require('./metadata-schema');
+const { readVersionMetadata } = require('./version-metadata');
 
 const fsPromises = fs.promises;
 const DEFAULT_FILE_CONCURRENCY = 32;
@@ -131,48 +135,8 @@ function isAbortError(error, signal) {
   return signal?.aborted || error?.name === 'AbortError';
 }
 
-function platformName() {
-  if (process.platform === 'win32') return 'windows';
-  if (process.platform === 'darwin') return 'osx';
-  return 'linux';
-}
-
-function ruleMatches(rule) {
-  if (rule.os) {
-    if (rule.os.name && rule.os.name !== platformName()) {
-      return false;
-    }
-
-    if (rule.os.arch) {
-      try {
-        if (!new RegExp(rule.os.arch).test(process.arch)) {
-          return false;
-        }
-      } catch {
-        return false;
-      }
-    }
-  }
-
-  if (rule.features) {
-    return Object.values(rule.features).every((required) => required === false);
-  }
-
-  return true;
-}
-
 function isLibraryAllowed(library) {
-  if (!library.rules?.length) {
-    return true;
-  }
-
-  let allowed = false;
-  for (const rule of library.rules) {
-    if (ruleMatches(rule)) {
-      allowed = rule.action === 'allow';
-    }
-  }
-  return allowed;
+  return rulesAllow(library.rules);
 }
 
 function mavenPathFromName(name) {
@@ -205,15 +169,17 @@ function markerEntry(gameDirectory, task) {
     label: task.label,
     path: relativePath.split(path.sep).join('/'),
     sha1: task.sha1,
+    sha256: task.sha256,
     size: Number.isFinite(task.size) ? task.size : undefined
   };
 }
 
-async function writeInstallationMarker(gameDirectory, profileId, tasks = []) {
+async function writeInstallationMarker(gameDirectory, profileId, tasks = [], { coversInheritance = false } = {}) {
   const files = deduplicateTasks(tasks).map((task) => markerEntry(gameDirectory, task));
   await writeJsonAtomic(installationMarkerPath(gameDirectory, profileId), {
     schemaVersion: 1,
     profileId,
+    coversInheritance,
     completedAt: new Date().toISOString(),
     files
   });
@@ -225,7 +191,8 @@ async function hasValidInstallationMarker(gameDirectory, profileId) {
       installationMarkerPath(gameDirectory, profileId),
       'utf8'
     ));
-    if (marker.schemaVersion !== 1 || marker.profileId !== profileId || !Array.isArray(marker.files)) {
+    if (marker.schemaVersion !== 1 || marker.profileId !== profileId
+        || !Array.isArray(marker.files) || marker.files.length === 0) {
       return false;
     }
 
@@ -245,8 +212,8 @@ async function hasValidInstallationMarker(gameDirectory, profileId) {
 }
 
 
-async function fileSha1(filePath, signal) {
-  const hash = crypto.createHash('sha1');
+async function fileDigest(filePath, algorithm, signal) {
+  const hash = crypto.createHash(algorithm);
   for await (const chunk of fs.createReadStream(filePath)) {
     throwIfAborted(signal);
     hash.update(chunk);
@@ -255,13 +222,14 @@ async function fileSha1(filePath, signal) {
 }
 
 async function fileMatches(filePath, options = {}) {
-  const { sha1, size, signal } = options;
+  const { sha1, sha256, size, signal } = options;
   try {
     const stat = await fsPromises.stat(filePath);
     if (!stat.isFile()) return false;
-    if (!sha1 && !Number.isFinite(size) && stat.size === 0) return false;
+    if (!sha1 && !sha256 && !Number.isFinite(size) && stat.size === 0) return false;
     if (Number.isFinite(size) && stat.size !== size) return false;
-    if (sha1 && (await fileSha1(filePath, signal)) !== sha1) return false;
+    if (sha1 && (await fileDigest(filePath, 'sha1', signal)) !== String(sha1).toLowerCase()) return false;
+    if (sha256 && (await fileDigest(filePath, 'sha256', signal)) !== String(sha256).toLowerCase()) return false;
     return true;
   } catch (error) {
     if (isAbortError(error, signal)) throw createAbortError();
@@ -286,12 +254,16 @@ async function replaceFileAtomic(temporary, destination, signal) {
 }
 
 async function writeJsonAtomic(destination, value) {
+  return writeBytesAtomic(destination, Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'));
+}
+
+async function writeBytesAtomic(destination, bytes) {
   await fsPromises.mkdir(path.dirname(destination), { recursive: true });
   const temporary = `${destination}.${process.pid}-${crypto.randomUUID()}.part`;
   try {
     const file = await fsPromises.open(temporary, 'wx', 0o600);
     try {
-      await file.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+      await file.writeFile(bytes);
       await file.sync();
     } finally {
       await file.close();
@@ -302,6 +274,17 @@ async function writeJsonAtomic(destination, value) {
   } finally {
     await fsPromises.rm(temporary, { force: true }).catch(() => {});
   }
+}
+
+function metadataDocument(result, integrity, validate, label) {
+  // Source-manager returns the actual HTTP bytes. Minimal injected adapters
+  // without integrity metadata may still supply a parsed document.
+  const bytes = result.bytes ?? (integrity.sha1 === undefined && integrity.size === undefined
+    ? Buffer.from(JSON.stringify(result.data), 'utf8') : undefined);
+  verifyJsonBytes(bytes, integrity, label);
+  const data = JSON.parse(bytes.toString('utf8'));
+  validate(data);
+  return { data, bytes };
 }
 
 
@@ -602,7 +585,12 @@ function libraryTasks(metadata, gameDirectory, sourceManager, preferredSourceId)
     }
 
     const classifierName = nativeClassifier(library);
-    const classifier = classifierName ? library.downloads?.classifiers?.[classifierName] : undefined;
+    let classifier = classifierName ? library.downloads?.classifiers?.[classifierName] : undefined;
+    if (classifierName && !classifier) {
+      const fallbackPath = mavenPathFromName(`${library.name}:${classifierName}`);
+      if (fallbackPath) classifier = { path: fallbackPath,
+        url: new URL(fallbackPath, library.url ?? 'https://libraries.minecraft.net/').toString() };
+    }
     if (classifier?.path && classifier.url) {
       tasks.push({
         label: `原生库 ${library.name}`,
@@ -874,16 +862,13 @@ class MinecraftDownloader {
 
   async verifyVersion(versionId, onProgress = () => {}, { signal } = {}) {
     throwIfAborted(signal);
-    if (!/^[0-9A-Za-z._-]{1,80}$/.test(versionId)) {
-      throw new Error('Minecraft 版本号格式无效');
-    }
+    versionId = validateProfileId(versionId);
 
-    const versionRoot = safePath(this.gameDirectory, 'versions', versionId);
-    const metadataPath = safePath(versionRoot, `${versionId}.json`);
     let metadata;
     try {
-      metadata = JSON.parse(await fsPromises.readFile(metadataPath, 'utf8'));
-    } catch {
+      metadata = await readVersionMetadata(this.gameDirectory, versionId);
+    } catch (error) {
+      throwIfAborted(signal);
       await fsPromises.rm(installationMarkerPath(this.gameDirectory, versionId), { force: true });
       return {
         versionId,
@@ -891,25 +876,27 @@ class MinecraftDownloader {
         checkedFiles: 1,
         totalFiles: 1,
         missingCount: 1,
-        missingFiles: ['版本配置文件']
+        missingFiles: [`版本配置文件：${error.message}`]
       };
     }
 
-    const requiredTasks = [{
-      label: '版本配置文件',
-      destination: metadataPath
-    }];
-    if (metadata.downloads?.client) {
+    const requiredTasks = metadata.metadataChain.map((entry) => ({
+      label: `版本配置文件 ${entry.profileId}`,
+      destination: entry.metadataPath
+    }));
+    const clientJarId = metadata.clientJarId;
+    const clientDestination = safePath(this.gameDirectory, 'versions', clientJarId, `${clientJarId}.jar`);
+    if (metadata.clientDownload) {
       requiredTasks.push({
         label: `Minecraft ${versionId} 客户端`,
-        destination: safePath(versionRoot, `${versionId}.jar`),
-        sha1: metadata.downloads.client.sha1,
-        size: metadata.downloads.client.size
+        destination: clientDestination,
+        sha1: metadata.clientDownload.sha1,
+        size: metadata.clientDownload.size
       });
     } else {
       requiredTasks.push({
         label: `Minecraft ${versionId} 客户端`,
-        destination: safePath(versionRoot, `${versionId}.jar`)
+        destination: clientDestination
       });
     }
 
@@ -933,9 +920,12 @@ class MinecraftDownloader {
         'indexes',
         `${assetIndexId}.json`
       );
-      requiredTasks.push({ label: '资源索引', destination: assetIndexPath });
+      requiredTasks.push({ label: '资源索引', destination: assetIndexPath,
+        sha1: metadata.assetIndex?.sha1, size: metadata.assetIndex?.size });
       try {
-        const assetIndex = JSON.parse(await fsPromises.readFile(assetIndexPath, 'utf8'));
+        const bytes = await fsPromises.readFile(assetIndexPath);
+        verifyJsonBytes(bytes, metadata.assetIndex ?? {}, '资源索引');
+        const assetIndex = validateAssetIndex(JSON.parse(bytes.toString('utf8')));
         requiredTasks.push(...assetTasks(
           assetIndex,
           this.gameDirectory,
@@ -955,7 +945,7 @@ class MinecraftDownloader {
     await runPool(verificationTasks, Math.min(8, this.concurrency), async (task, _index, poolSignal) => {
       throwIfAborted(poolSignal);
       if (!(await fileMatches(task.destination, { ...task, signal: poolSignal }))) {
-        missing.push(task.label);
+        if (!(assetIndexInvalid && task.label === '资源索引')) missing.push(task.label);
       }
       checkedFiles += 1;
       if (Date.now() - lastProgressAt >= 180 || checkedFiles === verificationTasks.length) {
@@ -966,7 +956,7 @@ class MinecraftDownloader {
 
     const complete = missing.length === 0;
     if (complete) {
-      await writeInstallationMarker(this.gameDirectory, versionId, verificationTasks);
+      await writeInstallationMarker(this.gameDirectory, versionId, verificationTasks, { coversInheritance: true });
     } else {
       await fsPromises.rm(installationMarkerPath(this.gameDirectory, versionId), { force: true });
     }
@@ -980,11 +970,101 @@ class MinecraftDownloader {
     };
   }
 
+  async repairVersion(profileId, onProgress = () => {}, { signal } = {}) {
+    throwIfAborted(signal);
+    profileId = validateProfileId(profileId);
+    onProgress({ phase: 'preparing', versionId: profileId, message: '正在读取本地版本配置…' });
+    let metadata;
+    try {
+      metadata = await readVersionMetadata(this.gameDirectory, profileId);
+    } catch (cause) {
+      throwIfAborted(signal);
+      throw Object.assign(new Error(`启动配置缺失或损坏，无法安全补全，请重新安装该版本：${cause.message}`, { cause }),
+        { code: 'GAME_METADATA_INVALID', phase: 'preparing', retryable: false });
+    }
+    await fsPromises.rm(installationMarkerPath(this.gameDirectory, profileId), { force: true });
+    const preferredSourceId = this.sourceManager.downloadPreference === 'bmclapi' ? 'bmclapi' : 'official';
+    const tasks = [];
+    const clientJarId = metadata.clientJarId;
+    const client = metadata.clientDownload;
+    const clientTask = { label: `Minecraft ${clientJarId} 客户端`,
+      destination: safePath(this.gameDirectory, 'versions', clientJarId, `${clientJarId}.jar`),
+      sha1: client?.sha1, size: client?.size };
+    if (client?.url) {
+      tasks.push({ ...clientTask, urls: this.sourceManager.getCandidateUrls('client',
+        { versionId: clientJarId, originalUrl: client.url }, preferredSourceId) });
+    } else if (!(await fileMatches(clientTask.destination, { ...clientTask, signal }))) {
+      throw Object.assign(new Error(`客户端 ${clientJarId} 缺少可信下载地址，请重新安装该版本`),
+        { code: 'GAME_REPAIR_UNAVAILABLE', phase: 'preparing', retryable: false });
+    }
+    tasks.push(...libraryTasks(metadata, this.gameDirectory, this.sourceManager, preferredSourceId));
+    const logging = metadata.logging?.client?.file;
+    if (logging?.id) {
+      const task = { label: '日志配置', destination: safePath(this.gameDirectory, 'assets', 'log_configs', logging.id),
+        sha1: logging.sha1, size: logging.size };
+      if (logging.url) {
+        tasks.push({ ...task, urls: this.sourceManager.getCandidateUrls('logging',
+          { originalUrl: logging.url }, preferredSourceId) });
+      } else if (!(await fileMatches(task.destination, { ...task, signal }))) {
+        throw Object.assign(new Error('日志配置缺少可信下载地址，请重新安装该版本'),
+          { code: 'GAME_REPAIR_UNAVAILABLE', phase: 'preparing', retryable: false });
+      }
+    }
+
+    const assetIndexId = metadata.assetIndex?.id ?? metadata.assets;
+    let assetIndex = { objects: {} };
+    if (assetIndexId) {
+      const indexPath = safePath(this.gameDirectory, 'assets', 'indexes', `${assetIndexId}.json`);
+      try {
+        const bytes = await fsPromises.readFile(indexPath);
+        verifyJsonBytes(bytes, metadata.assetIndex ?? {}, '资源索引');
+        assetIndex = validateAssetIndex(JSON.parse(bytes.toString('utf8')));
+      } catch (cause) {
+        throwIfAborted(signal);
+        if (cause.code && !['ENOENT', 'INVALID_MINECRAFT_METADATA'].includes(cause.code)) throw cause;
+        if (!metadata.assetIndex?.url) {
+          throw Object.assign(new Error('资源索引缺失或损坏，且缺少可信下载地址，请重新安装该版本', { cause }),
+            { code: 'GAME_REPAIR_UNAVAILABLE', phase: 'preparing', retryable: false });
+        }
+        onProgress({ phase: 'preparing', versionId: profileId, message: '正在重新获取资源索引…' });
+        const result = await this.sourceManager.fetchJsonFromSources('asset-index',
+          { originalUrl: metadata.assetIndex.url }, preferredSourceId,
+          { signal, sha1: metadata.assetIndex.sha1, size: metadata.assetIndex.size, validate: validateAssetIndex });
+        throwIfAborted(signal);
+        const document = metadataDocument(result, metadata.assetIndex, validateAssetIndex, '资源索引');
+        await writeBytesAtomic(indexPath, document.bytes);
+        assetIndex = document.data;
+      }
+      tasks.push(...assetTasks(assetIndex, this.gameDirectory, this.sourceManager, preferredSourceId));
+    }
+
+    const downloadTasks = deduplicateTasks(tasks);
+    const tracker = createDownloadProgressTracker({ tasks: downloadTasks, onProgress,
+      phase: 'downloading', baseProgress: { versionId: profileId }, initialSourceId: preferredSourceId });
+    tracker.start(`正在检查并补全 ${downloadTasks.length} 个游戏文件`);
+    await runPool(downloadTasks, this.concurrency, async (task, _index, poolSignal) => {
+      const result = await downloadFile({ ...task, signal: poolSignal,
+        segmentConcurrency: this.segmentConcurrency, ...tracker.hooks(task) });
+      tracker.complete(task, result);
+    }, signal);
+    if (assetIndexId) await materializeLegacyAssets(assetIndex, assetIndexId, this.gameDirectory, signal);
+    const verification = await this.verifyVersion(profileId, (progress) => onProgress({
+      ...progress, phase: 'verifying', message: '正在验证补全后的游戏文件…'
+    }), { signal });
+    if (!verification.complete) {
+      throw Object.assign(new Error(`补全后仍有游戏文件缺失或损坏：${verification.missingFiles.join('、')}`),
+        { code: 'GAME_FILES_INCOMPLETE', phase: 'verifying', retryable: true, details: verification });
+    }
+    const progress = tracker.snapshot();
+    onProgress({ phase: 'complete', versionId: profileId, message: `${profileId} 游戏文件补全完成`,
+      completedFiles: progress.totalFiles, totalFiles: progress.totalFiles,
+      completedBytes: progress.totalBytes, totalBytes: progress.totalBytes });
+    return { ...verification, profileId, gameDirectory: this.gameDirectory, repaired: true };
+  }
+
   async installVersion(versionId, onProgress = () => {}, { signal } = {}) {
     throwIfAborted(signal);
-    if (!/^[0-9A-Za-z._-]{1,80}$/.test(versionId)) {
-      throw new Error('Minecraft 版本号格式无效');
-    }
+    versionId = validateProfileId(versionId);
 
     onProgress({ phase: 'preparing', message: '正在获取版本清单…', versionId });
     const { manifest, source } = await this.sourceManager.getVersionManifest({ signal });
@@ -1004,10 +1084,13 @@ class MinecraftDownloader {
       'version-json',
       { versionId, originalUrl: versionEntry.url },
       source.id,
-      { signal }
+      { signal, sha1: versionEntry.sha1, size: versionEntry.size,
+        validate: (value) => validateVersionMetadata(value, versionId) }
     );
     throwIfAborted(signal);
-    const metadata = metadataResult.data;
+    const metadataDocumentResult = metadataDocument(metadataResult, versionEntry,
+      (value) => validateVersionMetadata(value, versionId), '版本配置');
+    const metadata = metadataDocumentResult.data;
     let downloadSource = metadataResult.source;
     if (metadata.downloads?.client?.url) {
       onProgress({
@@ -1032,7 +1115,7 @@ class MinecraftDownloader {
       versionId, sourceLabel: downloadSource.label, sourceThroughput: downloadSource.throughput,
       sourcePreference: this.sourceManager.downloadPreference });
     const versionRoot = safePath(this.gameDirectory, 'versions', versionId);
-    await writeJsonAtomic(safePath(versionRoot, `${versionId}.json`), metadata);
+    await writeBytesAtomic(safePath(versionRoot, `${versionId}.json`), metadataDocumentResult.bytes);
 
     let assetIndex = { objects: {} };
     let assetIndexId = metadata.assetIndex?.id ?? metadata.assets;
@@ -1042,13 +1125,15 @@ class MinecraftDownloader {
         'asset-index',
         { originalUrl: metadata.assetIndex.url },
         preferredSourceId,
-        { signal }
+        { signal, sha1: metadata.assetIndex.sha1, size: metadata.assetIndex.size,
+          validate: validateAssetIndex }
       );
       throwIfAborted(signal);
-      assetIndex = assetIndexResult.data;
-      await writeJsonAtomic(
+      const assetDocument = metadataDocument(assetIndexResult, metadata.assetIndex, validateAssetIndex, '资源索引');
+      assetIndex = assetDocument.data;
+      await writeBytesAtomic(
         safePath(this.gameDirectory, 'assets', 'indexes', `${assetIndexId}.json`),
-        assetIndex
+        assetDocument.bytes
       );
     }
 
@@ -1116,13 +1201,15 @@ class MinecraftDownloader {
     }
 
     const markerTasks = [
-      { label: '版本配置文件', destination: safePath(versionRoot, `${versionId}.json`) },
+      { label: '版本配置文件', destination: safePath(versionRoot, `${versionId}.json`),
+        sha1: versionEntry.sha1, size: metadataDocumentResult.bytes.length },
       ...downloadTasks
     ];
     if (assetIndexId) {
       markerTasks.push({
         label: '资源索引',
-        destination: safePath(this.gameDirectory, 'assets', 'indexes', `${assetIndexId}.json`)
+        destination: safePath(this.gameDirectory, 'assets', 'indexes', `${assetIndexId}.json`),
+        sha1: metadata.assetIndex?.sha1, size: metadata.assetIndex?.size
       });
     }
     await writeInstallationMarker(this.gameDirectory, versionId, markerTasks);

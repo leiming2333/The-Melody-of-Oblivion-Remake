@@ -3,11 +3,11 @@
 ## 当前状态
 
 - Vercel 静态输出目录是仓库根目录 `.`；`.vercelignore` 忽略 `release/`，因此本地安装包不会被当前网站部署上传。
-- 本地 `release/` 中现有 Windows 产物约为 89.6 MiB（EXE）和 139.4 MiB（ZIP）。这只是已找到的 Windows 样本，不代表最新 Release 的全部平台产物；正式估算应在 CI 对当前 Release 的全部 `.exe`、`.zip`、`.AppImage` 求和。
+- 本地 `release/` 中已有约 89.6 MiB 的 Windows EXE 样本。Blob 容量应按当前 Release 的 Windows x64、ia32、arm64 三个 EXE 大小之和估算；macOS ZIP 和 Linux AppImage 不纳入同步范围。
 - GitHub Actions 会为安装包生成 `.sha256` 文件并保留在 GitHub Releases；站点日志仍从 GitHub Release API 读取。
 - `download` Public Blob Store 已连接到网站项目，启用了 `BLOB_READ_WRITE_TOKEN`，区域为 HKG1。
-- 网站和 Release 工作流现已支持 Blob：工作流发布 GitHub Release 后重新下载公开资产、计算 SHA-256、上传至 `releases/<tag>/`，最后更新 `releases/latest.json`。网站默认从 Blob 下载；对象不存在时回退 GitHub。
-- 启动器更新也优先读取网站 `/api/latest-release` 的 Blob 清单，并直接下载所选平台的公共 Blob URL。Blob 连接失败、停滞或速度过慢时，按清单中的 `github_download_url` 切换 GitHub 镜像与官方源；若清单接口回退 GitHub，启动器先尝试网站 `/api/download?source=blob`。更新包仍校验大小和 SHA-256，客户端无需 Blob 写入令牌。这些行为随新的启动器构建生效。
+- 网站和 Release 工作流现已支持 Blob：GitHub Releases 仍发布完整八包及校验文件；Blob 只同步 Windows x64、ia32、arm64 三个 portable EXE，上传至 `releases/<tag>/` 并回读校验后，最后更新仅含这三个 EXE 的 `releases/latest.json`。Windows 对象不存在时回退 GitHub，macOS、Linux 下载继续使用 GitHub。
+- 网站 `/api/latest-release` 先核实 GitHub 最新版本，再合并同版本、同大小、同 SHA-256 的 Blob 下载地址；Windows 更新可直接下载公共 Blob URL，macOS、Linux 资产保留 GitHub 地址。Blob 连接失败、停滞或速度过慢时，按清单中的 `github_download_url` 切换 GitHub 镜像与官方源；若资产仍使用 GitHub 地址，启动器先尝试网站 `/api/download?source=blob`，对象不存在时由该接口回退 GitHub。更新包仍校验大小和 SHA-256，客户端无需 Blob 写入令牌。
 - 自动同步还需要在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加 `BLOB_READ_WRITE_TOKEN`。该值应从 Vercel Blob Store 凭据中取得，不要提交到仓库。
 - 已有 Release 可在 GitHub Actions 中运行 **Sync an existing release to Vercel Blob**，输入 tag（例如 `v1.6.1`）进行首次回填。
 
@@ -15,9 +15,9 @@
 
 1. Public Blob Store 已创建并连接项目。Public Blob 的读取 URL 可公开访问，写入凭据必须保密。
 2. 将 `BLOB_READ_WRITE_TOKEN` 添加为 GitHub 仓库 Actions Secret，使 Release workflow 可以上传对象。Vercel 项目自身已通过 Store 连接获得该变量。
-3. Release workflow 在发布 GitHub Release 后下载公开资产，运行 `scripts/sync-release-to-blob.mjs` 上传。路径固定为 `releases/<tag>/<asset-name>`；不同 tag 不会互相覆盖，同一 tag 重跑会更新对应对象。
+3. Release workflow 在发布完整 GitHub Release 后，运行 `scripts/sync-release-to-blob.mjs`，仅上传 Windows x64、ia32、arm64 三个 portable EXE。手动回填只从 GitHub 下载 `*-Windows-*.exe` 和 `release-manifest.json`。对象路径固定为 `releases/<tag>/<asset-name>`；不同 tag 不会互相覆盖，同一 tag 仅允许相同发布清单的幂等重跑。
 
-4. 上传脚本逐个计算 SHA-256，并最后写出稳定清单 `releases/latest.json`。字段与当前实现一致：
+4. 上传脚本先核对三个 Windows EXE 的大小、SHA-256 与完整发布清单，逐个上传并回读验证。完整 `release-manifest.json` 原样保存为 `releases/<tag>/manifest.json`，用于来源验证和同标签不可变校验；其中保留八个平台的构建记录，不表示这些包都已同步至 Blob。最后写出的 `releases/latest.json` 仅列出三个 Windows EXE，以下为其中一项：
 
 ```json
 {
@@ -35,9 +35,9 @@
 }
 ```
 
-5. 只有全部资产上传成功后才更新 `releases/latest.json`，避免网站指向未完成的上传。
-6. `api/latest-release.js` 从 Blob 清单读取版本、下载 URL 和校验值；页面默认直接下载 Blob URL，其他线路及 GitHub 原始链接继续保留。
-7. 配置 GitHub Actions Secret 后，创建一个测试 Release 验证 Windows、macOS、Linux 下载、SHA-256、Range/断点续传和 GitHub 回退链路。若 Secret 尚未配置，Release 会正常发布到 GitHub，但 Blob 同步会跳过并给出警告。
+5. 只有三个 Windows EXE 都上传并回读校验成功后才更新 `releases/latest.json`，避免网站指向未完成的上传；回填旧版本不会覆盖已知的更新版本。
+6. `api/latest-release.js` 核实 GitHub 最新发布与校验值，仅为匹配的 Windows 资产合并 Blob 下载 URL。macOS、Linux 和其他 GitHub 资产继续保留，页面的其他线路及 GitHub 原始链接也保留。
+7. 配置 GitHub Actions Secret 后，创建一个测试 Release 验证 Windows Blob 下载、SHA-256、Range/断点续传和 GitHub 回退链路，并确认 macOS、Linux 仍从 GitHub 下载。若 Secret 尚未配置，Release 会正常发布到 GitHub，但 Blob 同步会跳过并给出提示。
 
 ### 浏览器直传结构（备选）
 
@@ -45,7 +45,7 @@
 
 ## 免费额度粗算
 
-按任务输入的免费额度假设：1 GB 存储、每月 10 GB 传输。单个约 90 MiB 的 EXE 约可存 11 份，约 114 次完整下载会消耗 10 GiB 传输；约 139 MiB 的 ZIP 约可存 7 份，约 74 次完整下载会消耗 10 GiB 传输。多平台资产和所有用户下载共用传输额度，实际容量按当月所有资产流量累计；旧版本保留越多，越快触及 1 GB 存储上限。删除旧 Blob 可回收存储，但不能依赖它减少已发生的传输量。
+按任务输入的免费额度假设：1 GB 存储、每月 10 GB 传输。单个约 90 MiB 的 Windows EXE 约可存 11 份，约 114 次完整下载会消耗 10 GiB 传输；若三个架构均按该样本估算，每个版本约占 270 MiB，约可保留三个完整版本。正式估算须使用当前三个 EXE 的实际大小，并计入清单及已存历史对象。三个 Windows 架构及所有用户的 Blob 下载共用额度，传输量按当月实际读取累计；macOS ZIP 和 Linux AppImage 的 GitHub 下载不计入 Blob 用量。删除旧 Blob 可回收存储，但不能依赖它减少已发生的传输量。
 
 以上是按样本大小的数量级估算，不是 Vercel 当前计费承诺。上线前应在 Vercel 控制台复核账号适用计划、当期免费额度、超额单价、带宽计量方式和缓存命中规则；超过免费额度可能产生费用或影响服务，需设置用量告警和旧版本保留策略。
 
@@ -53,7 +53,7 @@
 
 - 公共 Blob URL 可被任何持有链接的人访问；不要上传账户数据、配置文件或非公开构建物。
 - Blob URL 的公开访问不保证中国大陆链路一定快。先小流量验证不同运营商的首字节时间、完整下载和 Range 请求，再考虑切换默认下载线路。
-- 上传成功但清单未更新会留下孤立 Blob；清单先更新则可能产生失效链接。按“上传全部资产 → 校验 → 发布清单”的顺序执行。
+- 上传成功但清单未更新会留下孤立 Blob；清单先更新则可能产生失效链接。按“上传三个 Windows EXE → 回读校验 → 发布清单”的顺序执行。
 - 误删或替换 Blob 会破坏旧 Release 的可用性。采用 tag 版本化路径，生产环境避免复用对象名或覆写已发布文件。
 - 保留 GitHub Releases URL 及现有镜像选项作为回退；清单、Blob 或配额异常时可将网站默认线路切回 GitHub，并在 Vercel 用量恢复后再评估迁移。
 

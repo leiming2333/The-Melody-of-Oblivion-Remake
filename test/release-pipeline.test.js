@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { targets, matrix } = require('../scripts/release-targets.cjs');
+const windowsTargets = targets.filter(target => target.platform === 'win32');
 const { versions, assertToolchain } = require('../scripts/toolchain.cjs');
 const { selectTarget } = require('../scripts/build.cjs');
 const { hashFile, prepareRelease, collectPackages, verifyManifest } = require('../scripts/release-assets.cjs');
@@ -169,10 +170,10 @@ test('publication rejects a moved or unrelated tag before creating or changing a
   assert.match(commands[0][1], /\/commits\//);
 });
 
-test('Blob latest only changes after every package digest is verified', async t => {
+test('Blob only syncs Windows executables and changes latest after every Windows digest is verified', async t => {
   const { syncRelease } = await import('../scripts/sync-release-to-blob.mjs');
   const f = await fixture(t);
-  await f.prepare();
+  const manifest = await f.prepare();
   const metadataPath = path.join(f.output, 'release.json');
   await fs.writeFile(metadataPath, JSON.stringify({ tagName: `v${version}`, name: 'test' }));
   const blobs = new Map();
@@ -187,7 +188,7 @@ test('Blob latest only changes after every package digest is verified', async t 
     fetchUrl: async url => {
       const key = url.slice('https://blob.invalid/'.length);
       const contents = blobs.get(key);
-      return new Response(fail && key.endsWith(targets[2].filename) ? 'corrupt' : contents, { status: contents ? 200 : 404 });
+      return new Response(fail && key.endsWith(windowsTargets[2].filename) ? 'corrupt' : contents, { status: contents ? 200 : 404 });
     }
   };
   await assert.rejects(syncRelease(f.output, `v${version}`, metadataPath, options), /digest mismatch/);
@@ -195,9 +196,12 @@ test('Blob latest only changes after every package digest is verified', async t 
   assert.deepEqual(deleted, []);
   fail = false;
   assert.equal((await syncRelease(f.output, `v${version}`, metadataPath, options)).latestUpdated, true);
-  assert.equal(JSON.parse(blobs.get('releases/latest.json')).assets.length, 8);
+  const latest = JSON.parse(blobs.get('releases/latest.json'));
+  assert.deepEqual(latest.assets.map(asset => asset.name).sort(), windowsTargets.map(target => target.filename).sort());
+  assert.deepEqual(latest.assets.map(asset => asset.platform).sort(), ['Windows-arm64', 'Windows-ia32', 'Windows-x64']);
+  assert.deepEqual(JSON.parse(blobs.get(`releases/v${version}/manifest.json`)), manifest);
   assert.deepEqual([...blobs.keys()].filter(key => key.startsWith(`releases/v${version}/`) && /\.(?:exe|zip|AppImage)$/.test(key)).sort(),
-    targets.map(target => `releases/v${version}/${target.filename}`).sort());
+    windowsTargets.map(target => `releases/v${version}/${target.filename}`).sort());
   assert.deepEqual(blobs.get('releases/v0.0.1/The-Melody-of-Oblivion-Remake-Windows-x64.exe'), Buffer.from('old tag'));
   blobs.set('releases/latest.json', Buffer.from(JSON.stringify({ tag_name: 'v999.0.0' })));
   assert.equal((await syncRelease(f.output, `v${version}`, metadataPath, options)).latestUpdated, false);
@@ -208,4 +212,48 @@ test('Blob latest only changes after every package digest is verified', async t 
   blobs.set(immutableKey, Buffer.from(JSON.stringify(conflicting)));
   await assert.rejects(syncRelease(f.output, `v${version}`, metadataPath, options), /immutable/);
   assert.equal(JSON.parse(blobs.get('releases/latest.json')).tag_name, 'v999.0.0');
+});
+
+test('Blob accepts Windows-only downloads and rejects missing, duplicate or modified Windows packages before uploading', async t => {
+  const { syncRelease } = await import('../scripts/sync-release-to-blob.mjs');
+  const f = await fixture(t);
+  await f.prepare();
+  for (const target of targets.filter(target => target.platform !== 'win32')) {
+    await fs.rm(path.join(f.output, target.filename));
+  }
+  const metadataPath = path.join(f.output, 'release.json');
+  await fs.writeFile(metadataPath, JSON.stringify({ tagName: `v${version}` }));
+  const blobs = new Map();
+  const options = {
+    token: 'fixture',
+    listBlobs: async () => ({ blobs: [] }),
+    putBlob: async (pathname, contents) => {
+      blobs.set(pathname, Buffer.from(contents));
+      return { url: `https://blob.invalid/${pathname}` };
+    },
+    fetchUrl: async url => new Response(blobs.get(url.slice('https://blob.invalid/'.length)))
+  };
+  const sync = () => syncRelease(f.output, `v${version}`, metadataPath, options);
+  for (const target of windowsTargets) {
+    const file = path.join(f.output, target.filename);
+    const contents = await fs.readFile(file);
+    await fs.rm(file);
+    await assert.rejects(sync(), /Missing or duplicate package/);
+    await fs.writeFile(file, Buffer.alloc(0));
+    await assert.rejects(sync(), /Empty release package/);
+    await fs.writeFile(file, Buffer.alloc(contents.length, 'x'));
+    await assert.rejects(sync(), /Release manifest mismatch/);
+    await fs.writeFile(file, contents);
+    assert.equal(blobs.size, 0);
+  }
+  const duplicate = path.join(f.output, 'duplicate', windowsTargets[0].filename);
+  await fs.mkdir(path.dirname(duplicate));
+  await fs.copyFile(path.join(f.output, windowsTargets[0].filename), duplicate);
+  await assert.rejects(sync(), /Missing or duplicate package/);
+  assert.equal(blobs.size, 0);
+  await fs.rm(duplicate);
+  const result = await sync();
+  assert.equal(result.latestUpdated, true);
+  assert.deepEqual(result.assets.map(asset => asset.name).sort(), windowsTargets.map(target => target.filename).sort());
+  assert.equal(blobs.size, windowsTargets.length + 2);
 });

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     whenWindowShown: () => ipcRenderer.invoke('startup:when-window-shown'),
     rendererReady: () => ipcRenderer.invoke('startup:renderer-ready'),
     copyError: (message) => ipcRenderer.invoke('diagnostics:copy-error', String(message)),
+    exportReport: (message) => ipcRenderer.invoke('diagnostics:export-report', String(message ?? '')),
     reportError: (message) => ipcRenderer.send('diagnostics:error', String(message))
   }),
   windowControls: Object.freeze({
@@ -49,10 +50,12 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
       { gameVersion, loaderType, ...options }
     ),
     installLoader: (request) => invokeTask('minecraft:install-loader', request),
+    listFabricApiVersions: (gameVersion, options = {}) => invokeTask('minecraft:list-fabric-api-versions', gameVersion, options),
     cancelDownload: (options = {}) => invokeTask('minecraft:cancel-download', options),
     verifyVersion: (versionId) => ipcRenderer.invoke('minecraft:verify-version', versionId),
+    repairVersion: (targetId, options = {}) => invokeTask('minecraft:repair-version', targetId, options),
     deleteVersion: (profileId) => ipcRenderer.invoke('minecraft:delete-version', profileId),
-    launchVersion: (profileId) => ipcRenderer.invoke('minecraft:launch-version', profileId),
+    launchVersion: (profileId) => invokeTask('minecraft:launch-version', profileId),
     listMods: targetId => ipcRenderer.invoke('minecraft:list-mods', targetId),
     setModEnabled: (targetId, name, enabled) => ipcRenderer.invoke('minecraft:set-mod-enabled', targetId, name, enabled),
     importModFile: (targetId, filePath) => ipcRenderer.invoke('minecraft:import-mod-file', targetId, filePath),
@@ -111,9 +114,6 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     cancelMicrosoft: (sessionId) => ipcRenderer.invoke('accounts:cancel-microsoft', sessionId),
     loginLittleSkin: (username, password) => (
       ipcRenderer.invoke('accounts:login-littleskin', username, password)
-    ),
-    selectLittleSkinProfile: (sessionId, profileId) => (
-      ipcRenderer.invoke('accounts:select-littleskin-profile', sessionId, profileId)
     ),
     onMicrosoftProgress: (callback) => {
       const listener = (_event, progress) => callback(progress);

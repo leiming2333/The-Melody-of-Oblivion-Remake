@@ -49,11 +49,12 @@ function registerMinecraftIpc({
   getJavaProbeCache = () => javaProbeCache
 }) {
   const activeDownloads = new Map();
+  const gameProcesses = new (require('./game-process-registry').GameProcessRegistry)();
   let gameDirectory;
   let services;
   let serviceSettings;
 
-  async function ensureMinecraftServices(settings, preparingTask) {
+  async function ensureMinecraftServices(settings, preparingTask, onBound) {
     const settingsStore = getSettingsStore();
     const currentSettings = settings ?? (settingsStore
       ? await settingsStore.getState()
@@ -62,6 +63,7 @@ function registerMinecraftIpc({
     if (preparingTask?.controller.signal.aborted) throw createTaskError('TASK_CANCELLED', '下载已取消');
     if (gameDirectory === requestedDirectory) {
       if (preparingTask) Object.assign(preparingTask, { directory: gameDirectory, preparing: false });
+      onBound?.({ directory: gameDirectory, services });
       return currentSettings;
     }
     if ([...activeDownloads.values()].some((task) => task !== preparingTask && !task.preparing)) {
@@ -99,6 +101,10 @@ function registerMinecraftIpc({
         manager.javaPath = config.javaPath;
         return manager;
       },
+      fabricApiManager: () => {
+        const { FabricApiManager } = require('./fabric-api-manager');
+        return new FabricApiManager(transferOptions());
+      },
       versionManager: () => {
         const { MinecraftVersionManager } = require('./version-manager');
         return new MinecraftVersionManager({ gameDirectory: directory, trashItem: (target) => shell.trashItem(target) });
@@ -119,7 +125,9 @@ function registerMinecraftIpc({
       },
       launcher: (registry) => {
         const { MinecraftLauncher } = require('./launch-core');
-        const launcher = new MinecraftLauncher({ gameDirectory: directory, javaRuntime: registry.javaRuntime });
+        const launcher = new MinecraftLauncher({ gameDirectory: directory, javaRuntime: registry.javaRuntime,
+          activeGames: gameProcesses.forDirectory(directory),
+          verifyFiles: (profileId, onProgress) => registry.downloader.verifyVersion(profileId, onProgress) });
         return launcher;
       },
       authlibInjector: () => {
@@ -128,6 +136,7 @@ function registerMinecraftIpc({
       }
     });
     if (preparingTask) Object.assign(preparingTask, { directory: gameDirectory, preparing: false });
+    onBound?.({ directory: gameDirectory, services });
     return currentSettings;
   }
 
@@ -147,7 +156,7 @@ function registerMinecraftIpc({
     sourceManager?.setDownloadPreference(settings.downloadSource);
     const concurrency = settings.downloadConcurrency;
     const segmentConcurrency = Math.min(12, Math.max(4, Math.floor(concurrency / 2)));
-    for (const name of ['downloader', 'loaderManager', 'modpackManager']) {
+    for (const name of ['downloader', 'loaderManager', 'modpackManager', 'fabricApiManager']) {
       const manager = services.peek(name);
       if (manager) Object.assign(manager, { concurrency, segmentConcurrency });
     }
@@ -351,10 +360,50 @@ function registerMinecraftIpc({
     );
   });
 
+  let fabricApiCatalog;
+  registerTaskHandler(ipcMain, 'minecraft:list-fabric-api-versions', (_event, gameVersion, options = {}) => {
+    const { FabricApiManager } = require('./fabric-api-manager');
+    fabricApiCatalog ??= new FabricApiManager({});
+    return fabricApiCatalog.listVersions(gameVersion, { force: options.force === true });
+  });
+
   registerTaskHandler(ipcMain, 'minecraft:install-loader', (event, request = {}) => (
     runDownloadTask(event, 'loader', async (signal, report, task) => {
-      await applyDownloadSettings(task);
-      return services.loaderManager.installLoader(request, report, { signal });
+      const withFabricApi = request.fabricApiVersionId != null;
+      if (withFabricApi && request.loaderType !== 'fabric') {
+        throw createTaskError('FABRIC_API_INCOMPATIBLE', 'Fabric API 只能随 Fabric 加载器安装');
+      }
+      const settings = await applyDownloadSettings(task);
+      const directory = gameDirectory;
+      const selectedServices = services;
+      const directoryKey = (value) => process.platform === 'win32'
+        ? path.resolve(value).toLowerCase() : path.resolve(value);
+      if (request.expectedGameDirectory && (typeof request.expectedGameDirectory !== 'string'
+          || directoryKey(request.expectedGameDirectory) !== directoryKey(directory))) {
+        throw createTaskError('GAME_DIRECTORY_CHANGED', '游戏目录已改变，请重新选择版本后安装');
+      }
+      if (withFabricApi) {
+        if (gameProcesses.isBusy(directory)) {
+          throw createTaskError('GAME_RUNNING', '请先关闭当前目录中运行的游戏，再安装 Fabric API');
+        }
+        report({ phase: 'preparing', message: '正在核对 Fabric API 版本兼容性…' });
+        await selectedServices.fabricApiManager.resolveVersion(request.gameVersion, request.fabricApiVersionId, { signal });
+        if (signal.aborted) throw createTaskError('TASK_CANCELLED', '下载已取消');
+      }
+      const result = await selectedServices.loaderManager.installLoader(request, (progress) => report({
+        ...progress, phase: withFabricApi && progress.phase === 'complete' ? 'loader-ready' : progress.phase
+      }), { signal });
+      if (!withFabricApi) return result;
+      if (signal.aborted) throw createTaskError('TASK_CANCELLED', '下载已取消');
+      const { profileGameDirectory } = require('./launch-target');
+      const instanceDirectory = settings.isolateProfiles !== false
+        ? profileGameDirectory(directory, result.profileId) : directory;
+      const fabricApi = await selectedServices.fabricApiManager.installVersion({
+        gameVersion: request.gameVersion, versionId: request.fabricApiVersionId, instanceDirectory
+      }, report, { signal });
+      report({ phase: 'complete', message: 'Fabric 和 Fabric API 安装完成',
+        profileId: result.profileId, gameDirectory: directory });
+      return { ...result, fabricApi };
     }, request)
   ));
 
@@ -385,60 +434,87 @@ function registerMinecraftIpc({
     });
   });
 
+  registerTaskHandler(ipcMain, 'minecraft:repair-version', (event, targetId, options = {}) => (
+    runDownloadTask(event, 'repair-version', async (signal, report, task) => {
+      await applyDownloadSettings(task);
+      const directory = gameDirectory;
+      const downloader = services.downloader;
+      if (gameProcesses.isBusy(directory)) throw new Error('请先关闭当前目录中运行的游戏，再补全游戏文件');
+      const { resolveLaunchTarget } = require('./launch-target');
+      const instance = await resolveLaunchTarget(directory, String(targetId ?? ''));
+      return downloader.repairVersion(instance?.profileId ?? targetId, report, { signal });
+    }, options)
+  ));
+
   ipcMain.handle('minecraft:delete-version', async (_event, profileId) => {
     if (activeDownloads.size > 0) {
       throw new Error('请先等待下载完成或取消下载，再删除游戏版本');
     }
     await ensureMinecraftServices();
+    if (gameProcesses.isBusy(gameDirectory)) throw new Error('请先关闭当前目录中运行的游戏，再删除游戏版本');
     return services.versionManager.deleteProfile(profileId);
   });
 
-  ipcMain.handle('minecraft:launch-version', async (event, profileId) => {
+  registerTaskHandler(ipcMain, 'minecraft:launch-version', async (event, profileId) => {
     if (activeDownloads.size > 0) {
       throw new Error('请先等待下载完成或取消下载，再启动游戏');
     }
-    const accountStore = getAccountStore();
     const settingsStore = getSettingsStore();
-    let currentAccount = accountStore ? await accountStore.getCurrentAccount() : undefined;
-    if (currentAccount?.type === 'microsoft') {
-      const auth = getMicrosoftAuth();
-      if (!auth) throw new Error('Microsoft 登录服务不可用，请重新登录');
-      try {
-        currentAccount = await auth.ensureAccount(currentAccount);
-      } catch (error) {
-        if (error.code !== 'MICROSOFT_AUTH_EXPIRED') throw error;
-        await accountStore.signOut(currentAccount.id);
-        throw new Error('Microsoft 登录已过期，已自动退出，请重新登录');
-      }
-    }
-    if (currentAccount?.type === 'yggdrasil') {
-      const yggdrasilAuth = getYggdrasilAuth();
-      if (yggdrasilAuth) currentAccount = await yggdrasilAuth.ensureAccount(currentAccount);
-    }
     const settings = settingsStore
       ? await settingsStore.getState()
       : { gameDirectoryMode: 'local', memoryMb: 4096 };
-    await ensureMinecraftServices(settings);
+    let binding;
+    // Bind synchronously inside service selection, before another request can
+    // switch the shared current-directory pointer after this await completes.
+    await ensureMinecraftServices(settings, undefined, (selected) => { binding = selected; });
+    const { directory: launchDirectory, services: launchServices } = binding;
+    const requestedTargetId = String(profileId ?? '');
+    const directoryGames = gameProcesses.forDirectory(launchDirectory);
+    const preparingKey = `preparing:${requestedTargetId}`;
+    if ([directoryGames.get(requestedTargetId), directoryGames.get(preparingKey)]
+      .some((game) => game && game.exitCode == null)) {
+      throw new Error(`${requestedTargetId} 已经在运行中或正在准备启动`);
+    }
+    const reservation = { exitCode: null, preparing: true };
+    directoryGames.set(preparingKey, reservation);
     const sendStatus = (status) => {
-      if (!event.sender.isDestroyed()) event.sender.send('minecraft:launch-status', status);
+      if (!event.sender.isDestroyed()) event.sender.send('minecraft:launch-status', { ...status, gameDirectory: launchDirectory });
     };
     try {
+      sendStatus({ phase: 'preparing', profileId: requestedTargetId, targetId: requestedTargetId });
+      const accountStore = getAccountStore();
+      let currentAccount = accountStore ? await accountStore.getCurrentAccount() : undefined;
+      if (currentAccount?.type === 'microsoft') {
+        const auth = getMicrosoftAuth();
+        if (!auth) throw new Error('Microsoft 登录服务不可用，请重新登录');
+        try {
+          currentAccount = await auth.ensureAccount(currentAccount);
+        } catch (error) {
+          if (error.code !== 'MICROSOFT_AUTH_EXPIRED') throw error;
+          await accountStore.signOut(currentAccount.id);
+          throw new Error('Microsoft 登录已过期，已自动退出，请重新登录');
+        }
+      }
+      if (currentAccount?.type === 'yggdrasil') {
+        const yggdrasilAuth = getYggdrasilAuth();
+        if (yggdrasilAuth) currentAccount = await yggdrasilAuth.ensureAccount(currentAccount);
+      }
+      if (activeDownloads.size > 0) throw new Error('请先等待下载完成或取消下载，再启动游戏');
       const { resolveLaunchTarget, profileGameDirectory } = require('./launch-target');
-      const requestedTargetId = String(profileId ?? '');
-      const instance = await resolveLaunchTarget(gameDirectory, requestedTargetId);
+      const instance = await resolveLaunchTarget(launchDirectory, requestedTargetId);
       const authlibInjectorPath = currentAccount?.type === 'yggdrasil'
-        ? await services.authlibInjector.ensureInstalled((progress) => sendStatus({
+        ? await launchServices.authlibInjector.ensureInstalled((progress) => sendStatus({
             phase: 'authlib-injector',
             profileId: instance?.profileId ?? requestedTargetId,
             targetId: requestedTargetId,
             ...progress
           }))
         : undefined;
-      return await services.launcher.launch({
+      return await launchServices.launcher.launch({
         profileId: instance?.profileId ?? requestedTargetId,
         targetId: requestedTargetId,
         instanceDirectory: instance?.instanceDirectory ?? (settings.isolateProfiles !== false
-          ? profileGameDirectory(gameDirectory, requestedTargetId) : undefined),
+          ? profileGameDirectory(launchDirectory, requestedTargetId) : undefined),
         account: currentAccount,
         memoryMb: settings.memoryMb,
         javaPath: settings.javaPath,
@@ -455,6 +531,8 @@ function registerMinecraftIpc({
         message: error.message
       });
       throw error;
+    } finally {
+      if (directoryGames.get(preparingKey) === reservation) directoryGames.delete(preparingKey);
     }
   });
 
@@ -462,7 +540,7 @@ function registerMinecraftIpc({
   const getModManager = () => modManager ??= new (require('./mod-manager').ModManager)();
   async function targetDirectory(targetId, mutate = false) {
     const settings = await ensureMinecraftServices();
-    if (mutate && (activeDownloads.size || services.peek('launcher')?.activeGames?.size)) {
+    if (mutate && (activeDownloads.size || gameProcesses.isBusy(gameDirectory))) {
       throw new Error('请先关闭游戏并等待安装完成，再修改 Mod');
     }
     const root = gameDirectory;

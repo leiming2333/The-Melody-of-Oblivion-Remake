@@ -45,6 +45,18 @@ test('redirected Mod directories are rejected', async t => {
   await assert.rejects(manager.list(a), /不能是链接/);
 });
 
+test('Mod toggling works without hard links and still preserves conflicting files', async t => {
+  const { manager, source, a } = await fixture(t);
+  await manager.importFile(a, source);
+  t.mock.method(fs, 'link', async () => { throw Object.assign(new Error('Unsupported'), { code: 'ENOTSUP' }); });
+  await manager.setEnabled(a, 'sample.jar', false);
+  assert.equal(await fs.readFile(path.join(a, 'mods', 'sample.jar.disabled'), 'utf8'), 'fixture mod');
+  await fs.writeFile(path.join(a, 'mods', 'sample.jar'), 'do not overwrite');
+  await assert.rejects(manager.setEnabled(a, 'sample.jar.disabled', true), /同名/);
+  assert.equal(await fs.readFile(path.join(a, 'mods', 'sample.jar'), 'utf8'), 'do not overwrite');
+  assert.equal(await fs.readFile(path.join(a, 'mods', 'sample.jar.disabled'), 'utf8'), 'fixture mod');
+});
+
 test('Mod IPC imports into the selected profile and opens the same isolated directory', async t => {
   const { registerMinecraftIpc } = require('../src/main/minecraft/ipc');
   const { profileGameDirectory } = require('../src/main/minecraft/launch-target');

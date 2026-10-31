@@ -1,18 +1,14 @@
-const fs = require('node:fs');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { ESLint } = require('eslint');
 
-function sourceFiles(directory) {
-  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(directory, entry.name);
-    return entry.isDirectory() ? sourceFiles(file) : /\.(?:c|m)?js$/.test(file) ? [file] : [];
-  });
+async function check() {
+  const eslint = new ESLint();
+  // ESLint's parser checks syntax as well as the selected correctness rules.
+  const results = await eslint.lintFiles(['site.js', 'src', 'api', 'scripts', 'test', 'eslint.config.js']);
+  const formatter = await eslint.loadFormatter('stylish');
+  const report = formatter.format(results);
+  if (report) process.stdout.write(report);
+  if (results.some((result) => result.errorCount > 0)) process.exitCode = 1;
+  else console.log(`Syntax and lint checked ${results.length} JavaScript files`);
 }
 
-const files = ['site.js', ...['src', 'api', 'scripts', 'test'].flatMap(sourceFiles)];
-for (const file of files) {
-  const result = spawnSync(process.execPath, ['--check', file], { stdio: 'inherit', windowsHide: true });
-  if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
-}
-console.log(`Syntax checked ${files.length} JavaScript files`);
+void check().catch((error) => { console.error(error.message); process.exitCode = 1; });

@@ -816,8 +816,7 @@ class ModpackManager {
       const stagingDirectory = await createStagingDirectory(session.gameDirectory, instanceId);
       const warnings = [...cleanupWarnings];
       let committed = false;
-      let primaryError;
-      try {
+      const install = async () => {
         throwIfAborted(signal);
 
         let files = pack.files.filter((file) => file.required !== false || installOptionalFiles);
@@ -981,22 +980,27 @@ class ModpackManager {
         });
         this.sessions.delete(session.sessionId);
         return result;
+      };
+      let primaryError;
+      let outcome;
+      try {
+        outcome = await install();
       } catch (error) {
         primaryError = error;
-        throw error;
-      } finally {
-        if (!committed) {
-          try { await removeStagingDirectory(session.gameDirectory, stagingDirectory); }
-          catch (cleanupError) {
-            if (primaryError) {
-              primaryError.details = { ...primaryError.details,
-                cleanupMessage: `临时文件清理失败，将在下次启动时重试：${cleanupError.message}` };
-            }
-            else throw modpackError(`临时文件清理失败，将在下次启动时重试：${cleanupError.message}`,
-              'MODPACK_CLEANUP_FAILED', 'cleanup', true, cleanupError);
+      }
+      if (!committed) {
+        try { await removeStagingDirectory(session.gameDirectory, stagingDirectory); }
+        catch (cleanupError) {
+          if (primaryError) {
+            primaryError.details = { ...primaryError.details,
+              cleanupMessage: `临时文件清理失败，将在下次启动时重试：${cleanupError.message}` };
           }
+          else primaryError = modpackError(`临时文件清理失败，将在下次启动时重试：${cleanupError.message}`,
+            'MODPACK_CLEANUP_FAILED', 'cleanup', true, cleanupError);
         }
       }
+      if (primaryError) throw primaryError;
+      return outcome;
     }, { signal, onProgress });
   }
 

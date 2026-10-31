@@ -1,24 +1,17 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { hasInstallationMarker, safePath } = require('./installation-files');
+const { readInstallationMarkerState, safePath } = require('./installation-files');
 const { cleanupStaleStaging } = require('./modpack-staging');
-
-const PROFILE_ID_PATTERN = /^[0-9A-Za-z._+-]{1,120}$/;
-
-function validateProfileId(profileId) {
-  const normalized = String(profileId ?? '');
-  if (!PROFILE_ID_PATTERN.test(normalized) || normalized === '.' || normalized === '..') {
-    throw new Error('游戏版本 ID 格式无效');
-  }
-  return normalized;
-}
+const { PROFILE_ID_PATTERN, validateProfileId } = require('./profile-id');
+const { validateVersionMetadata } = require('./metadata-schema');
 
 async function readProfileMetadata(versionsRoot, profileId) {
   try {
     const metadataPath = safePath(versionsRoot, profileId, `${profileId}.json`);
-    return JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+    return validateVersionMetadata(JSON.parse(await fs.readFile(metadataPath, 'utf8')), profileId);
   } catch (error) {
-    if (error.code === 'ENOENT' || error instanceof SyntaxError) return undefined;
+    if (error.code === 'ENOENT' || error instanceof SyntaxError
+        || error.code === 'INVALID_MINECRAFT_METADATA' || error.message === '游戏版本 ID 格式无效') return undefined;
     throw error;
   }
 }
@@ -27,7 +20,7 @@ function detectLoaderType(metadata, profileId) {
   const description = [
     profileId,
     metadata?.mainClass,
-    ...(metadata?.libraries ?? []).map((library) => library?.name)
+    ...(Array.isArray(metadata?.libraries) ? metadata.libraries : []).map((library) => library?.name)
   ].filter(Boolean).join(' ').toLowerCase();
   if (description.includes('quilt')) return 'quilt';
   if (description.includes('fabric')) return 'fabric';
@@ -81,6 +74,8 @@ class MinecraftVersionManager {
           ? metadata.inheritsFrom
           : undefined;
         const loaderType = detectLoaderType(metadata, entry.name);
+        const marker = valid ? await readInstallationMarkerState(this.gameDirectory, entry.name)
+          : { complete: false, coversInheritance: false };
         return {
           profileId: entry.name,
           displayName: inheritsFrom && loaderType !== 'custom' ? inheritsFrom : entry.name,
@@ -89,27 +84,27 @@ class MinecraftVersionManager {
           inheritsFrom,
           loaderType,
           valid,
-          markerComplete: valid
-            ? await hasInstallationMarker(this.gameDirectory, entry.name)
-            : false
+          markerComplete: marker.complete,
+          markerCoversInheritance: marker.coversInheritance
         };
       })));
 
     const byId = new Map(profiles.map((profile) => [profile.profileId, profile]));
-    function isComplete(profile, visiting = new Set()) {
-      if (!profile.markerComplete || visiting.has(profile.profileId)) return false;
+    function isComplete(profile, visiting = new Set(), covered = false) {
+      if (!profile.valid || (!covered && !profile.markerComplete) || visiting.has(profile.profileId)) return false;
       if (!profile.inheritsFrom) return true;
       const parent = byId.get(profile.inheritsFrom);
       if (!parent) return false;
       const nextVisiting = new Set(visiting);
       nextVisiting.add(profile.profileId);
-      return isComplete(parent, nextVisiting);
+      return isComplete(parent, nextVisiting, covered || profile.markerCoversInheritance);
     }
 
     const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
-    const publicProfiles = profiles.map(({ markerComplete: _markerComplete, ...profile }) => ({
+    const publicProfiles = profiles.map(({ markerComplete: _markerComplete,
+      markerCoversInheritance: _markerCoversInheritance, ...profile }) => ({
       ...profile,
-      complete: isComplete({ ...profile, markerComplete: _markerComplete }),
+      complete: isComplete({ ...profile, markerComplete: _markerComplete, markerCoversInheritance: _markerCoversInheritance }),
       requiredJavaVersion: resolveRequiredJavaVersion(profile.profileId, metadataById)
     }));
 

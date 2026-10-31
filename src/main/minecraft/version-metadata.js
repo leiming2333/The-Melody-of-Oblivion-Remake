@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const { safePath } = require('./installation-files');
-const { validateProfileId } = require('./version-manager');
+const { validateProfileId } = require('./profile-id');
+const { validateVersionMetadata } = require('./metadata-schema');
 
 function libraryKey(library) {
   const parts = String(library?.name ?? '').split(':');
@@ -34,6 +35,7 @@ function mergeMetadata(parent, child) {
       libraries: [...(child.libraries ?? [])],
       minecraftArguments: child.minecraftArguments ?? '',
       clientJarId: child.jar ?? child.id,
+      clientDownload: child.downloads?.client,
       clientReleaseTime: child.releaseTime ?? child.time
     };
   }
@@ -48,6 +50,9 @@ function mergeMetadata(parent, child) {
     libraries: mergeLibraries(parent.libraries, child.libraries),
     minecraftArguments: legacyArguments,
     clientJarId: child.jar ?? parent.clientJarId,
+    clientDownload: child.jar && child.jar !== parent.clientJarId
+      ? child.downloads?.client
+      : child.downloads?.client ?? parent.clientDownload,
     clientReleaseTime: child.jar
       ? child.releaseTime ?? child.time
       : parent.clientReleaseTime
@@ -73,6 +78,7 @@ async function readVersionMetadata(gameDirectory, profileId, visited = new Set()
     if (error instanceof SyntaxError) throw new Error(`游戏版本 ${validatedId} 的启动配置已损坏`);
     throw error;
   }
+  validateVersionMetadata(child, validatedId);
   if (child.id && child.id !== validatedId) {
     throw new Error(`游戏版本目录与启动配置 ID 不一致：${validatedId}`);
   }
@@ -81,7 +87,10 @@ async function readVersionMetadata(gameDirectory, profileId, visited = new Set()
     ? await readVersionMetadata(gameDirectory, child.inheritsFrom, visited)
     : undefined;
   visited.delete(validatedId);
-  return mergeMetadata(parent, { ...child, id: validatedId });
+  return {
+    ...mergeMetadata(parent, { ...child, id: validatedId }),
+    metadataChain: [...(parent?.metadataChain ?? []), { profileId: validatedId, metadataPath }]
+  };
 }
 
 

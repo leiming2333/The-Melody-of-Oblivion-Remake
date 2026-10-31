@@ -38,22 +38,52 @@ function combinedSignal(signal, timeoutMs = 15000) {
 }
 
 async function requestJson(fetchImpl, url, options = {}, timeoutMs = 15000) {
+  const signal = combinedSignal(options.signal, timeoutMs);
   let response;
   try {
     response = await fetchImpl(url, {
       ...options,
-      signal: combinedSignal(options.signal, timeoutMs)
+      signal
     });
+    if (response.status === 204) return { response, payload: {} };
+    let payload;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      // Error pages need not be JSON; preserve their HTTP status for diagnostics.
+      if (!(error instanceof SyntaxError) || response.ok) throw error;
+      payload = {};
+    }
+    if (signal.aborted) throw signal.reason;
+    return { response, payload };
   } catch (error) {
-    if (options.signal?.aborted) throw new Error('LittleSkin 登录已取消');
-    if (error.name === 'TimeoutError') throw new Error('LittleSkin 服务连接超时');
-    throw new Error(`LittleSkin 服务连接失败：${error.message}`);
+    let message = `LittleSkin 服务连接失败：${error.message}`;
+    let code = 'NETWORK_ERROR';
+    if (options.signal?.aborted) { message = 'LittleSkin 登录已取消'; code = 'TASK_CANCELLED'; }
+    else if (signal.reason?.name === 'TimeoutError' || error.name === 'TimeoutError') {
+      message = 'LittleSkin 服务连接超时'; code = 'ETIMEDOUT';
+    } else if (error instanceof SyntaxError) {
+      message = 'LittleSkin 服务返回了无效的 JSON 响应，请稍后重试'; code = 'YGGDRASIL_INVALID_RESPONSE';
+    }
+    throw Object.assign(new Error(message, { cause: error }), { code,
+      retryable: ['NETWORK_ERROR', 'ETIMEDOUT'].includes(code) });
   }
-  let payload = {};
-  try {
-    payload = await response.json();
-  } catch {}
-  return { response, payload };
+}
+
+function responseError(result, fallback, { expired = false } = {}) {
+  const status = result.response.status;
+  const cause = new Error(`LittleSkin HTTP ${status}`);
+  if (status >= 500 || status === 429) {
+    return Object.assign(new Error(`LittleSkin 服务暂时不可用（HTTP ${status}），请稍后重试`, { cause }),
+      { code: 'NETWORK_ERROR', status, retryable: true });
+  }
+  if (expired && [401, 403].includes(status)) {
+    return Object.assign(new Error('LittleSkin 登录已过期，请在账户管理中重新登录', { cause }),
+      { code: 'YGGDRASIL_AUTH_EXPIRED', status, retryable: false });
+  }
+  return Object.assign(new Error(`${readableProviderError(result.payload, fallback)}（HTTP ${status}）`, { cause }),
+    { code: result.response.ok ? 'YGGDRASIL_INVALID_RESPONSE' : 'YGGDRASIL_AUTH_FAILED', status,
+      retryable: false });
 }
 
 function postJson(fetchImpl, endpoint, body, signal) {
@@ -83,7 +113,6 @@ class YggdrasilAuthManager {
   constructor({ accountStore, fetchImpl = fetch } = {}) {
     this.accountStore = accountStore;
     this.fetchImpl = fetchImpl;
-    this.sessions = new Map();
   }
 
   async fetchProfile(profileId, signal) {
@@ -100,19 +129,24 @@ class YggdrasilAuthManager {
     };
   }
 
-  async saveAccount({ accessToken, clientToken, profile, signal }) {
+  async saveAccount({ accessToken, clientToken, profile, signal, select = true }) {
     if (!accessToken || !clientToken) throw new Error('LittleSkin 没有返回可用的登录令牌');
     const selectedProfile = normalizeProfile(profile);
-    const texture = await this.fetchProfile(selectedProfile.id, signal);
-    return this.accountStore.upsertYggdrasil({
+    if (signal?.aborted) throw Object.assign(new Error('LittleSkin 登录已取消'), { code: 'TASK_CANCELLED' });
+    const credentials = {
       name: selectedProfile.name,
       uuid: hyphenateProfileId(selectedProfile.id),
       accessToken,
       clientToken,
-      skinUrl: normalizeSkinUrl(texture.skinUrl, ['littleskin.cn']),
-      skinModel: texture.skinModel,
       authServer: LITTLE_SKIN_API,
       serverName: LITTLE_SKIN_NAME
+    };
+    // A rotated token must survive even if optional texture lookup subsequently fails.
+    const state = await this.accountStore.upsertYggdrasil(credentials, { select });
+    const texture = await this.fetchProfile(selectedProfile.id, signal).catch(() => ({}));
+    if (!texture.skinUrl) return state;
+    return this.accountStore.updateYggdrasilTexture(`littleskin:${credentials.uuid}`, {
+      skinUrl: normalizeSkinUrl(texture.skinUrl, ['littleskin.cn']), skinModel: texture.skinModel
     });
   }
 
@@ -124,12 +158,12 @@ class YggdrasilAuthManager {
       requestUser: true
     }, signal);
     if (!result.response.ok || !result.payload?.accessToken || !result.payload?.selectedProfile) {
-      throw new Error(readableProviderError(result.payload, 'LittleSkin 角色选择失败'));
+      throw responseError(result, 'LittleSkin 角色选择失败', { expired: true });
     }
     return result.payload;
   }
 
-  async login(ownerId, username, password) {
+  async login(username, password) {
     const normalizedUsername = String(username ?? '').trim();
     const normalizedPassword = String(password ?? '');
     if (!normalizedUsername || normalizedUsername.length > 254) {
@@ -147,7 +181,7 @@ class YggdrasilAuthManager {
       requestUser: true
     });
     if (!result.response.ok || !result.payload?.accessToken) {
-      throw new Error(readableProviderError(result.payload, 'LittleSkin 登录失败'));
+      throw responseError(result, 'LittleSkin 登录失败');
     }
 
     const returnedClientToken = result.payload.clientToken || clientToken;
@@ -161,7 +195,10 @@ class YggdrasilAuthManager {
       };
     }
 
-    const profiles = (result.payload.availableProfiles ?? []).map(normalizeProfile);
+    if (!Array.isArray(result.payload.availableProfiles)) {
+      throw Object.assign(new Error('LittleSkin 返回了无效的角色列表'), { code: 'YGGDRASIL_INVALID_RESPONSE' });
+    }
+    const profiles = result.payload.availableProfiles.map(normalizeProfile);
     if (profiles.length === 0) throw new Error('LittleSkin 账户还没有可用角色，请先在网站创建角色');
 
     const existingState = await this.accountStore.read();
@@ -188,38 +225,6 @@ class YggdrasilAuthManager {
     };
   }
 
-  session(sessionId, ownerId) {
-    const id = String(sessionId ?? '');
-    const session = this.sessions.get(id);
-    if (!session || session.ownerId !== ownerId || session.expiresAt <= Date.now()) {
-      this.sessions.delete(id);
-      throw new Error('LittleSkin 角色选择已过期，请重新登录');
-    }
-    return session;
-  }
-
-  async selectProfile(sessionId, ownerId, profileId) {
-    const session = this.session(sessionId, ownerId);
-    const profile = session.profiles.find((item) => item.id === String(profileId ?? '').replaceAll('-', ''));
-    if (!profile) throw new Error('请选择一个可用的 LittleSkin 角色');
-    try {
-      const refreshed = await this.refreshProfile({ ...session, profile });
-      return this.saveAccount({
-        accessToken: refreshed.accessToken,
-        clientToken: refreshed.clientToken || session.clientToken,
-        profile: refreshed.selectedProfile
-      });
-    } finally {
-      this.sessions.delete(String(sessionId));
-    }
-  }
-
-  cancelOwner(ownerId) {
-    for (const [sessionId, session] of this.sessions) {
-      if (session.ownerId === ownerId) this.sessions.delete(sessionId);
-    }
-  }
-
   async ensureAccount(account) {
     if (!account || account.type !== 'yggdrasil') return account;
     const validation = await postJson(this.fetchImpl, '/authserver/validate', {
@@ -227,18 +232,20 @@ class YggdrasilAuthManager {
       clientToken: account.clientToken
     });
     if (validation.response.status === 204) return account;
+    if (![401, 403].includes(validation.response.status)) {
+      throw responseError(validation, 'LittleSkin 返回了无效的令牌验证响应');
+    }
 
     const refreshed = await this.refreshProfile({
       accessToken: account.accessToken,
       clientToken: account.clientToken,
       profile: { id: account.uuid, name: account.name }
-    }).catch(() => {
-      throw new Error('LittleSkin 登录已过期，请在账户管理中重新登录');
     });
     await this.saveAccount({
       accessToken: refreshed.accessToken,
       clientToken: refreshed.clientToken || account.clientToken,
-      profile: refreshed.selectedProfile
+      profile: refreshed.selectedProfile,
+      select: false
     });
     return this.accountStore.getAccount(`littleskin:${hyphenateProfileId(refreshed.selectedProfile.id)}`);
   }

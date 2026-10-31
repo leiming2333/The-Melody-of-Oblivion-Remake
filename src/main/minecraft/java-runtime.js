@@ -197,7 +197,24 @@ function javaMajorFromVersionOutput(output) {
   return match ? Number(match[1]) : undefined;
 }
 
-async function javaMajorVersion(executable, timeoutMs = 8000) {
+function javaDetailsFromVersionOutput(output) {
+  const majorVersion = javaMajorFromVersionOutput(output);
+  if (!majorVersion) return undefined;
+  const rawArch = String(output).match(/^\s*os\.arch\s*=\s*(\S+)/m)?.[1]?.toLowerCase();
+  const architecture = /^(?:amd64|x86_64|x64)$/.test(rawArch ?? '') ? 'x64'
+    : /^(?:x86|i[3-6]86|ia32)$/.test(rawArch ?? '') ? 'ia32'
+      : /^(?:aarch64|arm64)$/.test(rawArch ?? '') ? 'arm64'
+        : /^arm/.test(rawArch ?? '') ? 'arm' : undefined;
+  const declaredBits = Number(String(output).match(/^\s*sun\.arch\.data\.model\s*=\s*(32|64)/m)?.[1]);
+  const bits = declaredBits || (architecture ? (['x64', 'arm64'].includes(architecture) ? 64 : 32)
+    : /64-Bit/i.test(output) ? 64 : undefined);
+  const property = (name) => String(output).match(new RegExp(`^\\s*${name.replaceAll('.', '\\.')}\\s*=\\s*(\\S+)`, 'm'))?.[1];
+  return { majorVersion, architecture, bits,
+    nativeEncoding: property('native.encoding') ?? property('sun.jnu.encoding') ?? property('file.encoding'),
+    fileEncoding: property('file.encoding') };
+}
+
+async function javaRuntimeDetails(executable, timeoutMs = 8000) {
   if (path.isAbsolute(executable)) {
     try {
       await fs.access(executable);
@@ -208,7 +225,7 @@ async function javaMajorVersion(executable, timeoutMs = 8000) {
 
   return new Promise((resolve) => {
     let settled = false;
-    const child = spawn(executable, ['-version'], {
+    const child = spawn(executable, ['-XshowSettings:properties', '-version'], {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -218,11 +235,11 @@ async function javaMajorVersion(executable, timeoutMs = 8000) {
     };
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
-    const finish = (majorVersion) => {
+    const finish = (details) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(majorVersion);
+      resolve(details);
     };
     const timer = setTimeout(() => {
       child.kill();
@@ -230,8 +247,12 @@ async function javaMajorVersion(executable, timeoutMs = 8000) {
     }, timeoutMs);
 
     child.once('error', () => finish(undefined));
-    child.once('close', (code) => finish(code === 0 ? javaMajorFromVersionOutput(output) : undefined));
+    child.once('close', (code) => finish(code === 0 ? javaDetailsFromVersionOutput(output) : undefined));
   });
+}
+
+async function javaMajorVersion(executable, timeoutMs = 8000) {
+  return (await javaRuntimeDetails(executable, timeoutMs))?.majorVersion;
 }
 
 async function findJavaExecutable(
@@ -279,18 +300,25 @@ function buildInstallerArguments(installerPath, gameDirectory) {
   return ['-jar', installerPath, '--installClient', gameDirectory];
 }
 
-async function installedJavaExecutable(gameDirectory, majorVersion, probe = javaMajorVersion) {
-  try {
-    const root = path.join(gameDirectory, 'runtime', 'melody', `java-${majorVersion}`);
-    const marker = JSON.parse(await fs.readFile(path.join(root, '.melody-runtime.json'), 'utf8'));
-    if (marker.schemaVersion !== 1 || marker.majorVersion !== majorVersion
-        || typeof marker.executable !== 'string') return undefined;
-    const executable = path.resolve(root, marker.executable);
-    if (!executable.startsWith(`${path.resolve(root)}${path.sep}`)) return undefined;
-    return await probe(executable) === majorVersion ? executable : undefined;
-  } catch {
-    return undefined;
+async function installedJavaExecutable(gameDirectory, majorVersion, probe = javaMajorVersion,
+  { architecture = process.arch } = {}) {
+  for (const name of [`java-${majorVersion}-${architecture}`, `java-${majorVersion}`]) {
+    try {
+      const root = path.join(gameDirectory, 'runtime', 'melody', name);
+      const marker = JSON.parse(await fs.readFile(path.join(root, '.melody-runtime.json'), 'utf8'));
+      if (marker.schemaVersion !== 1 || marker.majorVersion !== majorVersion
+          || typeof marker.executable !== 'string') continue;
+      const executable = path.resolve(root, marker.executable);
+      if (!executable.startsWith(`${path.resolve(root)}${path.sep}`)) continue;
+      if (marker.architecture && marker.architecture !== architecture) continue;
+      if (probe === javaMajorVersion) {
+        const details = await javaRuntimeDetails(executable);
+        if (details?.architecture !== architecture) continue;
+        if (details.majorVersion === majorVersion) return executable;
+      } else if (await probe(executable) === majorVersion) return executable;
+    } catch { /* Try a legacy installation after an unavailable current one. */ }
   }
+  return undefined;
 }
 
 async function runJavaInstaller({
@@ -298,7 +326,10 @@ async function runJavaInstaller({
   installerPath,
   gameDirectory,
   signal,
-  onOutput = () => {}
+  onOutput = () => {},
+  onLog = () => {},
+  idleTimeoutMs = 10 * 60 * 1000,
+  spawnProcess = spawn
 }) {
   if (signal?.aborted) {
     const error = new Error('下载已取消');
@@ -308,55 +339,103 @@ async function runJavaInstaller({
   const argumentsList = buildInstallerArguments(installerPath, gameDirectory);
 
   await new Promise((resolve, reject) => {
-    const child = spawn(javaExecutable, argumentsList, {
+    const child = spawnProcess(javaExecutable, argumentsList, {
       cwd: gameDirectory,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
     let output = '';
     let settled = false;
+    let stopping = false;
+    let failure;
+    let idleTimer;
+    let killTimer;
 
     const finish = (callback) => {
       if (settled) return;
       settled = true;
+      clearTimeout(idleTimer);
+      clearTimeout(killTimer);
       signal?.removeEventListener('abort', abort);
       callback();
     };
 
+    const stop = (error) => {
+      failure ??= error;
+      if (settled || stopping) return;
+      stopping = true;
+      clearTimeout(idleTimer);
+      // A failed kill can throw or emit another child error. Preserve the
+      // original failure and retain ownership until the close event arrives.
+      try { child.kill(); } catch { /* Escalate below and continue draining. */ }
+      if (!settled) {
+        killTimer = setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch { /* Continue waiting for close. */ }
+        }, 2000);
+        killTimer.unref?.();
+      }
+    };
     const abort = () => {
-      child.kill();
-      const error = new Error('下载已取消');
-      error.name = 'AbortError';
-      finish(() => reject(error));
+      const error = Object.assign(new Error('下载已取消'), { name: 'AbortError' });
+      stop(error);
     };
-    signal?.addEventListener('abort', abort, { once: true });
-
-    const collect = (chunk) => {
-      const text = chunk.toString('utf8');
-      output = `${output}${text}`.slice(-16000);
-      const latestLine = text
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .at(-1);
-      if (latestLine) onOutput(latestLine);
+    const resetIdleTimer = () => {
+      clearTimeout(idleTimer);
+      if (settled || failure) return;
+      if (idleTimeoutMs > 0) idleTimer = setTimeout(() => stop(Object.assign(
+        new Error('加载器安装长时间没有输出，请检查网络后重试'),
+        { code: 'INSTALLER_IDLE_TIMEOUT', phase: 'installing-loader', retryable: true }
+      )), idleTimeoutMs);
+      idleTimer?.unref?.();
+    };
+    const collect = (channel, chunk) => {
+      if (settled) return;
+      resetIdleTimer();
+      try {
+        onLog(channel, chunk);
+        const text = chunk.toString('utf8');
+        output = `${output}${text}`.slice(-16000);
+        const latestLine = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1);
+        if (latestLine && !failure) onOutput(latestLine);
+      } catch (cause) {
+        stop(Object.assign(new Error(`处理加载器安装器输出失败：${cause.message}`, { cause }),
+          { code: cause.code ?? 'INSTALLER_OUTPUT_FAILED', phase: 'installing-loader', retryable: true }));
+      }
     };
 
-    child.stdout.on('data', collect);
-    child.stderr.on('data', collect);
-    child.once('error', (error) => {
-      finish(() => reject(new Error(`无法启动 Java 安装器：${error.message}`)));
+    for (const channel of ['stdout', 'stderr']) {
+      child[channel]?.on('data', (chunk) => collect(channel, chunk));
+      child[channel]?.on('error', (cause) => {
+        if (!settled) stop(Object.assign(new Error(`读取加载器安装器 ${channel} 输出失败：${cause.message}`, { cause }),
+          { code: cause.code ?? 'INSTALLER_OUTPUT_FAILED', phase: 'installing-loader', retryable: true }));
+      });
+    }
+    child.on('error', (error) => {
+      if (settled) return;
+      if (child.pid) {
+        stop(Object.assign(new Error(`Java 安装器进程错误：${error.message}`, { cause: error }),
+          { code: error.code ?? 'INSTALLER_FAILED', phase: 'installing-loader', retryable: true }));
+        return;
+      }
+      finish(() => reject(new Error(`无法启动 Java 安装器：${error.message}`, { cause: error })));
     });
     child.once('close', (code) => {
+      if (failure) { finish(() => reject(failure)); return; }
       if (code === 0) {
         finish(resolve);
         return;
       }
       const detail = output.trim().split(/\r?\n/).slice(-5).join(' ');
       finish(() => reject(
-        new Error(`加载器安装器执行失败（退出码 ${code}）${detail ? `：${detail}` : ''}`)
+        Object.assign(new Error(`加载器安装器执行失败（退出码 ${code}）${detail ? `：${detail}` : ''}`),
+          { code: 'INSTALLER_FAILED', exitCode: code, phase: 'installing-loader', retryable: true })
       ));
     });
+    // Attach process/stream listeners before an already-delivered cancellation
+    // can kill a process whose close event may arrive immediately.
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    else resetIdleTimer();
   });
 }
 
@@ -369,6 +448,8 @@ module.exports = {
   findJavaExecutable,
   javaMajorFromVersionOutput,
   javaMajorVersion,
+  javaDetailsFromVersionOutput,
+  javaRuntimeDetails,
   javaExecutableName,
   runJavaInstaller
 };
