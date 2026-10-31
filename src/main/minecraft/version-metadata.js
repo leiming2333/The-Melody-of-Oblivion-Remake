@@ -33,7 +33,8 @@ function mergeMetadata(parent, child) {
       },
       libraries: [...(child.libraries ?? [])],
       minecraftArguments: child.minecraftArguments ?? '',
-      clientJarId: child.jar ?? child.id
+      clientJarId: child.jar ?? child.id,
+      clientReleaseTime: child.releaseTime ?? child.time
     };
   }
   const legacyArguments = child.minecraftArguments ?? parent.minecraftArguments;
@@ -46,7 +47,10 @@ function mergeMetadata(parent, child) {
     },
     libraries: mergeLibraries(parent.libraries, child.libraries),
     minecraftArguments: legacyArguments,
-    clientJarId: child.jar ?? parent.clientJarId
+    clientJarId: child.jar ?? parent.clientJarId,
+    clientReleaseTime: child.jar
+      ? child.releaseTime ?? child.time
+      : parent.clientReleaseTime
   };
 }
 

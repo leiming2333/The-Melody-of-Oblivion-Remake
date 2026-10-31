@@ -651,6 +651,10 @@ textarea {
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.75);
 }
 
+.deck-status[hidden] {
+  display: none;
+}
+
 .deck-status strong {
   margin-left: auto;
   color: #8fd3a6;
@@ -1283,6 +1287,88 @@ dialog ::-webkit-scrollbar-thumb {
   color: var(--panel-muted);
   font-size: 10px;
   line-height: 1.6;
+}
+
+.microsoft-account-form {
+  margin-bottom: 12px;
+}
+
+.microsoft-account-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.microsoft-mark {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+}
+
+.microsoft-mark i:nth-child(1) { background: #f25022; }
+.microsoft-mark i:nth-child(2) { background: #7fba00; }
+.microsoft-mark i:nth-child(3) { background: #00a4ef; }
+.microsoft-mark i:nth-child(4) { background: #ffb900; }
+
+.microsoft-account-button > span:nth-child(2) {
+  display: grid;
+  gap: 3px;
+}
+
+.microsoft-account-button strong {
+  font-size: 11px;
+}
+
+.microsoft-account-button small,
+.microsoft-account-button b {
+  color: var(--control-muted);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.microsoft-account-button b {
+  margin-left: auto;
+}
+
+.microsoft-device-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  color: var(--panel-muted);
+  background: var(--panel-card-highlight), var(--panel-card);
+  font-size: 10px;
+}
+
+.microsoft-device-panel[hidden] {
+  display: none;
+}
+
+.microsoft-device-code-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.microsoft-device-code-row strong {
+  color: var(--panel-ink);
+  font-family: Consolas, monospace;
+  font-size: 18px;
+  letter-spacing: 0.16em;
+}
+
+.microsoft-device-panel button {
+  width: fit-content;
+  min-height: 26px;
+  padding: 0 10px;
 }
 
 .offline-account-form {

@@ -39,6 +39,8 @@ jobs:
       - run: npm test
       - name: Build isolated package
         run: npm run build -- --target ${{ matrix.id }}
+        env:
+          MELODY_MICROSOFT_CLIENT_ID: ${{ secrets.MELODY_MICROSOFT_CLIENT_ID || '72867f11-f8bf-4086-a502-39039a08970c' }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

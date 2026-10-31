@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
 const { copyCachedNativeArchive } = require('../src/main/minecraft/native-cache');
-const { offlineUuidForSkinModel } = require('../src/main/accounts/account-store');
+const { javaUuidHashCode, offlineUuid, offlineUuidForSkinModel } = require('../src/main/accounts/account-store');
 const {
   expandArgumentEntries,
   extractNativeArchive,
@@ -18,20 +18,68 @@ const {
   splitLegacyArguments
 } = require('../src/main/minecraft/launch-core');
 
-test('launch variables reject retired Microsoft accounts and use supported authentication only', () => {
+test('launch variables accept known account types and reject unknown account data', () => {
   const options = {
     account: {
-      type: 'yggdrasil', name: 'Player_01', uuid: '01234567-89ab-cdef-0123-456789abcdef',
-      accessToken: 'little-access', xuid: 'old-xuid', clientId: 'old-client'
+      type: 'microsoft', name: 'Player_01', uuid: '01234567-89ab-cdef-0123-456789abcdef',
+      accessToken: 'minecraft-access', xuid: 'xuid', clientId: 'client-id'
     },
     gameDirectory: path.resolve('fixture'), metadata: { clientJarId: 'base' }
   };
   const variables = launchVariables(options);
-  assert.equal(variables.auth_access_token, 'little-access');
-  assert.equal(variables.user_type, 'legacy');
-  assert.equal(variables.auth_xuid, '');
-  assert.equal(variables.clientid, '');
-  assert.throws(() => launchVariables({ ...options, account: { ...options.account, type: 'microsoft' } }), /可用的游戏账户/);
+  assert.equal(variables.auth_access_token, 'minecraft-access');
+  assert.equal(variables.user_type, 'msa');
+  assert.equal(variables.auth_xuid, 'xuid');
+  assert.equal(variables.clientid, 'client-id');
+  assert.throws(() => launchVariables({
+    ...options,
+    account: { ...options.account, type: 'unknown' }
+  }), /可用的游戏账户/);
+});
+
+function defaultSkinForLaunch(metadata, skinModel, expandedDefaults) {
+  const variables = launchVariables({
+    account: { type: 'offline', name: 'Player_01', uuid: offlineUuid('Player_01'), skinModel },
+    gameDirectory: path.resolve('fixture'), metadata
+  });
+  const hash = javaUuidHashCode(variables.auth_uuid);
+  if (!expandedDefaults) return (hash & 1) === 0 ? 'wide/steve' : 'slim/alex';
+  // Minecraft DefaultPlayerSkin.DEFAULT_SKINS, selected with Math.floorMod(hash, 18).
+  const names = ['alex', 'ari', 'efe', 'kai', 'makena', 'noor', 'steve', 'sunny', 'zuri'];
+  const skins = ['slim', 'wide'].flatMap((model) => names.map((name) => `${model}/${name}`));
+  return skins[((hash % skins.length) + skins.length) % skins.length];
+}
+
+test('offline skins select Steve and Alex in legacy and expanded client skin tables', () => {
+  for (const [clientJarId, expandedDefaults] of [
+    ['1.19.2', false], ['1.19.3', true], ['1.19.3-pre1', true],
+    ['22w44a', false], ['22w45a', true], ['26.3', true]
+  ]) {
+    const metadata = { clientJarId };
+    assert.equal(defaultSkinForLaunch(metadata, 'steve', expandedDefaults), 'wide/steve', clientJarId);
+    assert.equal(defaultSkinForLaunch(metadata, 'alex', expandedDefaults), 'slim/alex', clientJarId);
+  }
+});
+
+test('loader profiles use the inherited client version and release date for offline skins', async (t) => {
+  const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-skin-metadata-'));
+  t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
+  for (const [clientJarId, releaseTime, expandedDefaults] of [
+    ['1.19.2', '2022-08-05T00:00:00Z', false],
+    ['1.19.3', '2022-12-07T00:00:00Z', true],
+    ['custom-legacy', '2022-11-08T00:00:00Z', false],
+    ['custom-modern', '2022-11-09T00:00:00Z', true]
+  ]) {
+    await writeVersion(gameDirectory, clientJarId, { releaseTime });
+    await writeVersion(gameDirectory, `loader-${clientJarId}`, {
+      inheritsFrom: clientJarId, releaseTime: '2026-10-30T00:00:00Z'
+    });
+    const metadata = await readVersionMetadata(gameDirectory, `loader-${clientJarId}`);
+    assert.equal(metadata.clientJarId, clientJarId);
+    assert.equal(metadata.clientReleaseTime, releaseTime);
+    assert.equal(defaultSkinForLaunch(metadata, 'steve', expandedDefaults), 'wide/steve', clientJarId);
+    assert.equal(defaultSkinForLaunch(metadata, 'alex', expandedDefaults), 'slim/alex', clientJarId);
+  }
 });
 
 test('legacy loader arguments replace inherited arguments while modern arrays merge', () => {
@@ -302,7 +350,7 @@ test('完整启动参数包含内存、继承类路径与离线账户信息', as
   assert.ok(prepared.argumentsList.includes('-Xmx6144M'));
   assert.ok(prepared.argumentsList.includes('Steve'));
   assert.ok(prepared.argumentsList.includes(
-    offlineUuidForSkinModel('5627dd98-e6be-3c21-b8a8-e92344183641', 'alex').replaceAll('-', '')
+    offlineUuidForSkinModel('5627dd98-e6be-3c21-b8a8-e92344183641', 'alex', true).replaceAll('-', '')
   ));
   assert.ok(prepared.argumentsList.includes('fabric-test'));
   const classpath = prepared.argumentsList[prepared.argumentsList.indexOf('-cp') + 1];

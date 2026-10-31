@@ -378,13 +378,28 @@ function replaceVariables(argument, variables) {
   ));
 }
 
-function normalizeAccount(account) {
-  if (!account || !['offline', 'yggdrasil'].includes(account.type)
+function usesExpandedDefaultSkins(metadata) {
+  // Use the inherited client JAR, since a loader's own version/date need not
+  // match the Minecraft client that supplies the default skin table.
+  const clientVersion = String(metadata?.clientJarId ?? '');
+  const release = /^(\d+)\.(\d+)(?:\.(\d+))?(?:-(?:pre|rc)-?\d+)?$/.exec(clientVersion);
+  if (release) {
+    const [major, minor, patch] = release.slice(1).map((part) => Number(part ?? 0));
+    return major > 1 || (major === 1 && (minor > 19 || (minor === 19 && patch >= 3)));
+  }
+  const snapshot = /^(\d{2})w(\d{2})[a-z]$/.exec(clientVersion);
+  if (snapshot) return Number(snapshot[1]) > 22 || (Number(snapshot[1]) === 22 && Number(snapshot[2]) >= 45);
+  const releaseTime = Date.parse(metadata?.clientReleaseTime ?? metadata?.releaseTime ?? metadata?.time ?? '');
+  return Number.isFinite(releaseTime) && releaseTime >= Date.parse('2022-11-09T00:00:00Z');
+}
+
+function normalizeAccount(account, metadata) {
+  if (!account || !['offline', 'microsoft', 'yggdrasil'].includes(account.type)
     || !/^[A-Za-z0-9_]{3,16}$/.test(account.name ?? '')) {
     throw new Error('请先添加并选择一个可用的游戏账户');
   }
   const accountUuid = account.type === 'offline'
-    ? offlineUuidForSkinModel(account.uuid, account.skinModel)
+    ? offlineUuidForSkinModel(account.uuid, account.skinModel, usesExpandedDefaultSkins(metadata))
     : account.uuid;
   const uuid = String(accountUuid ?? '').replaceAll('-', '');
   if (!/^[a-f0-9]{32}$/i.test(uuid)) throw new Error('当前游戏账户 UUID 无效');
@@ -393,7 +408,9 @@ function normalizeAccount(account) {
     uuid,
     skinModel: account.skinModel === 'alex' ? 'alex' : 'steve',
     accessToken: account.accessToken || '0',
-    userType: 'legacy'
+    userType: account.type === 'microsoft' ? 'msa' : 'legacy',
+    xuid: account.xuid || '',
+    clientId: account.clientId || ''
   };
 }
 
@@ -407,7 +424,7 @@ function launchVariables({
   nativesDirectory,
   profileId
 }) {
-  const normalizedAccount = normalizeAccount(account);
+  const normalizedAccount = normalizeAccount(account, metadata);
   const assetsRoot = safePath(gameDirectory, 'assets');
   const legacyAssets = safePath(assetsRoot, 'virtual', assetIndexId || 'legacy');
   return {
@@ -418,10 +435,10 @@ function launchVariables({
     auth_player_name: normalizedAccount.name,
     auth_session: `token:${normalizedAccount.accessToken}:${normalizedAccount.uuid}`,
     auth_uuid: normalizedAccount.uuid,
-    auth_xuid: '',
+    auth_xuid: normalizedAccount.xuid,
     classpath,
     classpath_separator: path.delimiter,
-    clientid: '',
+    clientid: normalizedAccount.clientId,
     game_assets: legacyAssets,
     game_directory: instanceDirectory ?? gameDirectory,
     launcher_name: LAUNCHER_NAME,
