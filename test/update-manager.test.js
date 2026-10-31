@@ -701,6 +701,123 @@ test('所有下载源均失败时报告聚合错误', async () => {
   assert.equal(calls.download.length, GITHUB_MIRRORS.length + 3);
 });
 
+test('updates use the measured route and pass asset identity to resumable transfers', async () => {
+  let selected;
+  const { manager, calls } = fixture({
+    assets: githubAssets,
+    downloadFile: async (url, targetPath, _progress, options) => {
+      calls.download.push({ url, targetPath, options });
+    }
+  });
+  manager.rankCandidates = async (candidates, options) => {
+    assert.equal(options.expectedSize, githubAssets[0].size);
+    assert.ok(options.signal instanceof AbortSignal);
+    selected = { ...candidates[2], minSpeedBytesPerSecond: 20000 };
+    return [selected, ...candidates.filter((candidate) => candidate !== candidates[2])];
+  };
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(calls.download.length, 1);
+  assert.equal(calls.download[0].url, selected.url);
+  assert.equal(calls.download[0].options.minSpeedBytesPerSecond, 20000);
+  assert.equal(calls.download[0].options.expectedSize, githubAssets[0].size);
+  assert.equal(calls.download[0].options.sha256, fixtureHash);
+});
+
+test('network source changes share completed ranges for exactly one update attempt', async () => {
+  let previousState;
+  let attempts = 0;
+  const { manager } = fixture({ assets: githubAssets,
+    downloadFile: async (_url, _target, _progress, { resumeState }) => {
+      if (attempts++ === 0) {
+        previousState = resumeState;
+        resumeState.marker = 'completed first range';
+        throw Object.assign(new Error('slow'), { code: 'SLOW_SOURCE' });
+      }
+      assert.equal(resumeState, previousState);
+      assert.equal(resumeState.marker, 'completed first range');
+    }
+  });
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(attempts, 2);
+});
+
+test('bad mirror bytes clear completed ranges before retrying the next source', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-update-mirror-integrity-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const valid = Buffer.from('valid update');
+  const invalid = Buffer.from('wrong update');
+  const asset = { ...githubAssets[0], size: valid.length,
+    digest: `sha256:${crypto.createHash('sha256').update(valid).digest('hex')}` };
+  let attempts = 0;
+  let poisonedState;
+  const { manager } = fixture({ assets: [asset],
+    downloadFile: async (_url, target, _progress, { resumeState }) => {
+      if (attempts++ === 0) {
+        poisonedState = resumeState;
+        resumeState.marker = 'bad completed range';
+        await fs.writeFile(target, invalid);
+      } else {
+        assert.notEqual(resumeState, poisonedState);
+        assert.equal(resumeState.marker, undefined);
+        await assert.rejects(fs.stat(target), { code: 'ENOENT' });
+        await fs.writeFile(target, valid);
+      }
+    }
+  });
+  manager.fileSystem = fs;
+  manager.env = { PORTABLE_EXECUTABLE_DIR: directory };
+  manager.hashFile = async (file) => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(attempts, 2);
+  assert.deepEqual(await fs.readFile(manager.updateFilePath), valid);
+});
+
+test('local storage failures stop immediately without trying more download sources', async () => {
+  for (const code of ['ENOSPC', 'EACCES', 'EIO']) {
+    let attempts = 0;
+    const { manager } = fixture({ assets: githubAssets,
+      downloadFile: async () => { attempts += 1; throw Object.assign(new Error('storage failed'), { code }); }
+    });
+    const state = await manager.check();
+    assert.equal(state.status, 'error');
+    assert.equal(state.errorCode, code);
+    assert.equal(attempts, 1);
+  }
+});
+
+test('a healthy mirror retries from scratch when inherited ranges fail verification', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-update-mixed-ranges-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const valid = Buffer.from('valid update');
+  const asset = { ...githubAssets[0], size: valid.length,
+    digest: `sha256:${crypto.createHash('sha256').update(valid).digest('hex')}` };
+  const attempted = [];
+  const { manager } = fixture({ assets: [asset],
+    downloadFile: async (url, target, _progress, { resumeState }) => {
+      attempted.push(url);
+      if (attempted.length === 1) {
+        resumeState.completed = new Set([0]);
+        throw new Error('first source disconnected after writing a corrupt range');
+      }
+      await fs.writeFile(target, resumeState.completed?.size ? 'wrong update' : valid);
+    }
+  });
+  manager.fileSystem = fs;
+  manager.env = { PORTABLE_EXECUTABLE_DIR: directory };
+  manager.hashFile = async (file) => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(attempted.length, 3);
+  assert.equal(attempted[1], attempted[2]);
+  assert.deepEqual(await fs.readFile(manager.updateFilePath), valid);
+});
+
+test('missing trusted checksums stop before probing or downloading an update', async () => {
+  const { manager, calls } = fixture({ assets: githubAssets.map(({ digest: _digest, ...asset }) => asset) });
+  manager.rankCandidates = async () => { throw new Error('must not probe'); };
+  assert.match((await manager.check()).message, /缺少 SHA-256/);
+  assert.equal(calls.download.length, 0);
+});
+
 test('仅提示策略下发现新版本但不自动下载', async () => {
   const { manager, calls } = fixture();
   const state = await manager.check({ autoDownload: false });
@@ -813,6 +930,40 @@ async function updateDownloadServer(t, handler) {
   });
   return { url: `http://127.0.0.1:${server.address().port}`, target: path.join(directory, 'update.part') };
 }
+
+test('real update downloads select a responding source, assemble ranges and verify before ready', async (t) => {
+  const bytes = Buffer.alloc(4 * 1024 * 1024, 37);
+  const requested = [];
+  const { url, target } = await updateDownloadServer(t, (request, response) => {
+    requested.push(request.url);
+    if (request.url === '/unavailable') { response.writeHead(503); response.end(); return; }
+    const range = /^bytes=(\d+)-(\d+)$/.exec(request.headers.range || '');
+    assert.ok(range);
+    const start = Number(range[1]);
+    const end = Number(range[2]);
+    response.writeHead(206, {
+      'content-range': `bytes ${start}-${end}/${bytes.length}`,
+      'content-length': end - start + 1
+    });
+    response.end(bytes.subarray(start, end + 1));
+  });
+  const asset = { ...githubAssets[0], size: bytes.length,
+    digest: `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}` };
+  const { manager, calls } = fixture({ assets: [asset], downloadFile: downloadToFile });
+  manager.fileSystem = fs;
+  manager.env = { PORTABLE_EXECUTABLE_DIR: path.dirname(target) };
+  manager.hashFile = async (file) => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
+  manager.downloadCandidates = () => [
+    { url: `${url}/unavailable`, enforceMinSpeed: true },
+    { url: `${url}/healthy`, enforceMinSpeed: true },
+    { url: `${url}/unavailable`, enforceMinSpeed: false }
+  ];
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(requested.filter((pathname) => pathname === '/unavailable').length, 1);
+  assert.equal(requested.filter((pathname) => pathname === '/healthy').length, 6);
+  assert.equal(calls.updateReady.length, 1);
+  assert.deepEqual(await fs.readFile(manager.updateFilePath), bytes);
+});
 
 test('an active update stream can outlast its connection timeout', async (t) => {
   const { url, target } = await updateDownloadServer(t, (_request, response) => {

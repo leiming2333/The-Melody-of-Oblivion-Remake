@@ -115,6 +115,15 @@ function detectPlatform() {
   return "Windows-x64";
 }
 
+function isBlobDownloadUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname.endsWith(".public.blob.vercel-storage.com");
+  } catch {
+    return false;
+  }
+}
+
 function updateDownloadLink() {
   const english = document.documentElement.lang === "en";
   document.querySelector("#latest-version").textContent = latestRelease?.tag_name ?? "—";
@@ -123,6 +132,13 @@ function updateDownloadLink() {
   const asset = latestRelease?.assets?.find((item) =>
     item.name.endsWith(`-${target}${extension}`) && /^(?:https:\/\/github\.com\/|https:\/\/.+\.public\.blob\.vercel-storage\.com\/)/.test(item.browser_download_url ?? "")
   );
+  const blobAvailable = Boolean(asset && isBlobDownloadUrl(asset.browser_download_url));
+  const blobOption = downloadSource.querySelector('option[value="blob"]');
+  blobOption.disabled = Boolean(latestRelease) && !blobAvailable;
+  blobOption.textContent = blobOption.disabled
+    ? (english ? "Vercel Blob (unavailable for this build)" : "Vercel Blob（此安装包不可用）")
+    : (english ? translations["download.blob"] : originalCopy["download.blob"]);
+  if (asset && !blobAvailable && downloadSource.value === "blob") downloadSource.value = "official";
   downloadButton.href = asset
     ? downloadSource.value === "blob"
       ? asset.browser_download_url
@@ -131,7 +147,9 @@ function updateDownloadLink() {
   downloadAlternative.hidden = !asset;
   if (asset) {
     const source = downloadSource.value;
-    const githubUrl = asset.github_download_url ?? asset.browser_download_url;
+    const githubUrl = asset.github_download_url || (blobAvailable
+      ? `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/${encodeURIComponent(latestRelease.tag_name)}/${encodeURIComponent(asset.name)}`
+      : asset.browser_download_url);
     const accelerated = source === "official";
     downloadAlternative.href = accelerated
       ? `https://gh-proxy.com/${githubUrl}`
@@ -149,7 +167,8 @@ function updateDownloadLink() {
         : (english ? `Accelerated download (${downloadSource.selectedOptions[0].textContent})` : `国内加速下载（${downloadSource.selectedOptions[0].textContent}）`)
     : (english ? "View releases" : "查看发行版本");
   downloadStatus.textContent = asset
-    ? `${latestRelease.tag_name} · ${(asset.size / 1048576).toFixed(1)} MB · HTTPS`
+    ? `${latestRelease.tag_name} · ${(asset.size / 1048576).toFixed(1)} MB · ${downloadSource.selectedOptions[0].textContent} · HTTPS${target.startsWith("Windows") && !blobAvailable
+      ? (english ? " · Blob is temporarily unavailable" : " · Blob 线路暂不可用") : ""}`
     : releaseLoadFailed
       ? (english ? "Could not load the download list. Open Releases to choose a file." : "暂时无法读取安装包列表，可前往发行页面选择。")
       : latestRelease

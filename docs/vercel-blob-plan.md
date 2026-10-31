@@ -7,7 +7,8 @@
 - GitHub Actions 会为安装包生成 `.sha256` 文件并保留在 GitHub Releases；站点日志仍从 GitHub Release API 读取。
 - `download` Public Blob Store 已连接到网站项目，启用了 `BLOB_READ_WRITE_TOKEN`，区域为 HKG1。
 - 网站和 Release 工作流现已支持 Blob：GitHub Releases 仍发布完整八包及校验文件；Blob 只同步 Windows x64、ia32、arm64 三个 portable EXE，上传至 `releases/<tag>/` 并回读校验后，最后更新仅含这三个 EXE 的 `releases/latest.json`。Windows 对象不存在时回退 GitHub，macOS、Linux 下载继续使用 GitHub。
-- 网站 `/api/latest-release` 先核实 GitHub 最新版本，再合并同版本、同大小、同 SHA-256 的 Blob 下载地址；Windows 更新可直接下载公共 Blob URL，macOS、Linux 资产保留 GitHub 地址。Blob 连接失败、停滞或速度过慢时，按清单中的 `github_download_url` 切换 GitHub 镜像与官方源；若资产仍使用 GitHub 地址，启动器先尝试网站 `/api/download?source=blob`，对象不存在时由该接口回退 GitHub。更新包仍校验大小和 SHA-256，客户端无需 Blob 写入令牌。
+- 网站 `/api/latest-release` 先核实 GitHub 最新版本，再合并同版本、同大小、同 SHA-256 的 Blob 下载地址；Windows 更新可直接下载公共 Blob URL，macOS、Linux 资产保留 GitHub 地址。当前源码会对 Blob、GitHub 镜像和官方源并行读取最多 64 KiB 样本，每源最多约 3 秒，按实测吞吐选择下载线路；全部测速失败时保留原有顺序。若资产仍使用 GitHub 地址，Blob 候选使用网站 `/api/download?source=blob`，对象不存在时由该接口回退 GitHub。客户端无需 Blob 写入令牌。
+- 启动器更新包达到 4 MiB 时尝试四段并行下载，服务器不支持 Range 时回退单流。同一次下载切源会保留已完成分段；取消、重启或手动重新下载不会持久化续传状态。慢速阈值参考每条线路的实测速度（上限 100 KiB/s），以免所有线路较慢时放弃最快可用源；最快测通源另有保留连接/停滞超时的宽松重试。每次传输完成都核对完整大小和可信 SHA-256；不匹配会丢弃分段状态后换源，磁盘和权限错误直接停止。这些源码改动需要重新构建发布才会进入已安装的启动器。
 - 自动同步还需要在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加 `BLOB_READ_WRITE_TOKEN`。该值应从 Vercel Blob Store 凭据中取得，不要提交到仓库。
 - 已有 Release 可在 GitHub Actions 中运行 **Sync an existing release to Vercel Blob**，输入 tag（例如 `v1.6.1`）进行首次回填。
 

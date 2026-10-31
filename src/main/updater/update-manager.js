@@ -1,8 +1,7 @@
 const fs = require('node:fs/promises');
-const { createWriteStream, createReadStream } = require('node:fs');
+const { createReadStream } = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
@@ -10,6 +9,8 @@ const { constants: fsConstants } = require('node:fs');
 const { isPublicBlobUrl, isStableRelease, withBlobDownloads } = require('../../shared/release-metadata');
 const { TransactionStore, identity, transactionPaths, assertManagedAncestors } = require('./transaction-store');
 const { startInstallHelper, startWindowsHelper } = require('./install-helper');
+const { downloadToFile } = require('./update-downloader');
+const { rankDownloadCandidates } = require('./update-source-selector');
 
 const UPDATE_CHANNEL = 'updater:state';
 const WEBSITE_ORIGIN = 'https://melodyoblivion.xyz';
@@ -18,7 +19,7 @@ const LATEST_RELEASE_URL = 'https://api.github.com/repos/leiming2333/The-Melody-
 const PLATFORM_KEYWORDS = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux: 'Linux' });
 const USER_AGENT = 'melody-of-oblivion-launcher-updater';
 
-// 更新安装包优先使用 Blob，过慢或失败时切换 GitHub 镜像，最后回退官方源。
+// Blob、GitHub 镜像和官方源通过小流量测速选路，失败后保留其他候选。
 const GITHUB_MIRRORS = Object.freeze([
   'https://ghproxy.net',
   'https://gh-proxy.com',
@@ -26,11 +27,6 @@ const GITHUB_MIRRORS = Object.freeze([
   'https://github.moeyy.xyz'
 ]);
 const API_TIMEOUT_MS = 15000;
-const DOWNLOAD_CONNECT_TIMEOUT_MS = 10000;
-const DOWNLOAD_STALL_TIMEOUT_MS = 15000;
-const DOWNLOAD_MIN_SPEED_BYTES_PER_SEC = 100 * 1024;
-const DOWNLOAD_MIN_SPEED_GRACE_MS = 6000;
-const DOWNLOAD_SPEED_WINDOW_MS = 3000;
 
 function percent(value) {
   const number = Number(value);
@@ -138,94 +134,6 @@ async function sha256File(filePath, signal) {
   return hash.digest('hex');
 }
 
-async function downloadToFile(url, targetPath, onProgress, {
-  enforceMinSpeed = true,
-  connectTimeoutMs = DOWNLOAD_CONNECT_TIMEOUT_MS,
-  stallTimeoutMs = DOWNLOAD_STALL_TIMEOUT_MS,
-  signal
-} = {}) {
-  throwIfAborted(signal);
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  signal?.addEventListener('abort', abort, { once: true });
-  let connectionTimedOut = false;
-  const connectTimer = setTimeout(() => {
-    connectionTimedOut = true;
-    controller.abort();
-  }, connectTimeoutMs);
-  const startedAt = Date.now();
-  let loaded = 0;
-  let windowStartedAt = startedAt;
-  let windowLoadedBytes = 0;
-  let lastByteAt = startedAt;
-  let speedAborted = false;
-  let stallAborted = false;
-  let monitor = null;
-
-  try {
-    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: controller.signal });
-    clearTimeout(connectTimer);
-    if (!response.ok || !response.body) {
-      throw new Error(`下载更新失败（HTTP ${response.status}）`);
-    }
-    const total = Number(response.headers.get('content-length')) || 0;
-    const source = Readable.fromWeb(response.body);
-    lastByteAt = Date.now();
-    monitor = setInterval(() => {
-      const now = Date.now();
-      const windowBytes = loaded - windowLoadedBytes;
-      if (now - lastByteAt >= stallTimeoutMs) {
-        stallAborted = true;
-        controller.abort();
-        return;
-      }
-      const windowMs = now - windowStartedAt;
-      if (windowMs < DOWNLOAD_SPEED_WINDOW_MS) return;
-      const bytesPerSecond = (windowBytes * 1000) / windowMs;
-      if (
-        enforceMinSpeed
-        && now - startedAt >= DOWNLOAD_MIN_SPEED_GRACE_MS
-        && bytesPerSecond < DOWNLOAD_MIN_SPEED_BYTES_PER_SEC
-      ) {
-        speedAborted = true;
-        controller.abort();
-        return;
-      }
-      windowStartedAt = now;
-      windowLoadedBytes = loaded;
-    }, Math.min(1000, stallTimeoutMs));
-    source.on('data', (chunk) => {
-      loaded += chunk.length;
-      lastByteAt = Date.now();
-      onProgress?.(total > 0 ? (loaded / total) * 100 : 0);
-    });
-    await pipeline(source, createWriteStream(targetPath));
-    return targetPath;
-  } catch (error) {
-    throwIfAborted(signal);
-    if (speedAborted) {
-      const slowError = new Error('当前下载源速度过慢');
-      slowError.code = 'SLOW_SOURCE';
-      throw slowError;
-    }
-    if (stallAborted) {
-      const stallError = new Error('下载超时：服务器长时间未响应');
-      stallError.code = 'STALL_SOURCE';
-      throw stallError;
-    }
-    if (connectionTimedOut) {
-      const timeoutError = new Error('连接下载源超时');
-      timeoutError.code = 'CONNECT_TIMEOUT';
-      throw timeoutError;
-    }
-    throw error;
-  } finally {
-    signal?.removeEventListener('abort', abort);
-    clearTimeout(connectTimer);
-    if (monitor) clearInterval(monitor);
-  }
-}
-
 class UpdateManager {
   constructor({
     app,
@@ -234,6 +142,7 @@ class UpdateManager {
     settingsStore = null,
     fetchImpl = globalThis.fetch,
     downloadFile = downloadToFile,
+    rankCandidates = downloadFile === downloadToFile ? rankDownloadCandidates : null,
     fileSystem = fs,
     hashFile = sha256File,
     spawnProcess = spawn,
@@ -253,6 +162,7 @@ class UpdateManager {
     this.settingsStore = settingsStore;
     this.fetchImpl = fetchImpl;
     this.downloadFile = downloadFile;
+    this.rankCandidates = rankCandidates;
     this.fileSystem = fileSystem;
     this.hashFile = hashFile;
     this.spawnProcess = spawnProcess;
@@ -494,15 +404,7 @@ class UpdateManager {
     )) ?? null;
   }
 
-  async verifyDownloadedFile(updateAsset, filePath, signal) {
-    throwIfAborted(signal);
-    const expectedSize = Number(updateAsset?.size) || 0;
-    if (this.fileSystem.stat && expectedSize > 0) {
-      const stat = await this.fileSystem.stat(filePath);
-      const actual = Number(stat?.size) || 0;
-      if (actual !== expectedSize) throw new Error(`更新包校验失败：文件大小不匹配（期望 ${formatBytes(expectedSize)}，实际 ${formatBytes(actual)}）`);
-    }
-
+  async expectedSha256For(updateAsset, signal) {
     let expectedSha256 = /^sha256:([a-f0-9]{64})$/i.exec(String(updateAsset?.digest ?? ''))?.[1]?.toLowerCase();
     if (!expectedSha256) {
       const checksumAsset = this.checksumAssetFor(updateAsset);
@@ -510,9 +412,22 @@ class UpdateManager {
       expectedSha256 = parseSha256(await this.fetchText(checksumAsset.browser_download_url, signal));
     }
     if (!expectedSha256) throw new Error('更新包校验失败：校验文件内容无效');
+    return expectedSha256;
+  }
+
+  async verifyDownloadedFile(updateAsset, filePath, signal, expectedSha256) {
+    throwIfAborted(signal);
+    const expectedSize = Number(updateAsset?.size) || 0;
+    if (this.fileSystem.stat && expectedSize > 0) {
+      const stat = await this.fileSystem.stat(filePath);
+      const actual = Number(stat?.size) || 0;
+      if (actual !== expectedSize) throw Object.assign(new Error(`更新包校验失败：文件大小不匹配（期望 ${formatBytes(expectedSize)}，实际 ${formatBytes(actual)}）`), { code: 'UPDATE_SIZE_MISMATCH' });
+    }
+
+    expectedSha256 ??= await this.expectedSha256For(updateAsset, signal);
     const actualSha256 = await this.hashFile(filePath, signal);
     throwIfAborted(signal);
-    if (expectedSha256 !== actualSha256) throw new Error('更新包校验失败：SHA-256 不匹配，请重试下载');
+    if (expectedSha256 !== actualSha256) throw Object.assign(new Error('更新包校验失败：SHA-256 不匹配，请重试下载'), { code: 'UPDATE_HASH_MISMATCH' });
     return actualSha256;
   }
 
@@ -593,19 +508,38 @@ class UpdateManager {
     ];
   }
 
-  async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress, githubDownloadUrl = null, signal) {
-    const candidates = this.downloadCandidates(assetUrl, assetName, githubDownloadUrl);
+  async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress, githubDownloadUrl = null, signal,
+    { expectedSize, sha256, verify } = {}) {
+    const initialCandidates = this.downloadCandidates(assetUrl, assetName, githubDownloadUrl);
+    const rankedCandidates = this.rankCandidates
+      ? await this.rankCandidates(initialCandidates, { expectedSize, signal }) : initialCandidates;
+    const candidates = [...rankedCandidates];
+    let resumeState = {};
     let lastError = null;
-    for (const candidate of candidates) {
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      const reusedRanges = resumeState.completed instanceof Set && resumeState.completed.size > 0;
       throwIfAborted(signal);
       try {
+        onProgress?.(0);
         await this.downloadFile(candidate.url, targetPath, onProgress, {
-          enforceMinSpeed: candidate.enforceMinSpeed, signal
+          enforceMinSpeed: candidate.enforceMinSpeed,
+          minSpeedBytesPerSecond: candidate.minSpeedBytesPerSecond,
+          expectedSize, sha256, resumeState, signal
         });
+        await verify?.();
         return candidate.url;
       } catch (error) {
         throwIfAborted(signal);
         if (isAbortError(error)) throw error;
+        if (['ENOSPC', 'EACCES', 'EPERM', 'EROFS', 'ENOTDIR', 'EISDIR', 'EMFILE', 'ENFILE', 'EIO'].includes(errorCode(error))) throw error;
+        if (['UPDATE_SIZE_MISMATCH', 'UPDATE_HASH_MISMATCH'].includes(errorCode(error))) {
+          resumeState = {};
+          await this.fileSystem.rm(targetPath, { force: true });
+          // A healthy source may have inherited a corrupt range from its predecessor.
+          // Give it one complete transfer before blaming this source for mixed bytes.
+          if (reusedRanges) candidates.splice(index + 1, 0, candidate);
+        }
         lastError = error;
       }
     }
@@ -644,6 +578,9 @@ class UpdateManager {
       await this.fileSystem.mkdir(directory, { recursive: true });
       await this.assertEnoughStorage(directory, asset.size);
       throwIfAborted(signal);
+      const expectedSha256 = await this.expectedSha256For(asset, signal);
+      let sha256;
+      if (this.rankCandidates) this.setState({ message: '正在测速并选择更新下载线路…' });
       await this.downloadUpdateFile(asset.browser_download_url, asset.name, temporaryPath, (value) => {
         if (signal.aborted) return;
         const downloaded = percent(value);
@@ -652,9 +589,13 @@ class UpdateManager {
           progress: downloaded,
           message: `正在后台下载更新 ${downloaded}%`
         });
-      }, asset.github_download_url, signal);
-      this.setState({ status: 'verifying', progress: 100, message: '正在校验更新包…' });
-      const sha256 = await this.verifyDownloadedFile(asset, temporaryPath, signal);
+      }, asset.github_download_url, signal, {
+        expectedSize: Number(asset.size), sha256: expectedSha256,
+        verify: async () => {
+          this.setState({ status: 'verifying', progress: 100, message: '正在校验更新包…' });
+          sha256 = await this.verifyDownloadedFile(asset, temporaryPath, signal, expectedSha256);
+        }
+      });
       throwIfAborted(signal);
       await this.fileSystem.rename(temporaryPath, targetPath);
       this.updateFilePath = targetPath;
