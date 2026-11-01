@@ -17,6 +17,18 @@ function isPublicBlobUrl(value) {
   }
 }
 
+const DOWNLOAD_CDN_ORIGIN = 'https://downloads.melodyoblivion.xyz';
+
+function isTrustedCdnUrl(value, tagName, assetName) {
+  try {
+    const url = new URL(value);
+    const expectedPath = `/releases/${encodeURIComponent(tagName)}/${encodeURIComponent(assetName)}`;
+    return url.origin === DOWNLOAD_CDN_ORIGIN && url.pathname === expectedPath && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
 // GitHub determines the release; a matching Blob manifest may supply its download URLs.
 function withBlobDownloads(release, blobRelease) {
   if (!isStableRelease(blobRelease) || releaseVersion(release) !== releaseVersion(blobRelease)) return release;
@@ -25,14 +37,19 @@ function withBlobDownloads(release, blobRelease) {
     ...release,
     assets: release.assets.map((asset) => {
       const blob = blobAssets.get(asset.name);
-      if (!blob || !isPublicBlobUrl(blob.browser_download_url)) return asset;
       const size = Number(asset.size);
-      if (!Number.isSafeInteger(size) || size <= 0 || size !== Number(blob.size)) return asset;
       const digest = String(asset.digest ?? '');
-      if (!/^sha256:[a-f\d]{64}$/i.test(digest)
-        || digest.toLowerCase() !== String(blob.digest ?? '').toLowerCase()) return asset;
+      const matchingMetadata = Number.isSafeInteger(size) && size > 0
+        && /^sha256:[a-f\d]{64}$/i.test(digest)
+        && blob && size === Number(blob.size)
+        && digest.toLowerCase() === String(blob.digest ?? '').toLowerCase();
+      const next = isTrustedCdnUrl(blob?.cdn_download_url, release.tag_name, asset.name)
+        && matchingMetadata
+        ? { ...asset, cdn_download_url: blob.cdn_download_url }
+        : asset;
+      if (!matchingMetadata || !isPublicBlobUrl(blob.browser_download_url)) return next;
       return {
-        ...asset,
+        ...next,
         browser_download_url: blob.browser_download_url,
         github_download_url: asset.github_download_url || asset.browser_download_url
       };
@@ -40,4 +57,4 @@ function withBlobDownloads(release, blobRelease) {
   };
 }
 
-module.exports = { isPublicBlobUrl, isStableRelease, releaseVersion, withBlobDownloads };
+module.exports = { isPublicBlobUrl, isStableRelease, isTrustedCdnUrl, releaseVersion, withBlobDownloads };

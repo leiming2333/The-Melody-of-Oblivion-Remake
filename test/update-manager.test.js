@@ -501,6 +501,42 @@ test('updater keeps Blob download URLs only for the verified GitHub version', as
   assert.equal(manager.release.assets[0].github_download_url, asset.browser_download_url);
 });
 
+test('verified website CDN download URLs are preferred by the launcher updater', async () => {
+  const githubAsset = githubAssets[0];
+  const websiteAsset = {
+    ...githubAsset,
+    browser_download_url: `https://fixture.public.blob.vercel-storage.com/releases/v9.9.9/${githubAsset.name}`,
+    github_download_url: githubAsset.browser_download_url,
+    cdn_download_url: `https://downloads.melodyoblivion.xyz/releases/v9.9.9/${githubAsset.name}`
+  };
+  const { manager, calls } = fixture({
+    fetchImpl: async (url) => ({ ok: true, json: async () => ({
+      tag_name: 'v9.9.9',
+      assets: [url.includes('melodyoblivion.xyz') ? websiteAsset : githubAsset]
+    }) })
+  });
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(calls.download[0].url, websiteAsset.cdn_download_url);
+  assert.equal(manager.release.assets[0].cdn_download_url, websiteAsset.cdn_download_url);
+});
+
+test('untrusted website CDN URLs are ignored by the launcher updater', async () => {
+  const githubAsset = githubAssets[0];
+  const websiteAsset = {
+    ...githubAsset,
+    cdn_download_url: `https://evil.example/releases/v9.9.9/${githubAsset.name}`
+  };
+  const { manager, calls } = fixture({
+    fetchImpl: async (url) => ({ ok: true, json: async () => ({
+      tag_name: 'v9.9.9',
+      assets: [url.includes('melodyoblivion.xyz') ? websiteAsset : githubAsset]
+    }) })
+  });
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.notEqual(calls.download[0].url, websiteAsset.cdn_download_url);
+  assert.equal(manager.release.assets[0].cdn_download_url, undefined);
+});
+
 test('stale mirrors cannot hide a known newer website release after GitHub fails', async () => {
   const requested = [];
   const { manager } = fixture({ fetchImpl: async (url) => {

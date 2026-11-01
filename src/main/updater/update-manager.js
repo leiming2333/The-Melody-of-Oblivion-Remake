@@ -6,7 +6,7 @@ const { pipeline } = require('node:stream/promises');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { constants: fsConstants } = require('node:fs');
-const { isPublicBlobUrl, isStableRelease, withBlobDownloads } = require('../../shared/release-metadata');
+const { isPublicBlobUrl, isStableRelease, isTrustedCdnUrl, withBlobDownloads } = require('../../shared/release-metadata');
 const { TransactionStore, identity, transactionPaths, assertManagedAncestors } = require('./transaction-store');
 const { startInstallHelper, startWindowsHelper } = require('./install-helper');
 const { downloadToFile } = require('./update-downloader');
@@ -486,7 +486,7 @@ class UpdateManager {
     return limited.replace(/\u0000/g, '');
   }
 
-  downloadCandidates(assetUrl, assetName, githubDownloadUrl = null) {
+  downloadCandidates(assetUrl, assetName, githubDownloadUrl = null, cdnDownloadUrl = null) {
     const blob = isPublicBlobUrl(assetUrl);
     if (!blob && !isGithubUrl(assetUrl)) return [{ url: assetUrl, enforceMinSpeed: false }];
     const tag = this.release?.tag_name ?? '';
@@ -499,18 +499,23 @@ class UpdateManager {
     websiteUrl.searchParams.set('tag', tag);
     websiteUrl.searchParams.set('asset', assetName);
     websiteUrl.searchParams.set('source', 'blob');
-    return [
+    const candidates = [
       { url: blob ? assetUrl : websiteUrl.href, enforceMinSpeed: true },
       ...mirrorUrls(githubUrl).map((url) => ({ url, enforceMinSpeed: true })),
       { url: githubUrl, enforceMinSpeed: true },
       // 所有镜像均不可用时，最后回退官方直连并放宽限速
       { url: githubUrl, enforceMinSpeed: false }
     ];
+    if (isTrustedCdnUrl(cdnDownloadUrl, tag, assetName)
+      && !candidates.some((candidate) => candidate.url === cdnDownloadUrl)) {
+      candidates.unshift({ url: cdnDownloadUrl, enforceMinSpeed: true });
+    }
+    return candidates;
   }
 
-  async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress, githubDownloadUrl = null, signal,
+  async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress, githubDownloadUrl = null, cdnDownloadUrl = null, signal,
     { expectedSize, sha256, verify } = {}) {
-    const initialCandidates = this.downloadCandidates(assetUrl, assetName, githubDownloadUrl);
+    const initialCandidates = this.downloadCandidates(assetUrl, assetName, githubDownloadUrl, cdnDownloadUrl);
     const rankedCandidates = this.rankCandidates
       ? await this.rankCandidates(initialCandidates, { expectedSize, signal }) : initialCandidates;
     const candidates = [...rankedCandidates];
@@ -589,7 +594,7 @@ class UpdateManager {
           progress: downloaded,
           message: `正在后台下载更新 ${downloaded}%`
         });
-      }, asset.github_download_url, signal, {
+      }, asset.github_download_url, asset.cdn_download_url, signal, {
         expectedSize: Number(asset.size), sha256: expectedSha256,
         verify: async () => {
           this.setState({ status: 'verifying', progress: 100, message: '正在校验更新包…' });
