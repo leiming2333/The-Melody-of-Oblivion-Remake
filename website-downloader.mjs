@@ -96,16 +96,19 @@ async function readRequest({ source, headers, signal, fetchImpl, connectTimeoutM
       const accepted = sample ? chunk.subarray(0, expected - received) : chunk;
       chunks.push(accepted);
       received += accepted.byteLength;
+      source.readable = true;
       onChunk?.(received);
       if (sample && received === expected) break;
     }
     checkCancelled(controller.signal);
-    if (received !== expected) throw failure('SIZE_MISMATCH', '下载文件不完整，正在尝试其他线路');
+    if (received !== expected) throw failure('INCOMPLETE_BODY', '下载连接提前结束，正在尝试恢复');
     return { bytes: joinBytes(chunks, received), status: response.status };
   } catch (error) {
     if (controller.signal.aborted) throw cancellation(controller.signal);
     if (error.code) throw error;
-    throw failure('DOWNLOAD_FAILED', '该下载线路读取失败', error);
+    const wrapped = failure('DOWNLOAD_FAILED', '该下载线路读取失败', error);
+    wrapped.retryable = true;
+    throw wrapped;
   } finally {
     clearTimeout(timer);
     clearTimeout(totalTimer);
@@ -120,6 +123,12 @@ function positiveInteger(value, name) {
   return value;
 }
 
+function unavailableResponse(response, message = '下载线路暂时不可用') {
+  const error = failure('DOWNLOAD_FAILED', message);
+  error.retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+  return error;
+}
+
 /** Download to memory and return a saveable Blob only after official SHA-256 verification. */
 export async function downloadReleaseAsset({
   asset, sources, signal, onProgress, fetchImpl = globalThis.fetch, autoSelect = true,
@@ -127,6 +136,7 @@ export async function downloadReleaseAsset({
   probeBytes = 32 * 1024, probeTimeoutMs = 3500, probeConcurrency = 2,
   segmentBytes = 1024 * 1024, concurrency = 4,
   connectTimeoutMs = 10000, stallTimeoutMs = 15000,
+  retryDelayMs = 500,
   slowWindowMs = 12000, slowWarmupMs = 3000, slowRatio = 0.4,
   nowImpl = () => globalThis.performance?.now() ?? Date.now()
 } = {}) {
@@ -138,7 +148,7 @@ export async function downloadReleaseAsset({
   }
   const size = positiveInteger(asset.size, '安装包大小');
   for (const [name, value] of Object.entries({ probeBytes, probeTimeoutMs, probeConcurrency,
-    segmentBytes, concurrency, connectTimeoutMs, stallTimeoutMs, slowWindowMs })) positiveInteger(value, name);
+    segmentBytes, concurrency, connectTimeoutMs, stallTimeoutMs, retryDelayMs, slowWindowMs })) positiveInteger(value, name);
   if (!Number.isFinite(slowWarmupMs) || slowWarmupMs < 0
     || !Number.isFinite(slowRatio) || slowRatio <= 0 || slowRatio > 0.5) {
     throw failure('INVALID_ASSET', '下载速度检测参数无效');
@@ -176,7 +186,7 @@ export async function downloadReleaseAsset({
             totalTimeoutMs: probeTimeoutMs,
             inspect(response) {
               if (response.status === 206) assertRange(response, 0, end, size);
-              else if (response.status !== 200) throw failure('DOWNLOAD_FAILED', '下载线路暂时不可用');
+              else if (response.status !== 200) throw unavailableResponse(response);
               return end + 1;
             }
           });
@@ -230,7 +240,7 @@ export async function downloadReleaseAsset({
       let previous = 0;
       const result = await readRequest({ ...options, source, signal: controller.signal, headers: {},
         inspect(response) {
-          if (response.status !== 200) throw failure('DOWNLOAD_FAILED', '下载线路未返回完整文件');
+          if (response.status !== 200) throw unavailableResponse(response, '下载线路未返回完整文件');
           return size;
         },
         onChunk(loaded) {
@@ -256,7 +266,7 @@ export async function downloadReleaseAsset({
             return size;
           }
           if (response.status === 200) throw failure('RANGE_UNSUPPORTED', '该线路不支持分段下载');
-          if (response.status !== 206) throw failure('DOWNLOAD_FAILED', '下载线路暂时不可用');
+          if (response.status !== 206) throw unavailableResponse(response);
           assertRange(response, start, end, size);
           source.rangeSupported = true;
           return end - start + 1;
@@ -275,13 +285,34 @@ export async function downloadReleaseAsset({
       progress();
       return null;
     };
+    const readPartWithRetry = async (index, allowWhole) => {
+      for (let attempt = 0; ; attempt++) {
+        try { return await readPart(index, allowWhole); }
+        catch (error) {
+          checkCancelled(controller.signal);
+          const temporary = error.code === 'DOWNLOAD_TIMEOUT' || error.code === 'INCOMPLETE_BODY'
+            || (error.code === 'DOWNLOAD_FAILED' && error.retryable === true);
+          // Retry only a proven readable Range source, and only once per part.
+          // Other workers keep their requests and completed bytes during recovery.
+          if (attempt || !source.readable || source.rangeSupported !== true || !temporary) throw error;
+          inFlight.delete(index);
+          progress();
+          let retryTimer;
+          try {
+            await interruptible(new Promise(resolve => {
+              retryTimer = setTimeout(resolve, retryDelayMs);
+            }), controller.signal);
+          } finally { clearTimeout(retryTimer); }
+        }
+      }
+    };
     try {
       if (source.rangeSupported === false) return await readWhole();
       const missing = [];
       for (let index = 0; index < count; index++) if (!complete.has(index)) missing.push(index);
       if (missing.length && source.rangeSupported !== true) {
         // Detect ignored Range before opening multiple redundant full downloads.
-        const whole = await readPart(missing.shift(), true);
+        const whole = await readPartWithRetry(missing.shift(), true);
         if (whole) return whole;
       }
       let next = 0;
@@ -289,7 +320,7 @@ export async function downloadReleaseAsset({
       await Promise.allSettled(Array.from({ length: Math.min(concurrency, missing.length) }, async () => {
         while (next < missing.length && !controller.signal.aborted) {
           const index = missing[next++];
-          try { await readPart(index, false); }
+          try { await readPartWithRetry(index, false); }
           catch (error) {
             firstError ||= error;
             controller.abort(error);

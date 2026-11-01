@@ -25,7 +25,7 @@ function part(bytes, options, { hidden = false, body, extraHeaders = {} } = {}) 
 async function download(options = {}) {
   const { downloadReleaseAsset } = await downloader;
   return downloadReleaseAsset({ asset: assetFor(contents), sources: [source('one')], autoSelect: false,
-    segmentBytes: 4, concurrency: 1, connectTimeoutMs: 100, stallTimeoutMs: 100, ...options });
+    segmentBytes: 4, concurrency: 1, connectTimeoutMs: 100, stallTimeoutMs: 100, retryDelayMs: 5, ...options });
 }
 
 test('automatic selection picks the faster readable source and reports its label', async () => {
@@ -122,6 +122,83 @@ test('parallel failure retains completed parts while cancelling another partial 
   assert.deepEqual(Buffer.from(await result.blob.arrayBuffer()), contents);
   assert.deepEqual(healthyStarts, [8, 12]);
   assert.equal(partialCancelled, true);
+});
+
+test('a readable source recovers one transient part failure without cancelling healthy parts', async () => {
+  for (const mode of ['disconnected', 'stalled', 'short-eof', 'http-503']) {
+    const starts = [];
+    const progress = [];
+    let failedAttempts = 0;
+    let fallbackRequests = 0;
+    const result = await download({ sources: [source('original'), source('fallback')], concurrency: 2,
+      stallTimeoutMs: 20, onProgress: event => progress.push(event),
+      fetchImpl: async (url, options) => {
+        const { start } = rangeOf(options, contents.length);
+        if (url.includes('fallback')) { fallbackRequests++; return part(contents, options); }
+        starts.push(start);
+        if (start === 4 && failedAttempts++ === 0) {
+          if (mode === 'http-503') return new Response('temporarily unavailable', { status: 503 });
+          if (mode === 'short-eof') return part(contents, options, { body: contents.subarray(4, 5) });
+          return part(contents, options, { body: new ReadableStream({
+            start(controller) { controller.enqueue(contents.subarray(4, 5)); },
+            pull(controller) { if (mode === 'disconnected') controller.error(new Error('reset')); }
+          }) });
+        }
+        return part(contents, options);
+      }
+    });
+    assert.equal(result.source, 'Line original', mode);
+    assert.deepEqual(Buffer.from(await result.blob.arrayBuffer()), contents, mode);
+    assert.equal(starts.filter(start => start === 4).length, 2, mode);
+    assert.equal(starts.filter(start => start === 8).length, 1, mode);
+    assert.equal(starts.filter(start => start === 12).length, 1, mode);
+    assert.equal(fallbackRequests, 0, mode);
+    assert.ok(progress.some(event => event.phase === 'downloading' && event.loaded === 12), mode);
+  }
+});
+
+test('retry backoff remains immediately cancellable and never launches another request', async () => {
+  const controller = new AbortController();
+  const starts = [];
+  let failed = false;
+  await assert.rejects(download({ signal: controller.signal, retryDelayMs: 500,
+    onProgress(event) { if (failed && event.loaded === 4) controller.abort(); },
+    fetchImpl: async (_url, options) => {
+      const { start } = rangeOf(options, contents.length);
+      starts.push(start);
+      if (start === 4) { failed = true; throw new Error('temporary reset'); }
+      return part(contents, options);
+    }
+  }), error => error.name === 'AbortError');
+  assert.deepEqual(starts, [0, 4]);
+});
+
+test('retry exhaustion advances to fallback once and corrupt ranges are never retried', async () => {
+  let failedAttempts = 0;
+  const result = await download({ sources: [source('broken'), source('healthy')],
+    fetchImpl: async (url, options) => {
+      if (url.includes('broken') && rangeOf(options, contents.length).start === 4) {
+        failedAttempts++;
+        throw new Error('connection reset');
+      }
+      return part(contents, options);
+    }
+  });
+  assert.equal(failedAttempts, 2);
+  assert.equal(result.source, 'Line healthy');
+  assert.deepEqual(Buffer.from(await result.blob.arrayBuffer()), contents);
+  for (const mode of ['oversized', 'wrong-header']) {
+    let downloadRequests = 0;
+    await assert.rejects(download({ autoSelect: true, probeBytes: 2,
+      fetchImpl: async (_url, options) => {
+        if (options.headers.Range === 'bytes=0-1') return part(contents, options);
+        downloadRequests++;
+        return part(contents, options, mode === 'oversized' ? { body: Buffer.alloc(5) }
+          : { extraHeaders: { 'Content-Range': 'bytes 1-4/16' } });
+      }
+    }), error => error.code === 'SIZE_MISMATCH');
+    assert.equal(downloadRequests, 1, mode);
+  }
 });
 
 test('a mixed-source digest mismatch clears poisoned parts before retrying the healthy source', async () => {

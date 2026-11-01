@@ -258,7 +258,7 @@ function updateWebsiteDownloadProgress(progress, controller) {
 }
 
 function loadWebsiteDownloader() {
-  return import("./website-downloader.mjs");
+  return import("./website-downloader.mjs?v=20261101-download-3");
 }
 
 async function abortableWebsiteDownload(task, signal) {
