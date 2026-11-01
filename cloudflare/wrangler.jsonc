@@ -2,5 +2,8 @@
   "name": "melody-downloads",
   "main": "download-worker.mjs",
   "compatibility_date": "2026-11-01",
-  "workers_dev": true
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "downloads.melodyoblivion.xyz", "custom_domain": true }
+  ]
 }

@@ -87,6 +87,43 @@ test('HEAD forwards no body or Range, with CORS and the original full length', a
   assert.equal(result.body, null);
   assert.equal(result.headers.get('content-length'), '103871652');
   assert.equal(result.headers.get('access-control-allow-origin'), '*');
+  assert.match(result.headers.get('cache-control'), /(?:^|,\s*)no-transform(?:,|$)/);
+});
+
+test('HEAD cache hits preserve full length without reading bytes or creating a pending fixed-length body', async () => {
+  const { createDownloadWorker } = await workerModule;
+  const original = globalThis.FixedLengthStream;
+  let read = false;
+  let cancelled = false;
+  globalThis.FixedLengthStream = class {
+    constructor() { assert.fail('HEAD must not create an unwritten fixed-length stream'); }
+  };
+  try {
+    const context = { waitUntil() { assert.fail('HEAD must not schedule body or cache work'); } };
+    const worker = createDownloadWorker({
+      cache: {
+        async match() {
+          return new Response(new ReadableStream({
+            pull() { read = true; assert.fail('HEAD must not read a cached installer'); },
+            cancel() { cancelled = true; }
+          }, { highWaterMark: 0 }), { headers: { 'Content-Length': '103871652' } });
+        },
+        async put() { assert.fail('HEAD must not write cache'); }
+      },
+      fetchImpl() { assert.fail('cached HEAD must not fetch the origin'); }
+    });
+    const result = await worker.fetch(new Request(publicUrl, { method: 'HEAD' }), {}, context);
+    assert.equal(result.status, 200);
+    assert.equal(result.body, null);
+    assert.equal(result.headers.get('content-length'), '103871652');
+    assert.match(result.headers.get('cache-control'), /(?:^|,\s*)no-transform(?:,|$)/);
+    assert.equal(result.headers.get('x-melody-cache'), 'HIT');
+    assert.equal(read, false);
+    assert.equal(cancelled, true);
+  } finally {
+    if (original === undefined) delete globalThis.FixedLengthStream;
+    else globalThis.FixedLengthStream = original;
+  }
 });
 
 test('a full object streams into cache and later HEAD and Range need no origin', async () => {

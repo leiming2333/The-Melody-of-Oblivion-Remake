@@ -1,4 +1,19 @@
 // Paste this module into a Cloudflare Worker. No secrets, bindings, or R2 bucket required.
+/**
+ * @typedef {{
+ *   match(request: Request): Promise<Response | undefined>,
+ *   put(request: Request, response: Response): Promise<void>
+ * }} DownloadCache
+ * @typedef {typeof globalThis & {
+ *   FixedLengthStream?: new (length: number) => {
+ *     readable: ReadableStream,
+ *     writable: WritableStream
+ *   },
+ *   caches?: { default?: DownloadCache }
+ * }} WorkerRuntime
+ */
+const runtime = /** @type {WorkerRuntime} */ (globalThis);
+
 const BLOB_ORIGIN = 'https://4rgpxcwwpeiy2uij.public.blob.vercel-storage.com';
 const GITHUB_RELEASES = 'https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download';
 const SEGMENT_BYTES = 1024 * 1024;
@@ -81,8 +96,10 @@ function headersFor(response, filename, cacheState) {
   headers.set('Accept-Ranges', 'bytes');
   headers.set('Content-Disposition', `attachment; filename="${filename}"`);
   headers.set('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+  // Cloudflare's compression layer can remove Content-Length, including on HEAD.
+  // Preserve the installer's byte representation and metadata without a dummy body.
   headers.set('Cache-Control', response.status === 200 || response.status === 206
-    ? `public, max-age=${CACHE_SECONDS}, immutable` : 'no-store');
+    ? `public, max-age=${CACHE_SECONDS}, immutable, no-transform` : 'no-store');
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('X-Melody-Cache', cacheState);
   return headers;
@@ -118,7 +135,11 @@ function allowedRedirect(url, initialUrl) {
 async function originFetch(fetchImpl, initialUrl, options) {
   let url = initialUrl;
   for (let redirects = 0; redirects <= 3; redirects++) {
-    const response = await fetchImpl(url, { ...options, redirect: 'manual' });
+    // Keep implicit subrequest caching separate from our explicit Cache API.
+    // An origin may still ignore Range, in which case callers receive a full 200.
+    const response = await fetchImpl(url, {
+      ...options, redirect: 'manual', cache: 'no-store'
+    });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get('location');
     discard(response);
@@ -130,9 +151,9 @@ async function originFetch(fetchImpl, initialUrl, options) {
 }
 
 function fixedLengthBody(body, length, context) {
-  if (length === null || typeof globalThis.FixedLengthStream !== 'function') return body;
+  if (length === null || typeof runtime.FixedLengthStream !== 'function') return body;
   // Workers derives Content-Length from the body type, not a manually set header.
-  const { readable, writable } = new globalThis.FixedLengthStream(length);
+  const { readable, writable } = new runtime.FixedLengthStream(length);
   const pumping = body.pipeTo(writable).catch(() => {});
   context?.waitUntil(pumping);
   return readable;
@@ -142,8 +163,8 @@ function fixedLengthBody(body, length, context) {
 // 100 MB installer; a stalled/failed cache writer is dropped without failing delivery.
 function cacheWhileStreaming(response, cache, key, storedHeaders, context, expectedLength) {
   const reader = response.body.getReader();
-  const { readable, writable } = typeof globalThis.FixedLengthStream === 'function'
-    ? new globalThis.FixedLengthStream(expectedLength) : new TransformStream();
+  const { readable, writable } = typeof runtime.FixedLengthStream === 'function'
+    ? new runtime.FixedLengthStream(expectedLength) : new TransformStream();
   const writer = writable.getWriter();
   let caching = true;
   let received = 0;
@@ -194,7 +215,8 @@ function cacheWhileStreaming(response, cache, key, storedHeaders, context, expec
   });
 }
 
-export function createDownloadWorker({ fetchImpl = (...args) => fetch(...args), cache } = {}) {
+/** @param {{ fetchImpl?: typeof fetch, cache?: DownloadCache | null }} [options] */
+export function createDownloadWorker({ fetchImpl = (input, init) => fetch(input, init), cache } = {}) {
   return {
     async fetch(request, _env, context) {
       const { method } = request;
@@ -208,7 +230,7 @@ export function createDownloadWorker({ fetchImpl = (...args) => fetch(...args), 
       let range;
       try { range = method === 'HEAD' ? null : rangeOf(request.headers.get('range')); }
       catch { return errorResponse(416, 'Use one valid byte range', method); }
-      const storage = cache === undefined ? globalThis.caches?.default : cache;
+      const storage = cache === undefined ? runtime.caches?.default : cache;
       const fullKey = cacheKey(url, asset, 'full');
       const ifRange = range && request.headers.get('if-range');
       if (!ifRange) {
