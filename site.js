@@ -258,7 +258,7 @@ function updateWebsiteDownloadProgress(progress, controller) {
 }
 
 function loadWebsiteDownloader() {
-  return import("./src/shared/website-downloader.mjs");
+  return import("./website-downloader.mjs");
 }
 
 async function abortableWebsiteDownload(task, signal) {

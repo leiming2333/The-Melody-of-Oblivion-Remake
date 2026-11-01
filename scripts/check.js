@@ -3,7 +3,7 @@ const { ESLint } = require('eslint');
 async function check() {
   const eslint = new ESLint();
   // ESLint's parser checks syntax as well as the selected correctness rules.
-  const results = await eslint.lintFiles(['site.js', 'src', 'api', 'scripts', 'test', 'eslint.config.js']);
+  const results = await eslint.lintFiles(['site.js', 'website-downloader.mjs', 'src', 'api', 'scripts', 'test', 'eslint.config.js']);
   const formatter = await eslint.loadFormatter('stylish');
   const report = formatter.format(results);
   if (report) process.stdout.write(report);

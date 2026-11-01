@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 
-const downloader = import('../src/shared/website-downloader.mjs');
+const downloader = import('../website-downloader.mjs');
 const contents = Buffer.from('abcdefghijklmnop');
 const source = id => ({ id, label: `Line ${id}`, url: `https://${id}.example/launcher.exe` });
 const assetFor = bytes => ({ name: 'launcher.exe', size: bytes.length,
@@ -269,16 +269,27 @@ function trickle(bytes, delayMs) {
 test('a source that keeps trickling switches only when a faster measured fallback exists', async () => {
   const progress = [];
   const healthyStarts = [];
+  let probing = true;
+  let probeClock = 0;
   const result = await download({ autoSelect: true, probeBytes: 2, probeTimeoutMs: 100,
     slowWindowMs: 30, slowWarmupMs: 5,
     sources: [source('degraded'), source('healthy')],
-    onProgress: event => progress.push(event),
+    // Keep probe speeds deterministic despite Windows timer quantization:
+    // 2 bytes/ms for the first source and 1 byte/ms for its healthy fallback.
+    // The actual trickling transfer and rolling monitor still use real time.
+    nowImpl: () => probing ? probeClock : performance.now(),
+    onProgress(event) {
+      progress.push(event);
+      if (event.phase !== 'testing') probing = false;
+    },
     fetchImpl: async (url, options) => {
       const { start, end } = rangeOf(options, contents.length);
       if (url.includes('healthy')) {
-        if (end - start + 1 === 2) await new Promise(resolve => setTimeout(resolve, 5));
-        else healthyStarts.push(start);
-      }
+        if (probing) {
+          await new Promise(resolve => setTimeout(resolve, 5));
+          probeClock += 2;
+        } else healthyStarts.push(start);
+      } else if (probing) probeClock++;
       if (url.includes('degraded') && start > 0) return part(contents, options, {
         body: trickle(contents.subarray(start, end + 1), 15)
       });
