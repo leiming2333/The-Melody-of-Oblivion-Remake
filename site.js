@@ -57,6 +57,7 @@ const translations = {
   "download.source": "Download source (switch if a download fails)",
   "download.auto": "Choose automatically (recommended)",
   "download.blob": "Vercel Blob (Hong Kong)",
+  "download.cloudflare": "Cloudflare CDN",
   "download.official": "GitHub official",
   "download.button": "View releases",
   "download.alternative": "GitHub original download",
@@ -138,6 +139,15 @@ function isBlobDownloadUrl(value) {
   }
 }
 
+function cloudflareDownloadUrl(asset) {
+  try {
+    const url = new URL(asset?.cdn_download_url);
+    const suffix = `/releases/${encodeURIComponent(latestRelease.tag_name)}/${encodeURIComponent(asset.name)}`;
+    return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash
+      && url.pathname.endsWith(suffix) ? url.href : null;
+  } catch { return null; }
+}
+
 function selectedDownloadAsset() {
   const target = downloadPlatform.value;
   const extension = target.startsWith("Windows") ? ".exe" : target.startsWith("macOS") ? ".zip" : ".AppImage";
@@ -157,6 +167,8 @@ function websiteDownloadSources(asset) {
   if (isBlobDownloadUrl(asset.browser_download_url)) {
     sources.unshift({ id: "blob", label: "Vercel Blob", url: asset.browser_download_url });
   }
+  const cdnUrl = cloudflareDownloadUrl(asset);
+  if (cdnUrl) sources.unshift({ id: "cloudflare", label: "Cloudflare CDN", url: cdnUrl });
   const selected = sources.find((source) => source.id === downloadSource.value);
   return selected ? [selected, ...sources.filter((source) => source !== selected)] : sources;
 }
@@ -167,6 +179,13 @@ function updateDownloadLink() {
   const target = downloadPlatform.value;
   const asset = selectedDownloadAsset();
   const blobAvailable = Boolean(asset && isBlobDownloadUrl(asset.browser_download_url));
+  const cdnUrl = cloudflareDownloadUrl(asset);
+  const cloudflareOption = downloadSource.querySelector('option[value="cloudflare"]');
+  cloudflareOption.disabled = !cdnUrl;
+  cloudflareOption.textContent = cdnUrl
+    ? (english ? translations["download.cloudflare"] : originalCopy["download.cloudflare"])
+    : (english ? "Cloudflare CDN (unavailable for this build)" : "Cloudflare CDN（此安装包不可用）");
+  if (asset && !cdnUrl && downloadSource.value === "cloudflare") downloadSource.value = "auto";
   const blobOption = downloadSource.querySelector('option[value="blob"]');
   blobOption.disabled = Boolean(latestRelease) && !blobAvailable;
   blobOption.textContent = blobOption.disabled
@@ -174,9 +193,11 @@ function updateDownloadLink() {
     : (english ? translations["download.blob"] : originalCopy["download.blob"]);
   if (asset && !blobAvailable && downloadSource.value === "blob") downloadSource.value = "auto";
   const automatic = downloadSource.value === "auto";
-  const directSource = automatic ? (blobAvailable ? "blob" : "official") : downloadSource.value;
+  const directSource = automatic ? (cdnUrl ? "cloudflare" : blobAvailable ? "blob" : "official") : downloadSource.value;
   downloadButton.href = asset
-    ? directSource === "blob"
+    ? directSource === "cloudflare"
+      ? cdnUrl
+      : directSource === "blob"
       ? asset.browser_download_url
       : `/api/download?tag=${encodeURIComponent(latestRelease.tag_name)}&asset=${encodeURIComponent(asset.name)}&source=${encodeURIComponent(directSource)}`
     : releasesUrl;
@@ -191,12 +212,14 @@ function updateDownloadLink() {
       ? (english ? "Download with automatic source selection" : "自动选择线路下载")
       : downloadSource.value === "official"
       ? (english ? "Download from GitHub in your browser" : "GitHub 官方下载（浏览器）")
+      : downloadSource.value === "cloudflare"
+        ? (english ? "Download from Cloudflare CDN" : "Cloudflare CDN 下载")
       : downloadSource.value === "blob"
         ? (english ? "Download from Vercel Blob" : "Vercel Blob 下载")
         : (english ? `Accelerated download (${downloadSource.selectedOptions[0].textContent})` : `国内加速下载（${downloadSource.selectedOptions[0].textContent}）`)
     : (english ? "View releases" : "查看发行版本");
   downloadStatus.textContent = asset
-    ? `${latestRelease.tag_name} · ${(asset.size / 1048576).toFixed(1)} MB · ${downloadSource.selectedOptions[0].textContent} · HTTPS${target.startsWith("Windows") && !blobAvailable
+    ? `${latestRelease.tag_name} · ${(asset.size / 1048576).toFixed(1)} MB · ${downloadSource.selectedOptions[0].textContent} · HTTPS${target.startsWith("Windows") && !blobAvailable && !cdnUrl
       ? (english ? " · Blob is temporarily unavailable" : " · Blob 线路暂不可用") : ""}`
     : releaseLoadFailed
       ? (english ? "Could not load the download list. Open Releases to choose a file." : "暂时无法读取安装包列表，可前往发行页面选择。")

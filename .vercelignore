@@ -3,6 +3,7 @@ src/*
 !src/shared/
 !src/shared/**
 test
+cloudflare
 release*/
 .git
 .github

@@ -28,18 +28,21 @@ async function harness({ releaseAsset = asset, savedSource } = {}) {
     return result;
   }
   const select = element('#download-source');
-  select.options = ['auto', 'blob', 'ghproxy', 'ghfast', 'gh-proxy', 'official'].map(value => ({ value, textContent: value }));
+  select.options = ['auto', 'cloudflare', 'blob', 'ghproxy', 'ghfast', 'gh-proxy', 'official'].map(value => ({ value, textContent: value }));
   select.value = 'auto';
   Object.defineProperty(select, 'selectedOptions', { get: () => select.options.filter(option => option.value === select.value) });
   const blobOption = element('option[value="blob"]');
   blobOption.dataset.i18n = 'download.blob';
   blobOption.innerHTML = 'Vercel Blob（香港）';
+  const cloudflareOption = element('option[value="cloudflare"]');
+  cloudflareOption.dataset.i18n = 'download.cloudflare';
+  cloudflareOption.innerHTML = 'Cloudflare CDN';
   class BrowserURL extends URL {}
   BrowserURL.createObjectURL = blob => { objectUrls.push(blob); return 'blob:validated'; };
   BrowserURL.revokeObjectURL = url => revoked.push(url);
   const context = vm.createContext({
     document: { documentElement: { lang: 'zh-CN' }, body: element('body'),
-      querySelector: element, querySelectorAll: () => [blobOption], createElement: tag => element(`${tag}-${elements.size}`),
+      querySelector: element, querySelectorAll: () => [blobOption, cloudflareOption], createElement: tag => element(`${tag}-${elements.size}`),
       addEventListener() {} },
     window: { addEventListener() {} }, navigator: { platform: 'Win32', language: 'zh-CN' },
     localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) },
@@ -166,4 +169,54 @@ test('manual sources stay first, failed verification does not save, and selectio
   assert.equal(h.storage.get('melody-site-download-source'), 'auto');
   const unknown = await harness({ savedSource: 'https://untrusted.example' });
   assert.equal(unknown.select.value, 'auto');
+});
+
+test('Cloudflare joins automatic source selection and remains the native browser fallback', async () => {
+  const cdnUrl = `https://cdn.example.test/releases/v1.9.1/${filename}`;
+  const h = await harness({ releaseAsset: { ...asset, cdn_download_url: cdnUrl } });
+  assert.equal(h.element('option[value="cloudflare"]').disabled, false);
+  assert.equal(h.element('#download-alternative').href, cdnUrl);
+  assert.equal(h.element('#download-alternative').listeners.click, undefined);
+  assert.equal(h.element('#download-button').href, cdnUrl);
+  const modified = h.click({ ctrlKey: true });
+  await modified.pending;
+  assert.equal(modified.event.prevented, false);
+  h.useDownloader(async options => {
+    assert.equal(options.autoSelect, true);
+    assert.equal(options.sources[0].id, 'cloudflare');
+    assert.equal(options.sources[0].url, cdnUrl);
+    assert.ok(options.sources.some(candidate => candidate.id === 'blob'));
+    return { blob: new Blob(['test']), filename, source: 'Cloudflare CDN' };
+  });
+  await h.click().pending;
+  assert.deepEqual(h.saved, [{ url: 'blob:validated', filename }]);
+});
+
+test('a configured manual Cloudflare selection stays first while keeping existing fallback sources', async () => {
+  const cdnUrl = `https://cdn.example.test/releases/v1.9.1/${filename}`;
+  const h = await harness({ savedSource: 'cloudflare', releaseAsset: { ...asset, cdn_download_url: cdnUrl } });
+  assert.equal(h.select.value, 'cloudflare');
+  assert.equal(h.element('#download-alternative').href, cdnUrl);
+  h.useDownloader(async options => {
+    assert.equal(options.autoSelect, false);
+    assert.equal(options.sources[0].id, 'cloudflare');
+    assert.ok(options.sources.some(candidate => candidate.id === 'gh-proxy'));
+    return { blob: new Blob(['test']), filename, source: 'Cloudflare CDN' };
+  });
+  await h.click().pending;
+  assert.equal(h.saved.length, 1);
+});
+
+test('unconfigured or invalid CDN metadata disables Cloudflare and preserves the previous native fallback', async () => {
+  for (const cdn_download_url of [undefined, 'http://cdn.example.test/releases/v1.9.1/' + filename,
+    `https://cdn.example.test/releases/v1.9.0/${filename}`,
+    `https://user:password@cdn.example.test/releases/v1.9.1/${filename}`,
+    `https://cdn.example.test/releases/v1.9.1/${filename}?origin=untrusted`]) {
+    const h = await harness({ savedSource: 'cloudflare', releaseAsset: { ...asset, cdn_download_url } });
+    assert.equal(h.select.value, 'auto');
+    assert.equal(h.element('option[value="cloudflare"]').disabled, true);
+    assert.equal(h.element('#download-alternative').href, asset.browser_download_url);
+    assert.equal(h.context.websiteDownloadSources({ ...asset, cdn_download_url })
+      .some(candidate => candidate.id === 'cloudflare'), false);
+  }
 });

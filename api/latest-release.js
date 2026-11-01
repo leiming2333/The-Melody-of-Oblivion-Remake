@@ -1,5 +1,25 @@
 const RELEASE_API = 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest';
 const { isStableRelease, withBlobDownloads } = require('../src/shared/release-metadata');
+const websiteCdnConfig = require('../src/shared/website-cdn-config.json');
+const CDN_ASSET_NAME = /^The-Melody-of-Oblivion-Remake-(?:Windows-(?:x64|ia32|arm64)\.exe|Linux-(?:x64|arm64|armv7l)\.AppImage|macOS-(?:x64|arm64)\.zip)$/;
+
+function withCdnDownloads(release, baseUrl) {
+  let base;
+  try {
+    if (typeof baseUrl !== 'string' || !baseUrl.trim()) return release;
+    base = new URL(baseUrl.trim());
+    if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) return release;
+    if (!/^v\d+\.\d+\.\d+$/.test(release.tag_name)) return release;
+    if (!base.pathname.endsWith('/')) base.pathname += '/';
+  } catch { return release; }
+  return {
+    ...release,
+    assets: release.assets.map(asset => CDN_ASSET_NAME.test(asset.name ?? '') ? {
+      ...asset,
+      cdn_download_url: new URL(`releases/${encodeURIComponent(release.tag_name)}/${encodeURIComponent(asset.name)}`, base).href
+    } : asset)
+  };
+}
 
 async function latestBlobRelease() {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
@@ -36,7 +56,8 @@ async function readChecksum(asset, fetchImpl) {
 
 function createLatestReleaseHandler({
   fetchImpl = (...args) => fetch(...args),
-  readBlobRelease = latestBlobRelease
+  readBlobRelease = latestBlobRelease,
+  cdnBaseUrl = process.env.CDN_BASE_URL ?? websiteCdnConfig.baseUrl
 } = {}) {
   return async function latestRelease(_request, response) {
     try {
@@ -66,7 +87,7 @@ function createLatestReleaseHandler({
       }));
       const blobRelease = await readBlobRelease();
       response.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
-      response.status(200).json(withBlobDownloads(release, blobRelease));
+      response.status(200).json(withCdnDownloads(withBlobDownloads(release, blobRelease), cdnBaseUrl));
     } catch {
       response.status(502).json({ error: 'Release information is unavailable' });
     }

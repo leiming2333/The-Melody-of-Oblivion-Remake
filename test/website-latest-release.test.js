@@ -44,13 +44,14 @@ const asset = {
   digest: `sha256:${'a'.repeat(64)}`
 };
 
-function releaseHandler(github, blob, { githubAvailable = true } = {}) {
+function releaseHandler(github, blob, { githubAvailable = true, cdnBaseUrl = '' } = {}) {
   return createLatestReleaseHandler({
     fetchImpl: async (url) => {
       assert.equal(url, 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest');
       return { ok: githubAvailable, json: async () => structuredClone(github) };
     },
-    readBlobRelease: async () => blob
+    readBlobRelease: async () => blob,
+    cdnBaseUrl
   });
 }
 
@@ -154,4 +155,71 @@ test('GitHub failure does not advertise a Blob manifest with unknown freshness',
   await releaseHandler(null, { tag_name: 'v1.6.4', assets: [] }, { githubAvailable: false })({}, result);
   assert.equal(result.code, 502);
   assert.equal(result.headers['Cache-Control'], undefined);
+});
+
+test('optional Cloudflare URLs cover all eight packages without replacing official metadata or Blob', async () => {
+  const names = ['Windows-x64.exe', 'Windows-ia32.exe', 'Windows-arm64.exe',
+    'Linux-x64.AppImage', 'Linux-arm64.AppImage', 'Linux-armv7l.AppImage',
+    'macOS-x64.zip', 'macOS-arm64.zip'].map(suffix => `The-Melody-of-Oblivion-Remake-${suffix}`);
+  const packages = names.map(name => ({ ...asset, name, browser_download_url:
+    `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/v1.6.5/${name}` }));
+  const sidecar = { name: `${names[0]}.sha256`, size: 80 };
+  const github = { tag_name: 'v1.6.5', body: 'official release notes', assets: [...packages, sidecar] };
+  const blobUrl = `https://fixture.public.blob.vercel-storage.com/releases/v1.6.5/${names[0]}`;
+  const result = response();
+  await releaseHandler(github, { tag_name: github.tag_name,
+    assets: [{ ...packages[0], browser_download_url: blobUrl }] },
+  { cdnBaseUrl: 'https://cdn.example.test/' })({}, result);
+  assert.equal(result.code, 200);
+  for (let index = 0; index < packages.length; index++) {
+    assert.equal(result.body.assets[index].cdn_download_url,
+      `https://cdn.example.test/releases/v1.6.5/${names[index]}`);
+    assert.equal(result.body.assets[index].size, packages[index].size);
+    assert.equal(result.body.assets[index].digest, packages[index].digest);
+    assert.equal(result.body.assets[index].browser_download_url, index ? packages[index].browser_download_url : blobUrl);
+  }
+  assert.equal(result.body.assets[0].github_download_url, packages[0].browser_download_url);
+  assert.equal(result.body.body, github.body);
+  assert.equal(result.body.assets.at(-1).cdn_download_url, undefined);
+});
+
+test('invalid or unconfigured CDN bases leave download metadata unchanged', async () => {
+  const github = { tag_name: 'v1.6.5', assets: [asset] };
+  for (const cdnBaseUrl of ['', 'not-a-url', 'http://cdn.example.test', 'javascript:alert(1)',
+    'https://user:password@cdn.example.test', 'https://cdn.example.test/?origin=untrusted',
+    'https://cdn.example.test/#fragment']) {
+    const result = response();
+    await releaseHandler(github, null, { cdnBaseUrl })({}, result);
+    assert.deepEqual(result.body, github);
+  }
+});
+
+test('CDN configuration preserves an optional path prefix and env overrides the tracked public default', async t => {
+  const original = process.env.CDN_BASE_URL;
+  const config = require('../src/shared/website-cdn-config.json');
+  const originalDefault = config.baseUrl;
+  config.baseUrl = 'https://public-cdn.example.test';
+  t.after(() => {
+    if (original === undefined) delete process.env.CDN_BASE_URL;
+    else process.env.CDN_BASE_URL = original;
+    config.baseUrl = originalDefault;
+  });
+  const options = {
+    fetchImpl: async () => ({ ok: true, json: async () => ({ tag_name: 'v1.6.5', assets: [asset] }) }),
+    readBlobRelease: async () => null
+  };
+  delete process.env.CDN_BASE_URL;
+  const defaultResult = response();
+  await createLatestReleaseHandler(options)({}, defaultResult);
+  assert.equal(defaultResult.body.assets[0].cdn_download_url,
+    `https://public-cdn.example.test/releases/v1.6.5/${asset.name}`);
+  process.env.CDN_BASE_URL = 'https://cdn.example.test/download';
+  const result = response();
+  await createLatestReleaseHandler(options)({}, result);
+  assert.equal(result.body.assets[0].cdn_download_url,
+    `https://cdn.example.test/download/releases/v1.6.5/${asset.name}`);
+  process.env.CDN_BASE_URL = '';
+  const disabled = response();
+  await createLatestReleaseHandler(options)({}, disabled);
+  assert.equal(disabled.body.assets[0].cdn_download_url, undefined);
 });

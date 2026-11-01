@@ -124,6 +124,8 @@ styles.css                Landing-page styles
 
 The repository root contains the website, while `src/renderer` contains the Electron launcher. The website does not embed launcher captures; `assets/launcher-screenshot.png` and `assets/launcher-accounts.png` appear in this README only, so recapture them when the launcher interface changes.
 
+To add the Cloudflare download CDN, deploy and verify the Worker in `cloudflare/`, then set `baseUrl` in `src/shared/website-cdn-config.json` and publish the website. The deployment environment variable `CDN_BASE_URL` takes precedence. The CDN serves `/releases/<tag>/<official filename>` and joins automatic source selection, manual selection, and the automatic browser fallback. Official GitHub sizes and SHA-256 values remain authoritative. An empty configuration keeps the CDN disabled.
+
 ## Security notes
 
 - Electron runs the renderer with context isolation, sandboxing, and Node.js integration disabled.

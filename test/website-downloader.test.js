@@ -329,7 +329,7 @@ test('untrusted metadata fails before any download and cancellation also interru
   }), error => error.name === 'AbortError');
 });
 
-function trickle(bytes, delayMs) {
+function trickle(bytes, delayMs, onData) {
   let offset = 0;
   let cancelled = false;
   return new ReadableStream({
@@ -337,7 +337,10 @@ function trickle(bytes, delayMs) {
       await new Promise(resolve => setTimeout(resolve, delayMs));
       if (cancelled) return;
       if (offset === bytes.length) controller.close();
-      else controller.enqueue(bytes.subarray(offset, ++offset));
+      else {
+        onData?.();
+        controller.enqueue(bytes.subarray(offset, ++offset));
+      }
     },
     cancel() { cancelled = true; }
   });
@@ -393,16 +396,30 @@ test('a source that keeps trickling switches only when a faster measured fallbac
 test('speed monitoring sums concurrent streams instead of rejecting individually slower parts', async () => {
   const bytes = Buffer.alloc(80, 42);
   let switched = false;
+  let probing = true;
+  let probeClock = 0;
+  let transferClock = 0;
   const result = await download({ asset: assetFor(bytes), segmentBytes: 16, concurrency: 4,
     autoSelect: true, probeBytes: 4, probeTimeoutMs: 100,
-    slowWindowMs: 20, slowWarmupMs: 5,
+    slowWindowMs: 20, slowWarmupMs: 5, stallTimeoutMs: 1000,
     sources: [source('parallel'), source('backup')],
-    onProgress(event) { if (event.phase === 'switching') switched = true; },
+    // Four streams together deliver one byte per 5ms in the controlled clock;
+    // each stream alone is slower than 40% of the 0.25 byte/ms backup probe.
+    nowImpl: () => probing ? probeClock : transferClock,
+    onProgress(event) {
+      if (event.phase !== 'testing') probing = false;
+      if (event.phase === 'switching') switched = true;
+    },
     fetchImpl: async (url, options) => {
       const { start, end } = rangeOf(options, bytes.length);
-      if (url.includes('backup')) await new Promise(resolve => setTimeout(resolve, 4));
+      if (probing) {
+        if (url.includes('backup')) {
+          await new Promise(resolve => setTimeout(resolve, 4));
+          probeClock += 16;
+        } else probeClock++;
+      }
       return part(bytes, options, { body: start > 0
-        ? trickle(bytes.subarray(start, end + 1), 4) : undefined });
+        ? trickle(bytes.subarray(start, end + 1), 4, () => { transferClock += 5; }) : undefined });
     }
   });
   assert.equal(result.source, 'Line parallel');

@@ -20,7 +20,7 @@
     "verify:toolchain": "node scripts/toolchain.cjs",
     "smoke": "electron . --smoke-test",
     "check": "node scripts/check.js",
-    "lint": "eslint site.js website-downloader.mjs src api scripts test eslint.config.js",
+    "lint": "eslint site.js website-downloader.mjs cloudflare src api scripts test eslint.config.js",
     "test": "node --test test/*.test.js"
   },
   "engines": {

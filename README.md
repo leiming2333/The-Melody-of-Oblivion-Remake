@@ -129,6 +129,8 @@ styles.css                落地页样式
 
 官网位于仓库根目录，Electron 启动器界面位于 `src/renderer`。官网不嵌入启动器截图，`assets/launcher-screenshot.png` 和 `assets/launcher-accounts.png` 两张真实截图仅供 README 展示；界面变化后需重新采集截图。
 
+官网可选接入 Cloudflare CDN：将已验收的 Worker HTTPS 根地址写入 `src/shared/website-cdn-config.json` 的 `baseUrl`，随网站代码发布；也可在网站部署环境设置优先级更高的 `CDN_BASE_URL`。两处默认都不配置时沿用现有下载线路。CDN 提供 `/releases/<tag>/<官方文件名>`；网站将其加入自动测速和手动选线，自动模式的浏览器备用直链也优先使用该地址。安装包大小和 SHA-256 仍以 GitHub 官方发布信息为准。
+
 ## 安全说明
 
 - Electron 渲染进程启用了上下文隔离和沙箱，并关闭 Node.js 集成。

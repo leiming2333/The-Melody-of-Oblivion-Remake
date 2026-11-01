@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" href="./assets/app-icon.png">
   <link rel="preload" as="image" href="./assets/backgrounds/scene-04.jpg">
   <link rel="stylesheet" href="./styles.css?v=20261101-download">
-  <script src="./site.js?v=20261101-download-3" defer></script>
+  <script src="./site.js?v=20261101-download-4" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content" data-i18n="skip">跳到主要内容</a>
@@ -104,6 +104,7 @@
           <label for="download-source" data-i18n="download.source">下载线路（下载失败可切换）</label>
           <select id="download-source">
             <option value="auto" selected data-i18n="download.auto">自动选择线路（推荐）</option>
+            <option value="cloudflare" data-i18n="download.cloudflare" disabled>Cloudflare CDN</option>
             <option value="blob" data-i18n="download.blob">Vercel Blob（香港）</option>
             <option value="ghproxy">ghproxy.net</option>
             <option value="ghfast">ghfast.top</option>
