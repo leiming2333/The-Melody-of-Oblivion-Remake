@@ -9,8 +9,8 @@
   <title>忘却的旋律启动器</title>
   <link rel="icon" type="image/png" href="./assets/app-icon.png">
   <link rel="preload" as="image" href="./assets/backgrounds/scene-04.jpg">
-  <link rel="stylesheet" href="./styles.css?v=20261031">
-  <script src="./site.js" defer></script>
+  <link rel="stylesheet" href="./styles.css?v=20261101-download">
+  <script src="./site.js?v=20261101-download" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content" data-i18n="skip">跳到主要内容</a>
@@ -103,7 +103,8 @@
           </select>
           <label for="download-source" data-i18n="download.source">下载线路（下载失败可切换）</label>
           <select id="download-source">
-            <option value="blob" selected data-i18n="download.blob">Vercel Blob（香港）</option>
+            <option value="auto" selected data-i18n="download.auto">自动选择线路（推荐）</option>
+            <option value="blob" data-i18n="download.blob">Vercel Blob（香港）</option>
             <option value="ghproxy">ghproxy.net</option>
             <option value="ghfast">ghfast.top</option>
             <option value="gh-proxy">gh-proxy.com</option>
@@ -112,6 +113,11 @@
           <a class="button button-primary" id="download-button" href="https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases" rel="noopener"><span aria-hidden="true">↓</span><span id="download-button-label" data-i18n="download.button">查看发行版本</span></a>
           <a class="download-alternative" id="download-alternative" href="https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases" rel="noopener" hidden></a>
           <small id="download-status" role="status" aria-live="polite"></small>
+          <div class="download-progress-panel" id="download-progress-panel" hidden>
+            <div class="download-progress-row"><label for="download-progress" data-i18n="download.progress">下载进度</label><button type="button" id="download-cancel" data-i18n="download.cancel">取消下载</button></div>
+            <progress id="download-progress" max="100" value="0"></progress>
+            <small id="download-progress-text" role="status" aria-live="polite"></small>
+          </div>
           <div class="cloud-downloads">
             <span data-i18n="download.cloud">网盘下载</span>
             <div class="cloud-download"><a href="https://pan.baidu.com/s/1G77ULq6sHAwdfKak16QpAA?pwd=2333" target="_blank" rel="noopener noreferrer" data-i18n="download.baidu">百度网盘 ↗</a><small><span data-i18n="download.code">提取码：</span><code>2333</code></small></div>

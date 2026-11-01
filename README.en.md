@@ -54,7 +54,7 @@ These screenshots were captured from the `1.6.5` Electron source, with no accoun
 
 ![Actual v1.6.5 account management screen](assets/launcher-accounts.png)
 
-The website does not embed launcher screenshots; the captures above appear in this README only. Its download section offers system, architecture, and source selection. A separate release-notes section opens by default and shows only the latest version. The website does not display installer SHA-256 values; launcher updates still verify them before installation.
+The website does not embed launcher screenshots; the captures above appear in this README only. Its download section offers system, architecture, and source selection. By default, small probes select a source that permits browser reads; downloads use concurrent ranges, switch sources on slow or broken connections, and retain completed ranges during that download. Files reach the browser's save flow only after size and official SHA-256 verification. Cancellation or closing the page discards the in-memory ranges. GitHub official and fallback links use native browser downloads outside this downloader. Release notes open by default and show only the latest version. SHA-256 values are not displayed; launcher updates also verify files before installation.
 
 ## Platform coverage and prerequisites
 
