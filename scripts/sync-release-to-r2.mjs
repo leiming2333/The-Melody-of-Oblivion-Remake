@@ -150,7 +150,9 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
   const existingManifestResponse = await client.request('GET', manifestPath);
   let existingManifest = null;
   if (existingManifestResponse.status === 200) existingManifest = await readJson(existingManifestResponse, `manifest ${tag}`);
-  else if (existingManifestResponse.status !== 404) throw new Error(`Cannot inspect existing R2 manifest: ${tag}`);
+  else if (existingManifestResponse.status !== 404) {
+    throw new Error(`Cannot inspect existing R2 manifest: ${tag} (HTTP ${existingManifestResponse.status})`);
+  }
   if (existingManifest && !isDeepStrictEqual(existingManifest, manifest)) {
     throw new Error('Published R2 tag is immutable; use a new version');
   }
@@ -168,7 +170,9 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
       });
       if (![200, 201, 204, 412].includes(put.status)) throw new Error(`R2 upload failed: ${item.name}`);
       existingObject = put.status === 412;
-    } else if (head.status !== 200) throw new Error(`Cannot inspect existing R2 object: ${item.name}`);
+    } else if (head.status !== 200) {
+      throw new Error(`Cannot inspect existing R2 object: ${item.name} (HTTP ${head.status})`);
+    }
     // The custom domain may still cache old bytes; inspect the origin for an existing immutable key.
     if (existingObject) await verifyResponse(await client.request('GET', pathname), item, `origin ${pathname}`);
     await publicVerify(config, fetchImpl, pathname, item);
@@ -183,7 +187,9 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
       'if-none-match': '*', 'content-type': 'application/json; charset=utf-8',
       'cache-control': 'public, max-age=31536000, immutable'
     });
-    if (![200, 201, 204, 412].includes(putManifest.status)) throw new Error(`R2 manifest upload failed: ${tag}`);
+    if (![200, 201, 204, 412].includes(putManifest.status)) {
+      throw new Error(`R2 manifest upload failed: ${tag} (HTTP ${putManifest.status})`);
+    }
     if (putManifest.status === 412) {
       const concurrent = await readJson(await client.request('GET', manifestPath), `manifest ${tag}`);
       if (!isDeepStrictEqual(concurrent, manifest)) throw new Error('Published R2 tag is immutable; use a new version');
@@ -197,7 +203,9 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
     const latestResponse = await client.request('GET', latestPath);
     let latest = null;
     if (latestResponse.status === 200) latest = await readJson(latestResponse, 'latest metadata');
-    else if (latestResponse.status !== 404) throw new Error('Cannot inspect existing R2 latest metadata');
+    else if (latestResponse.status !== 404) {
+      throw new Error(`Cannot inspect existing R2 latest metadata (HTTP ${latestResponse.status})`);
+    }
     if (latest?.tag_name && newerVersion(latest.tag_name, tag)) return { tag, assets, latestUpdated: false };
     const etag = latestResponse.headers.get('etag');
     if (latestResponse.status === 200 && !etag) throw new Error('R2 latest metadata has no conditional-write ETag');
@@ -206,7 +214,9 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
       ...(etag ? { 'if-match': etag } : { 'if-none-match': '*' })
     });
     if ([200, 201, 204].includes(putLatest.status)) return { ...release, latestUpdated: true };
-    if (putLatest.status !== 412) throw new Error('R2 latest metadata upload failed');
+    if (putLatest.status !== 412) {
+      throw new Error(`R2 latest metadata upload failed (HTTP ${putLatest.status})`);
+    }
   }
   throw new Error('R2 latest metadata changed concurrently; retry synchronization');
 }
