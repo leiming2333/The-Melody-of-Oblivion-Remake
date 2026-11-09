@@ -80,6 +80,18 @@ function isGithubUrl(url) {
   return /^https:\/\/(github\.com|api\.github\.com)\//i.test(String(url));
 }
 
+function isProtectedCdnUrl(value, tag, assetName) {
+  try {
+    const url = new URL(value);
+    // 即使清单误存了短期签名地址，也应使用不依赖过期许可的公开更新线路。
+    url.search = '';
+    url.hash = '';
+    return isTrustedCdnUrl(url.href, tag, assetName);
+  } catch {
+    return false;
+  }
+}
+
 function mirrorUrls(url) {
   if (!isGithubUrl(url)) return [];
   return GITHUB_MIRRORS.map((prefix) => `${prefix}/${url}`);
@@ -486,11 +498,13 @@ class UpdateManager {
     return limited.replace(/\u0000/g, '');
   }
 
-  downloadCandidates(assetUrl, assetName, githubDownloadUrl = null, cdnDownloadUrl = null) {
+  downloadCandidates(assetUrl, assetName, githubDownloadUrl = null) {
     const blob = isPublicBlobUrl(assetUrl);
-    if (!blob && !isGithubUrl(assetUrl)) return [{ url: assetUrl, enforceMinSpeed: false }];
     const tag = this.release?.tag_name ?? '';
-    const githubUrl = blob
+    // 官网 CDN 需要真人授权；后台更新使用公开线路，也兼容 CDN 被列为主下载地址的清单。
+    const protectedCdn = isProtectedCdnUrl(assetUrl, tag, assetName);
+    if (!blob && !protectedCdn && !isGithubUrl(assetUrl)) return [{ url: assetUrl, enforceMinSpeed: false }];
+    const githubUrl = blob || protectedCdn
       ? isGithubUrl(githubDownloadUrl)
         ? githubDownloadUrl
         : `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(assetName)}`
@@ -499,23 +513,18 @@ class UpdateManager {
     websiteUrl.searchParams.set('tag', tag);
     websiteUrl.searchParams.set('asset', assetName);
     websiteUrl.searchParams.set('source', 'blob');
-    const candidates = [
+    return [
       { url: blob ? assetUrl : websiteUrl.href, enforceMinSpeed: true },
       ...mirrorUrls(githubUrl).map((url) => ({ url, enforceMinSpeed: true })),
       { url: githubUrl, enforceMinSpeed: true },
       // 所有镜像均不可用时，最后回退官方直连并放宽限速
       { url: githubUrl, enforceMinSpeed: false }
     ];
-    if (isTrustedCdnUrl(cdnDownloadUrl, tag, assetName)
-      && !candidates.some((candidate) => candidate.url === cdnDownloadUrl)) {
-      candidates.unshift({ url: cdnDownloadUrl, enforceMinSpeed: true });
-    }
-    return candidates;
   }
 
-  async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress, githubDownloadUrl = null, cdnDownloadUrl = null, signal,
+  async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress, githubDownloadUrl = null, signal,
     { expectedSize, sha256, verify } = {}) {
-    const initialCandidates = this.downloadCandidates(assetUrl, assetName, githubDownloadUrl, cdnDownloadUrl);
+    const initialCandidates = this.downloadCandidates(assetUrl, assetName, githubDownloadUrl);
     const rankedCandidates = this.rankCandidates
       ? await this.rankCandidates(initialCandidates, { expectedSize, signal }) : initialCandidates;
     const candidates = [...rankedCandidates];
@@ -594,7 +603,7 @@ class UpdateManager {
           progress: downloaded,
           message: `正在后台下载更新 ${downloaded}%`
         });
-      }, asset.github_download_url, asset.cdn_download_url, signal, {
+      }, asset.github_download_url, signal, {
         expectedSize: Number(asset.size), sha256: expectedSha256,
         verify: async () => {
           this.setState({ status: 'verifying', progress: 100, message: '正在校验更新包…' });

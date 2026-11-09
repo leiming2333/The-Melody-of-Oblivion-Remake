@@ -501,7 +501,7 @@ test('updater keeps Blob download URLs only for the verified GitHub version', as
   assert.equal(manager.release.assets[0].github_download_url, asset.browser_download_url);
 });
 
-test('verified website CDN download URLs are preferred by the launcher updater', async () => {
+test('website CDN metadata does not send background updates through human verification', async () => {
   const githubAsset = githubAssets[0];
   const websiteAsset = {
     ...githubAsset,
@@ -515,10 +515,45 @@ test('verified website CDN download URLs are preferred by the launcher updater',
       assets: [url.includes('melodyoblivion.xyz') ? websiteAsset : githubAsset]
     }) })
   });
+  manager.rankCandidates = async (candidates) => {
+    assert.ok(candidates.every(({ url }) => !url.startsWith('https://downloads.melodyoblivion.xyz/')));
+    return candidates;
+  };
   assert.equal((await manager.check()).status, 'downloaded');
-  assert.equal(calls.download[0].url, websiteAsset.cdn_download_url);
+  assert.equal(calls.download[0].url, websiteAsset.browser_download_url);
   assert.equal(manager.release.assets[0].cdn_download_url, websiteAsset.cdn_download_url);
 });
+
+for (const suffix of ['', '?expires=1&signature=expired']) {
+  test(`a protected CDN primary URL falls back to public update routes without GitHub metadata (${suffix || 'unsigned'})`, async () => {
+    const githubAsset = githubAssets[0];
+    const websiteAsset = { ...githubAsset,
+      browser_download_url: `https://downloads.melodyoblivion.xyz/releases/v9.9.9/${githubAsset.name}${suffix}` };
+    const { manager, calls } = fixture({
+      fetchImpl: async (url) => {
+        if (!url.includes('melodyoblivion.xyz')) throw new Error('fetch failed');
+        return { ok: true, json: async () => ({ tag_name: 'v9.9.9', assets: [websiteAsset] }) };
+      },
+      downloadFile: async (url, targetPath, _progress, options) => {
+        calls.download.push({ url, targetPath, options });
+        if (url !== githubAsset.browser_download_url) throw new Error('source unavailable');
+      }
+    });
+    manager.rankCandidates = async (candidates) => {
+      assert.ok(candidates.every(({ url }) => !url.startsWith('https://downloads.melodyoblivion.xyz/')));
+      return candidates;
+    };
+    assert.equal((await manager.check()).status, 'downloaded');
+    const first = new URL(calls.download[0].url);
+    assert.equal(first.pathname, '/api/download');
+    assert.equal(first.searchParams.get('source'), 'blob');
+    assert.equal(first.searchParams.get('tag'), 'v9.9.9');
+    assert.equal(first.searchParams.get('asset'), githubAsset.name);
+    assert.equal(calls.download.at(-1).url, githubAsset.browser_download_url);
+    assert.ok(calls.download.every(({ options }) => options.expectedSize === githubAsset.size
+      && options.sha256 === fixtureHash));
+  });
+}
 
 test('untrusted website CDN URLs are ignored by the launcher updater', async () => {
   const githubAsset = githubAssets[0];
