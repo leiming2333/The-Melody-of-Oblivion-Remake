@@ -81,6 +81,37 @@ function env() {
   };
 }
 
+test('R2 configuration trims pasted surrounding whitespace without relaxing URL validation', async () => {
+  const { validateConfig } = await import('../scripts/sync-release-to-r2.mjs');
+  const clean = env();
+  const pasted = Object.fromEntries(Object.entries(clean).map(([name, value]) => [name, ` \r\n${value}\t `]));
+  assert.deepEqual(validateConfig(pasted), validateConfig(clean));
+  assert.equal(validateConfig({ ...clean, R2_PUBLIC_BASE_URL: ` ${PUBLIC_BASE}/\n` }).publicBase, PUBLIC_BASE);
+  for (const url of [
+    'http://downloads.example.test', 'https://user:password@downloads.example.test',
+    `${PUBLIC_BASE}:443`, `${PUBLIC_BASE}/releases`, `${PUBLIC_BASE}?query=1`,
+    `${PUBLIC_BASE}#fragment`, 'https://downloads.example.test /'
+  ]) {
+    assert.equal(validateConfig({ ...clean, R2_PUBLIC_BASE_URL: ` ${url}\n` }), null);
+  }
+});
+
+test('invalid R2 configuration reports only field names before touching files or the network', async () => {
+  const { syncReleaseToR2 } = await import('../scripts/sync-release-to-r2.mjs');
+  for (const field of Object.keys(env())) {
+    const value = 'private invalid value';
+    await assert.rejects(syncReleaseToR2('missing', TAG, 'missing.json', {
+      env: { ...env(), [field]: field === 'R2_SECRET_ACCESS_KEY' ? 'secret' : value },
+      fetchImpl: () => { assert.fail('Invalid configuration must not make network requests'); }
+    }), error => {
+      assert.match(error.message, new RegExp(`Invalid R2 configuration fields: ${field}\\.`));
+      assert.ok(!error.message.includes(value));
+      assert.ok(!error.message.includes('secret'));
+      return true;
+    });
+  }
+});
+
 test('R2 synchronization uploads and verifies all eight packages before publishing latest', async t => {
   const fixtureData = await fixture(t);
   const r2 = mockR2();

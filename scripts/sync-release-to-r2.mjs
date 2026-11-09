@@ -22,24 +22,33 @@ function signingKey(secret, date) {
   return sign(sign(sign(sign(`AWS4${secret}`, date), REGION), SERVICE), 'aws4_request');
 }
 
-export function validateConfig(env = process.env) {
-  const accountId = String(env.R2_ACCOUNT_ID ?? '').trim();
-  const bucket = String(env.R2_BUCKET_NAME ?? '').trim();
-  const accessKeyId = String(env.R2_ACCESS_KEY_ID ?? '').trim();
-  const secretAccessKey = env.R2_SECRET_ACCESS_KEY;
+function configValidation(env) {
+  const text = name => typeof env[name] === 'string' ? env[name].trim() : '';
+  const accountId = text('R2_ACCOUNT_ID');
+  const bucket = text('R2_BUCKET_NAME');
+  const accessKeyId = text('R2_ACCESS_KEY_ID');
+  const secretAccessKey = text('R2_SECRET_ACCESS_KEY');
+  const publicBaseText = text('R2_PUBLIC_BASE_URL');
+  const invalidFields = [];
+  if (!/^[a-f\d]{32}$/i.test(accountId)) invalidFields.push('R2_ACCOUNT_ID');
+  if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket)) invalidFields.push('R2_BUCKET_NAME');
+  if (!/^[A-Za-z\d_-]{8,128}$/.test(accessKeyId)) invalidFields.push('R2_ACCESS_KEY_ID');
+  if (Buffer.byteLength(secretAccessKey, 'utf8') < 16 || secretAccessKey.length > 256) {
+    invalidFields.push('R2_SECRET_ACCESS_KEY');
+  }
   let publicBase;
   try {
-    publicBase = new URL(env.R2_PUBLIC_BASE_URL ?? '');
+    publicBase = new URL(publicBaseText);
     if (publicBase.protocol !== 'https:' || publicBase.username || publicBase.password
       || publicBase.port || publicBase.pathname !== '/' || publicBase.search || publicBase.hash
-      || ![publicBase.origin, `${publicBase.origin}/`].includes(env.R2_PUBLIC_BASE_URL)) return null;
-  } catch { return null; }
-  if (!/^[a-f\d]{32}$/i.test(accountId)
-    || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket)
-    || !/^[A-Za-z\d_-]{8,128}$/.test(accessKeyId)
-    || typeof secretAccessKey !== 'string' || Buffer.byteLength(secretAccessKey, 'utf8') < 16
-    || secretAccessKey.length > 256) return null;
-  return { accountId, bucket, accessKeyId, secretAccessKey, publicBase: publicBase.origin };
+      || ![publicBase.origin, `${publicBase.origin}/`].includes(publicBaseText)) invalidFields.push('R2_PUBLIC_BASE_URL');
+  } catch { invalidFields.push('R2_PUBLIC_BASE_URL'); }
+  return { invalidFields, config: invalidFields.length ? null
+    : { accountId, bucket, accessKeyId, secretAccessKey, publicBase: publicBase.origin } };
+}
+
+export function validateConfig(env = process.env) {
+  return configValidation(env).config;
 }
 
 function objectUrl(config, pathname) {
@@ -109,8 +118,8 @@ async function verifyResponse(response, expected, label) {
 export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
   env = process.env, fetchImpl = fetch, now = () => new Date()
 } = {}) {
-  const config = validateConfig(env);
-  if (!config) throw new Error('R2_ACCOUNT_ID, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_PUBLIC_BASE_URL are required.');
+  const { config, invalidFields } = configValidation(env);
+  if (!config) throw new Error(`Invalid R2 configuration fields: ${invalidFields.join(', ')}. Check their format or missing values.`);
   const manifest = JSON.parse(await readFile(path.join(assetDirectory, 'release-manifest.json'), 'utf8'));
   assertTag(tag, manifest.version);
   const packages = await verifyManifest(assetDirectory, manifest);
