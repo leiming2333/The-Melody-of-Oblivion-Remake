@@ -134,6 +134,28 @@ test('R2 request failures include safe endpoint context without credentials', as
   });
 });
 
+test('R2 authorization errors expose only a safe S3 error code', async () => {
+  const { createR2Client } = await import('../scripts/sync-release-to-r2.mjs');
+  const config = {
+    accountId: ACCOUNT,
+    bucket: BUCKET,
+    accessKeyId: 'fixture-access-key',
+    secretAccessKey: 'fixture-secret-key-123456',
+    publicBase: PUBLIC_BASE
+  };
+  for (const status of [401, 403]) {
+    const client = createR2Client(config, async () => new Response(
+      `<Error><Code>InvalidAccessKeyId</Code><Message>${config.accessKeyId} ${config.secretAccessKey} &lt;malicious&gt;</Message></Error>`,
+      { status, headers: { 'content-type': 'application/xml' } }
+    ));
+    await assert.rejects(client.request('GET', 'releases/v1.9.2/manifest.json'), error => {
+      assert.match(error.message, new RegExp(`R2 request rejected: GET .*\\/melody-releases\\/releases\\/v1\\.9\\.2\\/manifest\\.json \\(HTTP ${status}, Code=InvalidAccessKeyId\\)`));
+      assert.doesNotMatch(error.message, /fixture-access-key|fixture-secret-key-123456|malicious|<Error>|<Message>/);
+      return true;
+    });
+  }
+});
+
 test('R2 synchronization uploads and verifies all eight packages before publishing latest', async t => {
   const fixtureData = await fixture(t);
   const r2 = mockR2();

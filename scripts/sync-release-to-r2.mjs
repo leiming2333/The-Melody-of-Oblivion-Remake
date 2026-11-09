@@ -64,6 +64,15 @@ function safeNetworkError(error, config) {
     .reduce((result, value) => result.replaceAll(value, '[redacted]'), details);
 }
 
+async function s3ErrorCode(response) {
+  try {
+    const body = await response.clone().text();
+    return body.match(/<Code>\s*([A-Za-z0-9_.-]{1,80})\s*<\/Code>/i)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function createR2Client(config, fetchImpl = fetch, now = () => new Date()) {
   const host = `${config.accountId}.r2.cloudflarestorage.com`;
   const endpoint = pathname => `https://${host}/${config.bucket}/${pathname.split('/').map(encode).join('/')}`;
@@ -92,11 +101,17 @@ export function createR2Client(config, fetchImpl = fetch, now = () => new Date()
     const authorization = `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
     const requestHeaders = { ...headers, Authorization: authorization };
     delete requestHeaders.host;
+    let response;
     try {
-      return await fetchImpl(url, { method, headers: requestHeaders, body, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(120000) });
+      response = await fetchImpl(url, { method, headers: requestHeaders, body, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(120000) });
     } catch (error) {
       throw new Error(`R2 request failed: ${method} ${parsed.host}${parsed.pathname}: ${safeNetworkError(error, config)}`, { cause: error });
     }
+    if (response.status === 401 || response.status === 403) {
+      const code = await s3ErrorCode(response);
+      throw new Error(`R2 request rejected: ${method} ${parsed.host}${parsed.pathname} (HTTP ${response.status}${code ? `, Code=${safeNetworkError({ message: code }, config)}` : ''})`);
+    }
+    return response;
   }
   return { request };
 }
