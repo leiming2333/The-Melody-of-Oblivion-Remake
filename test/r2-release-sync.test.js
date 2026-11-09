@@ -112,6 +112,28 @@ test('invalid R2 configuration reports only field names before touching files or
   }
 });
 
+test('R2 request failures include safe endpoint context without credentials', async () => {
+  const { createR2Client } = await import('../scripts/sync-release-to-r2.mjs');
+  const config = {
+    accountId: ACCOUNT,
+    bucket: BUCKET,
+    accessKeyId: 'fixture-access-key',
+    secretAccessKey: 'fixture-secret-key-123456',
+    publicBase: PUBLIC_BASE
+  };
+  const client = createR2Client(config, async () => {
+    throw new TypeError('fetch failed', {
+      cause: { code: 'ENETUNREACH', message: `request included ${config.accessKeyId} and ${config.secretAccessKey}` }
+    });
+  }, () => new Date('2026-11-09T00:00:00.000Z'));
+  await assert.rejects(client.request('GET', 'releases/v1.9.2/manifest.json'), error => {
+    assert.match(error.message, new RegExp(`R2 request failed: GET ${ACCOUNT}\\.r2\\.cloudflarestorage\\.com/${BUCKET}/releases/v1\\.9\\.2/manifest\\.json`));
+    assert.match(error.message, /ENETUNREACH/);
+    assert.doesNotMatch(error.message, /fixture-access-key|fixture-secret-key-123456/);
+    return true;
+  });
+});
+
 test('R2 synchronization uploads and verifies all eight packages before publishing latest', async t => {
   const fixtureData = await fixture(t);
   const r2 = mockR2();

@@ -55,6 +55,15 @@ function objectUrl(config, pathname) {
   return `${config.publicBase}/${pathname.split('/').map(encode).join('/')}`;
 }
 
+function safeNetworkError(error, config) {
+  const source = error?.cause && typeof error.cause === 'object' ? error.cause : error;
+  const code = typeof source?.code === 'string' ? source.code : '';
+  const message = typeof source?.message === 'string' ? source.message : '';
+  const details = [code, message].filter(Boolean).join(': ') || 'network-error';
+  return [config?.accessKeyId, config?.secretAccessKey].filter(value => typeof value === 'string' && value.length > 0)
+    .reduce((result, value) => result.replaceAll(value, '[redacted]'), details);
+}
+
 export function createR2Client(config, fetchImpl = fetch, now = () => new Date()) {
   const host = `${config.accountId}.r2.cloudflarestorage.com`;
   const endpoint = pathname => `https://${host}/${config.bucket}/${pathname.split('/').map(encode).join('/')}`;
@@ -83,7 +92,11 @@ export function createR2Client(config, fetchImpl = fetch, now = () => new Date()
     const authorization = `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
     const requestHeaders = { ...headers, Authorization: authorization };
     delete requestHeaders.host;
-    return fetchImpl(url, { method, headers: requestHeaders, body, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(120000) });
+    try {
+      return await fetchImpl(url, { method, headers: requestHeaders, body, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(120000) });
+    } catch (error) {
+      throw new Error(`R2 request failed: ${method} ${parsed.host}${parsed.pathname}: ${safeNetworkError(error, config)}`, { cause: error });
+    }
   }
   return { request };
 }
@@ -94,10 +107,17 @@ async function readJson(response, label) {
 }
 
 async function publicVerify(config, fetchImpl, pathname, expected) {
-  const response = await fetchImpl(objectUrl(config, pathname), {
-    method: 'GET', headers: { 'Accept-Encoding': 'identity', 'Cache-Control': 'no-cache' },
-    redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(120000)
-  });
+  const url = objectUrl(config, pathname);
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: 'GET', headers: { 'Accept-Encoding': 'identity', 'Cache-Control': 'no-cache' },
+      redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(120000)
+    });
+  } catch (error) {
+    const parsed = new URL(url);
+    throw new Error(`R2 public request failed: GET ${parsed.host}${parsed.pathname}: ${safeNetworkError(error, config)}`, { cause: error });
+  }
   await verifyResponse(response, expected, `public ${pathname}`);
 }
 
