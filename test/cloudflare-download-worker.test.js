@@ -1,12 +1,32 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { createHmac } = require('node:crypto');
 
 const filename = 'The-Melody-of-Oblivion-Remake-Windows-x64.exe';
-const publicUrl = `https://downloads.melodyoblivion.xyz/releases/v1.9.1/${filename}`;
+const unsignedUrl = `https://downloads.melodyoblivion.xyz/releases/v1.9.1/${filename}`;
+const secret = 'unit-test-worker-authorization-secret-at-least-32';
+function signedUrl(value = unsignedUrl, expires = Math.floor(Date.now() / 1000) + 900) {
+  const url = new URL(value);
+  const signature = createHmac('sha256', secret).update(`download-v1\n${url.pathname}\n${expires}`).digest('base64url');
+  url.searchParams.set('expires', expires);
+  url.searchParams.set('signature', signature);
+  return url.href;
+}
+const publicUrl = signedUrl();
 const blobUrl = `https://4rgpxcwwpeiy2uij.public.blob.vercel-storage.com/releases/v1.9.1/${filename}`;
 const githubUrl = `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/v1.9.1/${filename}`;
 const segmentBytes = 1024 * 1024;
-const workerModule = import('../cloudflare/download-worker.mjs');
+const realWorkerModule = import('../cloudflare/download-worker.mjs');
+// All existing delivery scenarios now use a real signed URL and configured
+// secret. Authorization failure scenarios below call the unwrapped Worker.
+const workerModule = realWorkerModule.then(module => ({ ...module,
+  createDownloadWorker(options) {
+    const worker = module.createDownloadWorker(options);
+    return { fetch(request, env = {}, context) {
+      return worker.fetch(request, { DOWNLOAD_AUTH_SECRET: secret, ...env }, context);
+    } };
+  }
+}));
 
 function execution() {
   const pending = [];
@@ -247,7 +267,7 @@ test('invalid or multiple ranges never reach an origin', async () => {
   }
 });
 
-test('cache read/write failure leaves delivery intact and a truncated source cannot be cached', async () => {
+test('cache failures leave native delivery intact and source stream failures never commit cache', async () => {
   const { createDownloadWorker } = await workerModule;
   const bytes = new Uint8Array([9, 8, 7, 6]);
   const worker = createDownloadWorker({
@@ -259,116 +279,118 @@ test('cache read/write failure leaves delivery intact and a truncated source can
   assert.deepEqual(new Uint8Array(await result.arrayBuffer()), bytes);
   await context.finish();
   const cache = memoryCache();
-  const truncated = createDownloadWorker({ cache, fetchImpl: async () => new Response(bytes, { headers: { 'Content-Length': '100' } }) });
+  const truncated = createDownloadWorker({ cache, fetchImpl: async () => new Response(new ReadableStream({
+    start(controller) { controller.enqueue(bytes); },
+    pull(controller) { controller.error(new Error('upstream connection reset')); }
+  }), { headers: { 'Content-Length': '100' } }) });
   const incompleteContext = execution();
   const incomplete = await truncated.fetch(new Request(publicUrl), {}, incompleteContext);
-  await assert.rejects(incomplete.arrayBuffer(), /Incomplete/);
+  await assert.rejects(incomplete.arrayBuffer(), /reset/);
   await incompleteContext.finish();
   assert.equal(cache.puts.length, 0);
 });
 
-test('a slow cache reader cannot make streaming fan-out buffer a whole installer', async () => {
+test('large installers bypass cache fan-out and return the native upstream stream unchanged', async () => {
   const { createDownloadWorker } = await workerModule;
+  let source;
+  let put = false;
   let pulled = 0;
-  let releaseCache;
-  const cacheGate = new Promise(resolve => { releaseCache = resolve; });
-  const cache = {
-    async match() { return undefined; },
-    async put(_key, response) {
-      await cacheGate;
-      await response.arrayBuffer();
-    }
-  };
   const bytes = new Uint8Array(1024).fill(3);
-  const worker = createDownloadWorker({ cache, fetchImpl: async () => new Response(new ReadableStream({
-    pull(controller) { pulled++; if (pulled <= 8) controller.enqueue(bytes); else controller.close(); }
-  }), { headers: { 'Content-Length': '8192' } }) });
-  const context = execution();
+  const worker = createDownloadWorker({
+    cache: { async match() {}, async put() { put = true; } },
+    fetchImpl: async () => {
+      source = new Response(new ReadableStream({
+        pull(controller) { pulled++; controller.enqueue(bytes); }
+      }, { highWaterMark: 0 }), { headers: { 'Content-Length': '103871652' } });
+      return source;
+    }
+  });
+  const context = { waitUntil() { assert.fail('large installers must not schedule cache or body-pumping work'); } };
   const result = await worker.fetch(new Request(publicUrl), {}, context);
-  const reading = result.arrayBuffer();
-  await new Promise(resolve => setTimeout(resolve, 10));
-  assert.ok(pulled <= 2, `upstream pulled ${pulled} chunks while cache was blocked`);
-  releaseCache();
-  assert.equal((await reading).byteLength, 8192);
-  await context.finish();
+  assert.equal(result.body, source.body, 'native streaming must not run JavaScript per upstream chunk');
+  assert.equal(pulled, 0, 'the Worker must not eagerly read the installer');
+  assert.equal(put, false);
+  assert.equal(result.headers.get('content-length'), '103871652');
+  const reader = result.body.getReader();
+  assert.equal((await reader.read()).value.byteLength, 1024);
+  await reader.cancel();
 });
 
-test('a stalled cache is abandoned and a cancelled client never commits a partial cache entry', async () => {
+test('a stalled small-object cache cannot stall delivery and client responses cannot outlive authorization in caches', async () => {
   const { createDownloadWorker } = await workerModule;
   let releaseCache;
   const gate = new Promise(resolve => { releaseCache = resolve; });
   const bytes = new Uint8Array([1, 2, 3, 4]);
   const cache = {
-    async match() { return undefined; },
+    async match() {},
     async put(_key, response) {
       await gate;
       await response.arrayBuffer();
+      assert.match(response.headers.get('cache-control'), /public/);
     }
   };
   const worker = createDownloadWorker({ cache, fetchImpl: async () => assetResponse(bytes) });
   const context = execution();
   const result = await worker.fetch(new Request(publicUrl), {}, context);
-  // Cache never starts reading until after the client has completed successfully.
   assert.deepEqual(new Uint8Array(await result.arrayBuffer()), bytes);
+  assert.match(result.headers.get('cache-control'), /private, no-store/);
+  assert.equal(result.headers.get('referrer-policy'), 'no-referrer');
   releaseCache();
   await context.finish();
-
-  const partialCache = memoryCache();
-  let cancelled = false;
-  const streaming = createDownloadWorker({ cache: partialCache, fetchImpl: async () => new Response(new ReadableStream({
-    pull(controller) { controller.enqueue(bytes); },
-    cancel() { cancelled = true; }
-  }), { headers: { 'Content-Length': '1000' } }) });
-  const cancelledContext = execution();
-  const partial = await streaming.fetch(new Request(publicUrl), {}, cancelledContext);
-  const reader = partial.body.getReader();
-  assert.equal((await reader.read()).value.byteLength, 4);
-  await reader.cancel();
-  await cancelledContext.finish();
-  assert.equal(cancelled, true);
-  assert.equal(partialCache.puts.length, 0);
 });
 
-test('Cloudflare FixedLengthStream preserves known-length streaming and detects truncation', async () => {
-  const { createDownloadWorker } = await workerModule;
-  const original = globalThis.FixedLengthStream;
-  let constructed = 0;
-  // Model the Cloudflare-only stream contract without installing a Worker runtime.
-  globalThis.FixedLengthStream = class {
-    constructor(expected) {
-      constructed++;
-      let received = 0;
-      const stream = new TransformStream({
-        transform(chunk, controller) {
-          received += chunk.byteLength;
-          if (received > expected) throw new Error('Fixed stream overflow');
-          controller.enqueue(chunk);
-        },
-        flush() { if (received !== expected) throw new Error('Fixed stream incomplete'); }
-      });
-      this.readable = stream.readable;
-      this.writable = stream.writable;
+test('authorization rejects missing, forged, expired, future and duplicate permits before cache or origin access', async () => {
+  const { createDownloadWorker } = await realWorkerModule;
+  let lookups = 0;
+  let calls = 0;
+  const worker = createDownloadWorker({
+    cache: { async match() { lookups++; }, async put() {} },
+    fetchImpl() { calls++; assert.fail('unauthorized requests must not fetch'); }
+  });
+  const forged = new URL(publicUrl);
+  forged.searchParams.set('signature', 'a'.repeat(43));
+  const swappedPath = publicUrl.replace('/v1.9.1/', '/v1.9.2/');
+  const cases = [unsignedUrl, forged.href, swappedPath,
+    signedUrl(unsignedUrl, Math.floor(Date.now() / 1000) - 1),
+    signedUrl(unsignedUrl, Math.floor(Date.now() / 1000) + 3601),
+    `${publicUrl}&expires=123`, `${publicUrl}&signature=${'b'.repeat(43)}`];
+  for (const url of cases) {
+    for (const method of ['GET', 'HEAD']) {
+      const result = await worker.fetch(new Request(url, { method }), { DOWNLOAD_AUTH_SECRET: secret });
+      assert.equal(result.status, 403, url);
+      assert.equal(result.headers.get('cache-control'), 'no-store');
     }
-  };
-  try {
-    const bytes = new Uint8Array([10, 11, 12, 13]);
-    const cache = memoryCache();
-    const worker = createDownloadWorker({ cache, fetchImpl: async () => assetResponse(bytes) });
-    const context = execution();
-    const result = await worker.fetch(new Request(publicUrl), {}, context);
-    assert.equal(result.headers.get('content-length'), '4');
-    assert.deepEqual(new Uint8Array(await result.arrayBuffer()), bytes);
-    await context.finish();
-    assert.ok(constructed >= 2, 'cache and client streams must both preserve their fixed length');
-    assert.equal(cache.puts.length, 1);
-    const truncated = createDownloadWorker({ cache: null, fetchImpl: async () =>
-      new Response(bytes, { headers: { 'Content-Length': '100' } }) });
-    const incompleteContext = execution();
-    const incomplete = await truncated.fetch(new Request(publicUrl), {}, incompleteContext);
-    await assert.rejects(incomplete.arrayBuffer(), /incomplete/);
-    await incompleteContext.finish();
-  } finally {
-    if (original === undefined) delete globalThis.FixedLengthStream;
-    else globalThis.FixedLengthStream = original;
   }
+  assert.equal(lookups, 0);
+  assert.equal(calls, 0);
+  for (const env of [undefined, {}, { DOWNLOAD_AUTH_SECRET: 'short' }]) {
+    const result = await worker.fetch(new Request(publicUrl), env);
+    assert.equal(result.status, 503);
+  }
+});
+
+test('cached segments still require a valid permit and share storage across different verified visitors', async () => {
+  const { createDownloadWorker } = await realWorkerModule;
+  const cache = memoryCache();
+  const bytes = new Uint8Array(segmentBytes).fill(42);
+  let calls = 0;
+  const worker = createDownloadWorker({ cache, fetchImpl: async () => {
+    calls++;
+    return assetResponse(bytes, { partial: true });
+  } });
+  const env = { DOWNLOAD_AUTH_SECRET: secret };
+  const options = { headers: { Range: `bytes=0-${segmentBytes - 1}` } };
+  const context = execution();
+  const first = await worker.fetch(new Request(publicUrl, options), env, context);
+  await first.arrayBuffer();
+  await context.finish();
+  const denied = await worker.fetch(new Request(unsignedUrl, options), env);
+  assert.equal(denied.status, 403);
+  const other = signedUrl(unsignedUrl, Math.floor(Date.now() / 1000) + 800);
+  const hit = await worker.fetch(new Request(other, options), env);
+  assert.equal(hit.status, 206);
+  assert.equal(hit.headers.get('x-melody-cache'), 'HIT');
+  assert.equal((await hit.arrayBuffer()).byteLength, segmentBytes);
+  assert.equal(calls, 1);
+  assert.equal(cache.puts.some(put => put.url.includes('signature=')), false);
 });

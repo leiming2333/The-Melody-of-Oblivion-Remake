@@ -1,14 +1,11 @@
-// Paste this module into a Cloudflare Worker. No secrets, bindings, or R2 bucket required.
+// Module Worker: native streaming + bounded edge caching; no object-storage binding.
+// Set DOWNLOAD_AUTH_SECRET to the same secret used by the website authorization API.
 /**
  * @typedef {{
  *   match(request: Request): Promise<Response | undefined>,
  *   put(request: Request, response: Response): Promise<void>
  * }} DownloadCache
  * @typedef {typeof globalThis & {
- *   FixedLengthStream?: new (length: number) => {
- *     readable: ReadableStream,
- *     writable: WritableStream
- *   },
  *   caches?: { default?: DownloadCache }
  * }} WorkerRuntime
  */
@@ -18,7 +15,7 @@ const BLOB_ORIGIN = 'https://4rgpxcwwpeiy2uij.public.blob.vercel-storage.com';
 const GITHUB_RELEASES = 'https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download';
 const SEGMENT_BYTES = 1024 * 1024;
 const CACHE_SECONDS = 31536000;
-const CACHE_WRITE_TIMEOUT_MS = 1000;
+const AUTH_TTL_SECONDS = 3600;
 const ASSETS = new Set([
   'The-Melody-of-Oblivion-Remake-Windows-x64.exe',
   'The-Melody-of-Oblivion-Remake-Windows-ia32.exe',
@@ -40,7 +37,7 @@ const CORS_HEADERS = {
 
 function route(url) {
   // Exact paths and filenames prevent this Worker becoming a general-purpose proxy.
-  if (url.search || url.hash) return null;
+  if (url.hash || [...url.searchParams.keys()].some(key => !['expires', 'signature'].includes(key))) return null;
   const match = /^\/releases\/(v\d+\.\d+\.\d+)\/([^/]+)$/.exec(url.pathname);
   if (!match || !ASSETS.has(match[2])) return null;
   const [, tag, filename] = match;
@@ -98,8 +95,10 @@ function headersFor(response, filename, cacheState) {
   headers.set('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
   // Cloudflare's compression layer can remove Content-Length, including on HEAD.
   // Preserve the installer's byte representation and metadata without a dummy body.
-  headers.set('Cache-Control', response.status === 200 || response.status === 206
-    ? `public, max-age=${CACHE_SECONDS}, immutable, no-transform` : 'no-store');
+  // Only the internal Cache API entry is public. Browser/CDN caches must not
+  // keep authorized responses beyond the signed URL's expiry.
+  headers.set('Cache-Control', 'private, no-store, no-transform');
+  headers.set('Referrer-Policy', 'no-referrer');
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('X-Melody-Cache', cacheState);
   return headers;
@@ -112,7 +111,7 @@ function errorResponse(status, message, method = 'GET', extraHeaders = {}) {
 }
 
 function cacheKey(url, asset, kind) {
-  return new Request(`${url.origin}/.melody-cache/v1/${kind}/${asset.path}`);
+  return new Request(`${url.origin}/.melody-cache/v2/${kind}/${asset.path}`);
 }
 
 async function cacheMatch(cache, key) {
@@ -150,75 +149,50 @@ async function originFetch(fetchImpl, initialUrl, options) {
   throw new Error('Too many upstream redirects');
 }
 
-function fixedLengthBody(body, length, context) {
-  if (length === null || typeof runtime.FixedLengthStream !== 'function') return body;
-  // Workers derives Content-Length from the body type, not a manually set header.
-  const { readable, writable } = new runtime.FixedLengthStream(length);
-  const pumping = body.pipeTo(writable).catch(() => {});
-  context?.waitUntil(pumping);
-  return readable;
+// Native clone/tee is limited to at most one 1 MiB segment. Large full-file
+// responses are passed straight through, so a slow cache cannot buffer an
+// installer in Worker memory or execute a JavaScript callback for every chunk.
+function cacheSmallResponse(response, storage, key, headers, context) {
+  if (!context?.waitUntil) return;
+  let stored;
+  try {
+    const internalHeaders = new Headers(headers);
+    internalHeaders.set('Cache-Control', `public, max-age=${CACHE_SECONDS}, immutable, no-transform`);
+    stored = new Response(response.clone().body, { headers: internalHeaders });
+    context.waitUntil(Promise.resolve().then(() => storage.put(key, stored)).catch(() => discard(stored)));
+  } catch { if (stored) discard(stored); }
 }
 
-// Read each upstream chunk once. Backpressure bounds memory even for a complete
-// 100 MB installer; a stalled/failed cache writer is dropped without failing delivery.
-function cacheWhileStreaming(response, cache, key, storedHeaders, context, expectedLength) {
-  const reader = response.body.getReader();
-  const { readable, writable } = typeof runtime.FixedLengthStream === 'function'
-    ? new runtime.FixedLengthStream(expectedLength) : new TransformStream();
-  const writer = writable.getWriter();
-  let caching = true;
-  let received = 0;
-  let releaseCacheWait;
-  const cacheStopped = new Promise(resolve => { releaseCacheWait = resolve; });
-  function stopCaching() {
-    if (!caching) return;
-    caching = false;
-    releaseCacheWait();
-    writer.abort().catch(() => {});
-  }
-  const put = Promise.resolve().then(() => cache.put(key, new Response(readable, { headers: storedHeaders })))
-    .catch(stopCaching);
-  context?.waitUntil(put);
-  async function writeCache(action) {
-    if (!caching) return;
-    let timer;
+function authorizationVerifier() {
+  let previousSecret;
+  let signingKey;
+  return async function authorized(url, secret) {
+    if (typeof secret !== 'string' || new TextEncoder().encode(secret).byteLength < 32 || secret.length > 4096) return null;
+    const expires = url.searchParams.get('expires');
+    const signature = url.searchParams.get('signature');
+    if (url.searchParams.getAll('expires').length !== 1 || url.searchParams.getAll('signature').length !== 1
+      || !/^\d{10,12}$/.test(expires ?? '') || !/^[A-Za-z\d_-]{43}$/.test(signature ?? '')) return false;
+    const expiry = Number(expires);
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isSafeInteger(expiry) || expiry <= now || expiry > now + AUTH_TTL_SECONDS) return false;
     try {
-      await Promise.race([action(), cacheStopped, new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Cache writer stalled')), CACHE_WRITE_TIMEOUT_MS);
-      })]);
-    } catch { stopCaching(); } finally { clearTimeout(timer); }
-  }
-  return new ReadableStream({
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (done) {
-          if (expectedLength !== null && received !== expectedLength) throw new Error('Incomplete upstream body');
-          await writeCache(() => writer.close());
-          controller.close();
-          return;
-        }
-        received += value.byteLength;
-        if (expectedLength !== null && received > expectedLength) throw new Error('Oversized upstream body');
-        await writeCache(() => writer.write(value));
-        controller.enqueue(value);
-      } catch (error) {
-        stopCaching();
-        reader.cancel(error).catch(() => {});
-        controller.error(error);
+      if (previousSecret !== secret) {
+        previousSecret = secret;
+        signingKey = crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
+          { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
       }
-    },
-    cancel(reason) {
-      stopCaching();
-      return reader.cancel(reason);
-    }
-  });
+      const bytes = Uint8Array.from(atob(signature.replace(/-/g, '+').replace(/_/g, '/') + '='), character => character.charCodeAt(0));
+      return await crypto.subtle.verify('HMAC', await signingKey, bytes,
+        new TextEncoder().encode(`download-v1\n${url.pathname}\n${expires}`));
+    } catch { return false; }
+  };
 }
 
 /** @param {{ fetchImpl?: typeof fetch, cache?: DownloadCache | null }} [options] */
 export function createDownloadWorker({ fetchImpl = (input, init) => fetch(input, init), cache } = {}) {
+  const authorized = authorizationVerifier();
   return {
-    async fetch(request, _env, context) {
+    async fetch(request, env, context) {
       const { method } = request;
       if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
         return errorResponse(405, 'Method not allowed', method, { Allow: 'GET, HEAD, OPTIONS' });
@@ -227,6 +201,9 @@ export function createDownloadWorker({ fetchImpl = (input, init) => fetch(input,
       const asset = route(url);
       if (!asset) return errorResponse(404, 'Unknown release asset', method);
       if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+      const access = await authorized(url, env?.DOWNLOAD_AUTH_SECRET);
+      if (access === null) return errorResponse(503, 'Verified downloads are not configured', method);
+      if (!access) return errorResponse(403, 'Verify you are human on the website before downloading', method);
       let range;
       try { range = method === 'HEAD' ? null : rangeOf(request.headers.get('range')); }
       catch { return errorResponse(416, 'Use one valid byte range', method); }
@@ -292,15 +269,18 @@ export function createDownloadWorker({ fetchImpl = (input, init) => fetch(input,
             && (part.length === SEGMENT_BYTES || part.end === part.size - 1);
           const targetKey = !ifRange && upstream.status === 200 ? fullKey : canStoreSegment ? segmentKey : null;
           let body = upstream.body;
-          if (storage && targetKey && length !== null && length > 0) {
+          if (storage && targetKey && length !== null && length > 0 && length <= SEGMENT_BYTES) {
             const storedHeaders = new Headers(headers);
             if (part) {
               storedHeaders.set('X-Melody-Content-Range', headers.get('Content-Range'));
               storedHeaders.delete('Content-Range');
             }
-            body = cacheWhileStreaming(upstream, storage, targetKey, storedHeaders, context, length);
+            cacheSmallResponse(upstream, storage, targetKey, storedHeaders, context);
+            body = upstream.body;
           }
-          return new Response(fixedLengthBody(body, length, context), { status: upstream.status, headers });
+          // Retain the fetch body's native length and backpressure. No manual
+          // reader, FixedLengthStream, Promise.race, or per-chunk timers.
+          return new Response(body, { status: upstream.status, headers });
         } catch {
           allMissing = false;
           if (upstream) discard(upstream);

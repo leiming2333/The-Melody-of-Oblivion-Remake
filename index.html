@@ -9,8 +9,8 @@
   <title>忘却的旋律启动器</title>
   <link rel="icon" type="image/png" href="./assets/app-icon.png">
   <link rel="preload" as="image" href="./assets/backgrounds/scene-04.jpg">
-  <link rel="stylesheet" href="./styles.css?v=20261101-download">
-  <script src="./site.js?v=20261101-download-4" defer></script>
+  <link rel="stylesheet" href="./styles.css?v=20261109-turnstile">
+  <script src="./site.js?v=20261109-turnstile" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content" data-i18n="skip">跳到主要内容</a>
@@ -101,27 +101,19 @@
             <option value="Linux-arm64">Linux · ARM64</option>
             <option value="Linux-armv7l">Linux · ARMv7</option>
           </select>
-          <label for="download-source" data-i18n="download.source">下载线路（下载失败可切换）</label>
-          <select id="download-source">
-            <option value="auto" selected data-i18n="download.auto">自动选择线路（推荐）</option>
-            <option value="cloudflare" data-i18n="download.cloudflare" disabled>Cloudflare CDN</option>
-            <option value="blob" data-i18n="download.blob">Vercel Blob（香港）</option>
-            <option value="ghproxy">ghproxy.net</option>
-            <option value="ghfast">ghfast.top</option>
-            <option value="gh-proxy">gh-proxy.com</option>
-            <option value="official" data-i18n="download.official">GitHub 官方</option>
-          </select>
-          <a class="button button-primary" id="download-button" href="https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases" rel="noopener"><span aria-hidden="true">↓</span><span id="download-button-label" data-i18n="download.button">查看发行版本</span></a>
-          <a class="download-alternative" id="download-alternative" href="https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases" rel="noopener" hidden></a>
+          <button class="button button-primary" type="button" id="download-button" disabled><span aria-hidden="true">↓</span><span id="download-button-label" data-i18n="download.button">验证并下载</span></button>
+          <small data-i18n="download.verification">完成真人验证后开始下载。</small>
+          <noscript><small>请启用 JavaScript，以完成真人验证并下载。</small></noscript>
           <small id="download-status" role="status" aria-live="polite"></small>
           <div class="download-progress-panel" id="download-progress-panel" hidden>
             <div class="download-progress-row"><label for="download-progress" data-i18n="download.progress">下载进度</label><button type="button" id="download-cancel" data-i18n="download.cancel">取消下载</button></div>
             <progress id="download-progress" max="100" value="0"></progress>
             <small id="download-progress-text" role="status" aria-live="polite"></small>
           </div>
+          <div class="download-turnstile" id="download-turnstile" aria-label="Cloudflare 真人验证" hidden></div>
           <div class="cloud-downloads">
             <span data-i18n="download.cloud">网盘下载</span>
-            <div class="cloud-download"><a href="https://pan.baidu.com/s/1G77ULq6sHAwdfKak16QpAA?pwd=2333" target="_blank" rel="noopener noreferrer" data-i18n="download.baidu">百度网盘 ↗</a><small><span data-i18n="download.code">提取码：</span><code>2333</code></small></div>
+            <div class="cloud-download"><a href="https://pan.baidu.com/s/1H_Glo2r43eftFvzdItooWA?pwd=2333" target="_blank" rel="noopener noreferrer" data-i18n="download.baidu">百度网盘 ↗</a><small><span data-i18n="download.code">提取码：</span><code>2333</code></small></div>
             <div class="cloud-download"><a href="https://wwayi.lanzouu.com/itX2J4ao8o7i" target="_blank" rel="noopener noreferrer" data-i18n="download.lanzou">蓝奏云 ↗</a><small><span data-i18n="download.password">密码：</span><code>9i2b</code></small></div>
           </div>
           <small data-i18n="download.note">本启动器为非官方项目，与 Mojang Studios / Microsoft 无隶属关系。测试前请备份 Minecraft 数据；建议从本页或 GitHub Releases 下载，避免使用第三方修改版本。</small>
@@ -152,7 +144,7 @@
           <details><summary data-i18n="guide.java.question">多个 Java 版本怎么切换？</summary><p data-i18n="guide.java.answer">在“启动设置”中添加 Java 可执行文件路径，点击保存后可从列表切换。支持下载 Java 8、16、17、21、25；启动时优先使用兼容的所选路径，不兼容时会尝试其他已保存、系统或已下载的 Java。</p></details>
           <details><summary data-i18n="guide.import.question">如何导入 Mod 和整合包？</summary><p data-i18n="guide.import.answer">先选好游戏，再把 .jar 文件拖进启动器窗口，可一次导入多个 Mod。整合包请单独拖入一个 .zip 或 .mrpack，确认识别结果后安装。Mod 需要与游戏版本及加载器兼容；部分 CurseForge 文件可能无法直接下载。</p></details>
           <details><summary data-i18n="guide.data.question">游戏文件存在哪里？</summary><p data-i18n="guide.data.answer">默认使用启动器旁的 .minecraft 目录；在首页选中游戏，点击“打开目录”可访问该游戏的数据。默认启用实例隔离，Mod、存档和配置按游戏分开。移动启动器或更换目录前，请备份原游戏目录。</p></details>
-          <details><summary data-i18n="guide.scene.question">背景场景和下载线路在哪里设置？</summary><p data-i18n="guide.scene.answer">背景在“启动设置”的“背景场景”中选择并保存，不会自动轮播。游戏下载源也可在设置中选择；启动器文件下载失败时，切换本站下载区域的线路后重试。</p></details>
+          <details><summary data-i18n="guide.scene.question">背景场景和下载线路在哪里设置？</summary><p data-i18n="guide.scene.answer">背景在“启动设置”的“背景场景”中选择并保存，不会自动轮播。游戏下载源也可在设置中选择；本站启动器文件下载失败时，点击下载按钮重新验证并重试。</p></details>
         </div>
       </div>
     </section>
