@@ -44,14 +44,13 @@ const asset = {
   digest: `sha256:${'a'.repeat(64)}`
 };
 
-function releaseHandler(github, blob, { githubAvailable = true, cdnBaseUrl = '' } = {}) {
+function releaseHandler(github, blob, { githubAvailable = true } = {}) {
   return createLatestReleaseHandler({
     fetchImpl: async (url) => {
       assert.equal(url, 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest');
       return { ok: githubAvailable, json: async () => structuredClone(github) };
     },
-    readBlobRelease: async () => blob,
-    cdnBaseUrl
+    readBlobRelease: async () => blob
   });
 }
 
@@ -157,7 +156,7 @@ test('GitHub failure does not advertise a Blob manifest with unknown freshness',
   assert.equal(result.headers['Cache-Control'], undefined);
 });
 
-test('optional Cloudflare URLs cover all eight packages without replacing official metadata or Blob', async () => {
+test('verified Blob direct URLs cover all eight platforms without adding Worker URLs', async () => {
   const names = ['Windows-x64.exe', 'Windows-ia32.exe', 'Windows-arm64.exe',
     'Linux-x64.AppImage', 'Linux-arm64.AppImage', 'Linux-armv7l.AppImage',
     'macOS-x64.zip', 'macOS-arm64.zip'].map(suffix => `The-Melody-of-Oblivion-Remake-${suffix}`);
@@ -165,61 +164,106 @@ test('optional Cloudflare URLs cover all eight packages without replacing offici
     `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/v1.6.5/${name}` }));
   const sidecar = { name: `${names[0]}.sha256`, size: 80 };
   const github = { tag_name: 'v1.6.5', body: 'official release notes', assets: [...packages, sidecar] };
-  const blobUrl = `https://fixture.public.blob.vercel-storage.com/releases/v1.6.5/${names[0]}`;
+  const blobAssets = packages.map(item => ({ ...item,
+    browser_download_url: `https://fixture.public.blob.vercel-storage.com/releases/v1.6.5/${item.name}`,
+    cdn_download_url: `https://downloads.melodyoblivion.xyz/releases/v1.6.5/${item.name}` }));
   const result = response();
-  await releaseHandler(github, { tag_name: github.tag_name,
-    assets: [{ ...packages[0], browser_download_url: blobUrl }] },
-  { cdnBaseUrl: 'https://cdn.example.test/' })({}, result);
+  await releaseHandler(github, { tag_name: github.tag_name, assets: blobAssets })({}, result);
   assert.equal(result.code, 200);
   for (let index = 0; index < packages.length; index++) {
-    assert.equal(result.body.assets[index].cdn_download_url,
-      `https://cdn.example.test/releases/v1.6.5/${names[index]}`);
+    assert.equal(result.body.assets[index].cdn_download_url, undefined);
     assert.equal(result.body.assets[index].size, packages[index].size);
     assert.equal(result.body.assets[index].digest, packages[index].digest);
-    assert.equal(result.body.assets[index].browser_download_url, index ? packages[index].browser_download_url : blobUrl);
+    assert.equal(result.body.assets[index].browser_download_url, blobAssets[index].browser_download_url);
+    assert.equal(result.body.assets[index].github_download_url, packages[index].browser_download_url);
   }
   assert.equal(result.body.assets[0].github_download_url, packages[0].browser_download_url);
   assert.equal(result.body.body, github.body);
   assert.equal(result.body.assets.at(-1).cdn_download_url, undefined);
 });
 
-test('invalid or unconfigured CDN bases leave download metadata unchanged', async () => {
-  const github = { tag_name: 'v1.6.5', assets: [asset] };
-  for (const cdnBaseUrl of ['', 'not-a-url', 'http://cdn.example.test', 'javascript:alert(1)',
-    'https://user:password@cdn.example.test', 'https://cdn.example.test/?origin=untrusted',
-    'https://cdn.example.test/#fragment']) {
+test('legacy Worker URLs are removed even without a matching Blob release', async () => {
+  const github = { tag_name: 'v1.6.5', assets: [{ ...asset,
+    cdn_download_url: `https://downloads.melodyoblivion.xyz/releases/v1.6.5/${asset.name}` }] };
+  for (const blob of [null, { tag_name: 'v1.6.4', assets: [] }, { tag_name: 'v1.6.5', assets: [] }]) {
     const result = response();
-    await releaseHandler(github, null, { cdnBaseUrl })({}, result);
-    assert.deepEqual(result.body, github);
+    await releaseHandler(github, blob)({}, result);
+    assert.equal(result.body.assets[0].cdn_download_url, undefined);
+    assert.equal(result.body.assets[0].browser_download_url, asset.browser_download_url);
   }
 });
 
-test('CDN configuration preserves an optional path prefix and env overrides the tracked public default', async t => {
+test('obsolete CDN environment configuration cannot reintroduce Worker URLs', async t => {
   const original = process.env.CDN_BASE_URL;
-  const config = require('../src/shared/website-cdn-config.json');
-  const originalDefault = config.baseUrl;
-  config.baseUrl = 'https://public-cdn.example.test';
   t.after(() => {
     if (original === undefined) delete process.env.CDN_BASE_URL;
     else process.env.CDN_BASE_URL = original;
-    config.baseUrl = originalDefault;
   });
   const options = {
     fetchImpl: async () => ({ ok: true, json: async () => ({ tag_name: 'v1.6.5', assets: [asset] }) }),
     readBlobRelease: async () => null
   };
-  delete process.env.CDN_BASE_URL;
-  const defaultResult = response();
-  await createLatestReleaseHandler(options)({}, defaultResult);
-  assert.equal(defaultResult.body.assets[0].cdn_download_url,
-    `https://public-cdn.example.test/releases/v1.6.5/${asset.name}`);
-  process.env.CDN_BASE_URL = 'https://cdn.example.test/download';
+  for (const baseUrl of ['', 'https://downloads.melodyoblivion.xyz', 'https://cdn.example.test/download']) {
+    process.env.CDN_BASE_URL = baseUrl;
+    const result = response();
+    await createLatestReleaseHandler(options)({}, result);
+    assert.deepEqual(result.body.assets[0], asset);
+  }
+});
+
+test('ambiguous duplicate Blob assets and credential-bearing Blob URLs are rejected', async () => {
+  const github = { tag_name: 'v1.6.5', assets: [asset] };
+  const valid = { ...asset, browser_download_url: 'https://fixture.public.blob.vercel-storage.com/package.exe' };
+  for (const assets of [[valid, valid], [null, { ...valid,
+    browser_download_url: 'https://user:password@fixture.public.blob.vercel-storage.com/package.exe' }]]) {
+    const result = response();
+    await releaseHandler(github, { tag_name: github.tag_name, assets })({}, result);
+    assert.equal(result.code, 200);
+    assert.equal(result.body.assets[0].browser_download_url, asset.browser_download_url);
+  }
+});
+
+test('matching R2 metadata adds verified object storage links while preserving Blob URLs', async () => {
+  const github = { tag_name: 'v1.6.5', assets: [asset] };
+  const blobAsset = { ...asset, browser_download_url: 'https://fixture.public.blob.vercel-storage.com/releases/v1.6.5/launcher.exe' };
+  const objectAsset = { ...asset,
+    object_storage_download_url: `https://downloads.example.test/releases/v1.6.5/${asset.name}`,
+    object_storage_verified: true };
   const result = response();
-  await createLatestReleaseHandler(options)({}, result);
-  assert.equal(result.body.assets[0].cdn_download_url,
-    `https://cdn.example.test/download/releases/v1.6.5/${asset.name}`);
-  process.env.CDN_BASE_URL = '';
-  const disabled = response();
-  await createLatestReleaseHandler(options)({}, disabled);
-  assert.equal(disabled.body.assets[0].cdn_download_url, undefined);
+  await createLatestReleaseHandler({
+    objectStorageBaseUrl: 'https://downloads.example.test',
+    fetchImpl: async _url => ({ ok: true, json: async () => structuredClone(github) }),
+    readBlobRelease: async () => ({ tag_name: github.tag_name, assets: [blobAsset] }),
+    readObjectStorageRelease: async () => ({ tag_name: github.tag_name, assets: [objectAsset] })
+  })({}, result);
+  assert.equal(result.code, 200);
+  assert.equal(result.body.assets[0].browser_download_url, blobAsset.browser_download_url);
+  assert.equal(result.body.assets[0].object_storage_download_url, objectAsset.object_storage_download_url);
+  assert.equal(result.body.assets[0].object_storage_verified, true);
+});
+
+test('R2 metadata is ignored when bytes, tag, asset identity, marker, or URL are not exact', async () => {
+  const github = { tag_name: 'v1.6.5', assets: [asset] };
+  const valid = { ...asset,
+    object_storage_download_url: 'https://downloads.example.test/releases/v1.6.5/launcher.exe',
+    object_storage_verified: true };
+  const changes = [
+    { size: 99 }, { digest: `sha256:${'b'.repeat(64)}` }, { object_storage_verified: false },
+    { object_storage_download_url: 'https://downloads.example.test/releases/v1.6.4/launcher.exe' },
+    { object_storage_download_url: 'https://downloads.example.test/releases/v1.6.5/other.exe' },
+    { object_storage_download_url: 'https://downloads.example.test/releases/v1.6.5/launcher.exe?cache=1' },
+    { object_storage_download_url: 'https://evil.example/releases/v1.6.5/launcher.exe' }
+  ];
+  for (const change of changes) {
+    const result = response();
+    await createLatestReleaseHandler({
+      objectStorageBaseUrl: 'https://downloads.example.test',
+      fetchImpl: async _url => ({ ok: true, json: async () => structuredClone(github) }),
+      readBlobRelease: async () => null,
+      readObjectStorageRelease: async () => ({ tag_name: github.tag_name, assets: [{ ...valid, ...change }] })
+    })({}, result);
+    assert.equal(result.code, 200);
+    assert.equal(result.body.assets[0].object_storage_download_url, undefined);
+    assert.equal(result.body.assets[0].object_storage_verified, undefined);
+  }
 });

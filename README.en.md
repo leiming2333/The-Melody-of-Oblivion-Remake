@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#platform-coverage-and-prerequisites)
-[![Source](https://img.shields.io/badge/Source-v1.9.2-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.9.3-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> The current source version is `1.9.2`, with Microsoft, offline, and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://melodyoblivion.xyz/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
+> The current source version is `1.9.3`, with Microsoft, offline, and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://melodyoblivion.xyz/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
 
 ## About this project
 
@@ -124,7 +124,7 @@ styles.css                Landing-page styles
 
 The repository root contains the website, while `src/renderer` contains the Electron launcher. The website does not embed launcher captures; `assets/launcher-screenshot.png` and `assets/launcher-accounts.png` appear in this README only, so recapture them when the launcher interface changes.
 
-To add the Cloudflare download CDN, deploy and verify the Worker in `cloudflare/`, then set `baseUrl` in `src/shared/website-cdn-config.json` and publish the website. The deployment environment variable `CDN_BASE_URL` takes precedence. The CDN serves `/releases/<tag>/<official filename>` and joins automatic source selection, manual selection, and the automatic browser fallback. Official GitHub sizes and SHA-256 values remain authoritative. An empty configuration keeps the CDN disabled.
+The website uses direct Cloudflare R2 object-storage links and the browser's native downloader, with GitHub as the fallback. GitHub determines the release version, sizes, and SHA-256 values. The download manifest changes only after all eight packages have been uploaded and read back for verification. Files not yet synchronized are labeled as GitHub downloads. See [object-storage downloads](docs/object-storage-downloads.md) for setup, backfilling, and retiring the old service.
 
 ## Security notes
 

@@ -98,18 +98,7 @@ h2{font-size:clamp(32px,3.3vw,48px);line-height:1.3;font-weight:800;margin-botto
 .download-alternative[hidden]{display:none}
 .download-action small{color:#647365;font-size:11px;line-height:1.5}
 #download-status{min-height:17px}
-.download-progress-panel{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid #9bac9a;border-radius:2px;background:#f1f5e9}
-.download-progress-panel[hidden]{display:none}
-.download-progress-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.download-progress-row button{min-height:36px;padding:6px 10px;border:1px solid #9bac9a;border-radius:2px;background:#f5f7f0;color:#35523a;font-size:12px}
-.download-progress-row button:hover{background:#e5ecde}
-.download-progress-row button:focus-visible{outline:2px solid #648a51;outline-offset:2px}
-.download-progress-panel progress{width:100%;height:10px;accent-color:#476348}
-.download-progress-panel small{min-height:17px;overflow-wrap:anywhere}
-.download-action .button[aria-disabled="true"]{opacity:.65;cursor:wait}
-.download-action .button:disabled{transform:none;filter:none;opacity:.65;cursor:not-allowed}
-.download-turnstile{width:100%;min-height:65px}
-.download-turnstile[hidden]{display:none}
+.download-action .button[aria-disabled="true"]{transform:none;filter:none;opacity:.65;cursor:wait;pointer-events:none}
 .changelog-details{margin-top:48px;border-top:1px solid #9bac9a;padding-top:18px}
 .changelog-details summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-size:18px;font-weight:700;color:#263629}
 .changelog-details summary:focus-visible{outline:2px solid #648a51;outline-offset:3px}

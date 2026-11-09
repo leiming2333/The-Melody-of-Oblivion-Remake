@@ -501,6 +501,47 @@ test('updater keeps Blob download URLs only for the verified GitHub version', as
   assert.equal(manager.release.assets[0].github_download_url, asset.browser_download_url);
 });
 
+test('updater uses a verified R2 download URL', async () => {
+  const asset = githubAssets[0];
+  const objectAsset = { ...asset,
+    object_storage_download_url: `https://downloads.melodyoblivion.xyz/releases/v9.9.9/${asset.name}`,
+    object_storage_verified: true };
+  const { manager, calls } = fixture({ fetchImpl: async (url) => ({ ok: true,
+    json: async () => ({ tag_name: 'v9.9.9', assets: [url.includes('melodyoblivion.xyz') ? objectAsset : asset] }) }) });
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(calls.download[0].url, objectAsset.object_storage_download_url);
+  assert.equal(manager.release.assets[0].object_storage_verified, true);
+});
+
+test('a failed verified R2 route reaches the official GitHub asset with the same integrity metadata', async () => {
+  const asset = githubAssets[0];
+  const objectAsset = { ...asset,
+    object_storage_download_url: `https://downloads.melodyoblivion.xyz/releases/v9.9.9/${asset.name}`,
+    object_storage_verified: true };
+  const attempted = [];
+  const { manager } = fixture({ fetchImpl: async (url) => ({ ok: true,
+    json: async () => ({ tag_name: 'v9.9.9', assets: [url.includes('melodyoblivion.xyz') ? objectAsset : asset] }) }),
+  downloadFile: async (url, _target, _onProgress, options) => {
+    attempted.push({ url, options });
+    if (url !== asset.browser_download_url) throw new Error('source unavailable');
+  } });
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.equal(attempted[0].url, objectAsset.object_storage_download_url);
+  assert.equal(attempted.at(-1).url, asset.browser_download_url);
+  assert.ok(attempted.every(({ options }) => options.expectedSize === asset.size && options.sha256 === fixtureHash));
+});
+
+test('updater ignores an untrusted R2 download URL', async () => {
+  const asset = githubAssets[0];
+  const objectAsset = { ...asset,
+    object_storage_download_url: `https://evil.example/releases/v9.9.9/${asset.name}`,
+    object_storage_verified: true };
+  const { manager, calls } = fixture({ fetchImpl: async (url) => ({ ok: true,
+    json: async () => ({ tag_name: 'v9.9.9', assets: [url.includes('melodyoblivion.xyz') ? objectAsset : asset] }) }) });
+  assert.equal((await manager.check()).status, 'downloaded');
+  assert.notEqual(calls.download[0].url, objectAsset.object_storage_download_url);
+});
+
 test('website CDN metadata does not send background updates through human verification', async () => {
   const githubAsset = githubAssets[0];
   const websiteAsset = {
@@ -521,7 +562,7 @@ test('website CDN metadata does not send background updates through human verifi
   };
   assert.equal((await manager.check()).status, 'downloaded');
   assert.equal(calls.download[0].url, websiteAsset.browser_download_url);
-  assert.equal(manager.release.assets[0].cdn_download_url, websiteAsset.cdn_download_url);
+  assert.equal(manager.release.assets[0].cdn_download_url, undefined);
 });
 
 for (const suffix of ['', '?expires=1&signature=expired']) {

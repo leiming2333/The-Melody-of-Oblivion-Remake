@@ -1,26 +1,5 @@
 const RELEASE_API = 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest';
-const { isStableRelease, withBlobDownloads } = require('../src/shared/release-metadata');
-const websiteCdnConfig = require('../src/shared/website-cdn-config.json');
-const CDN_ASSET_NAME = /^The-Melody-of-Oblivion-Remake-(?:Windows-(?:x64|ia32|arm64)\.exe|Linux-(?:x64|arm64|armv7l)\.AppImage|macOS-(?:x64|arm64)\.zip)$/;
-
-function withCdnDownloads(release, baseUrl) {
-  let base;
-  try {
-    if (typeof baseUrl !== 'string' || !baseUrl.trim()) return release;
-    base = new URL(baseUrl.trim());
-    if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) return release;
-    if (!/^v\d+\.\d+\.\d+$/.test(release.tag_name)) return release;
-    if (!base.pathname.endsWith('/')) base.pathname += '/';
-  } catch { return release; }
-  return {
-    ...release,
-    assets: release.assets.map(asset => CDN_ASSET_NAME.test(asset.name ?? '') ? {
-      ...asset,
-      cdn_download_url: new URL(`releases/${encodeURIComponent(release.tag_name)}/${encodeURIComponent(asset.name)}`, base).href
-    } : asset)
-  };
-}
-
+const { isStableRelease, withBlobDownloads, objectStorageBase, withObjectStorageDownloads } = require('../src/shared/release-metadata');
 async function latestBlobRelease() {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
   try {
@@ -36,6 +15,19 @@ async function latestBlobRelease() {
   } catch {
     return null;
   }
+}
+
+async function latestObjectStorageRelease(baseUrl, fetchImpl) {
+  const base = objectStorageBase(baseUrl);
+  if (!base) return null;
+  try {
+    const response = await fetchImpl(`${base}/releases/latest.json`, {
+      headers: { Accept: 'application/json' }, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10000)
+    });
+    if (!response.ok) return null;
+    const release = await response.json();
+    return isStableRelease(release) ? release : null;
+  } catch { return null; }
 }
 
 async function readChecksum(asset, fetchImpl) {
@@ -57,7 +49,8 @@ async function readChecksum(asset, fetchImpl) {
 function createLatestReleaseHandler({
   fetchImpl = (...args) => fetch(...args),
   readBlobRelease = latestBlobRelease,
-  cdnBaseUrl = process.env.CDN_BASE_URL ?? websiteCdnConfig.baseUrl
+  objectStorageBaseUrl = process.env.R2_PUBLIC_BASE_URL,
+  readObjectStorageRelease = () => latestObjectStorageRelease(objectStorageBaseUrl, fetchImpl)
 } = {}) {
   return async function latestRelease(_request, response) {
     try {
@@ -85,9 +78,9 @@ function createLatestReleaseHandler({
           asset.digest = await readChecksum({ ...asset, checksumAsset: checksumAssets.get(asset.name) }, fetchImpl);
         }
       }));
-      const blobRelease = await readBlobRelease();
+      const [blobRelease, objectRelease] = await Promise.all([readBlobRelease(), readObjectStorageRelease()]);
       response.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
-      response.status(200).json(withCdnDownloads(withBlobDownloads(release, blobRelease), cdnBaseUrl));
+      response.status(200).json(withObjectStorageDownloads(withBlobDownloads(release, blobRelease), objectRelease, objectStorageBaseUrl));
     } catch {
       response.status(502).json({ error: 'Release information is unavailable' });
     }

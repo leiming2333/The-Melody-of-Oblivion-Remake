@@ -31,4 +31,4 @@ jobs:
           cache: npm
       - run: npm install --global npm@11.13.0 --ignore-scripts
       - run: npm ci --omit=dev --ignore-scripts
-      - run: node --test test/website-*.test.js test/cloudflare-*.test.js
+      - run: node --test test/website-*.test.js

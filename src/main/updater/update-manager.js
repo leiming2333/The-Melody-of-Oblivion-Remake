@@ -6,7 +6,10 @@ const { pipeline } = require('node:stream/promises');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { constants: fsConstants } = require('node:fs');
-const { isPublicBlobUrl, isStableRelease, isTrustedCdnUrl, withBlobDownloads } = require('../../shared/release-metadata');
+const {
+  isPublicBlobUrl, isStableRelease, isTrustedCdnUrl, isTrustedObjectStorageUrl,
+  withBlobDownloads, withObjectStorageDownloads
+} = require('../../shared/release-metadata');
 const { TransactionStore, identity, transactionPaths, assertManagedAncestors } = require('./transaction-store');
 const { startInstallHelper, startWindowsHelper } = require('./install-helper');
 const { downloadToFile } = require('./update-downloader');
@@ -16,10 +19,11 @@ const UPDATE_CHANNEL = 'updater:state';
 const WEBSITE_ORIGIN = 'https://melodyoblivion.xyz';
 const WEBSITE_RELEASE_URL = `${WEBSITE_ORIGIN}/api/latest-release`;
 const LATEST_RELEASE_URL = 'https://api.github.com/repos/leiming2333/The-Melody-of-Oblivion-Remake/releases/latest';
+const OBJECT_STORAGE_ORIGIN = 'https://downloads.melodyoblivion.xyz';
 const PLATFORM_KEYWORDS = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux: 'Linux' });
 const USER_AGENT = 'melody-of-oblivion-launcher-updater';
 
-// Blob、GitHub 镜像和官方源通过小流量测速选路，失败后保留其他候选。
+// R2、Blob、GitHub 镜像和官方源通过小流量测速选路，失败后保留其他候选。
 const GITHUB_MIRRORS = Object.freeze([
   'https://ghproxy.net',
   'https://gh-proxy.com',
@@ -346,14 +350,14 @@ class UpdateManager {
         if (websiteRelease && isNewerVersion(websiteRelease.tag_name, release.tag_name)) {
           throw new Error('发布源返回了较旧版本，继续核对最新版本');
         }
-        return withBlobDownloads(release, websiteRelease);
+        return withObjectStorageDownloads(withBlobDownloads(release, websiteRelease), websiteRelease, OBJECT_STORAGE_ORIGIN);
       } catch (error) {
         lastError = error;
       }
     }
     // A cached release can prove an update exists, but cannot prove we are current.
     if (websiteRelease && isNewerVersion(websiteRelease.tag_name, this.state.currentVersion)) {
-      return websiteRelease;
+      return withObjectStorageDownloads(websiteRelease, websiteRelease, OBJECT_STORAGE_ORIGIN);
     }
     throw lastError ?? new Error('获取 Release 信息失败');
   }
@@ -498,17 +502,27 @@ class UpdateManager {
     return limited.replace(/\u0000/g, '');
   }
 
-  downloadCandidates(assetUrl, assetName, githubDownloadUrl = null) {
+  downloadCandidates(assetUrl, assetName, githubDownloadUrl = null, objectStorageVerified = false) {
     const blob = isPublicBlobUrl(assetUrl);
+    const objectStorage = objectStorageVerified && isTrustedObjectStorageUrl(assetUrl, OBJECT_STORAGE_ORIGIN,
+      this.release?.tag_name ?? '', assetName);
     const tag = this.release?.tag_name ?? '';
-    // 官网 CDN 需要真人授权；后台更新使用公开线路，也兼容 CDN 被列为主下载地址的清单。
+    // 旧 CDN 清单可能包含真人授权地址；只有明确验证的新 R2 直链参与后台更新。
     const protectedCdn = isProtectedCdnUrl(assetUrl, tag, assetName);
-    if (!blob && !protectedCdn && !isGithubUrl(assetUrl)) return [{ url: assetUrl, enforceMinSpeed: false }];
-    const githubUrl = blob || protectedCdn
+    if (!blob && !objectStorage && !protectedCdn && !isGithubUrl(assetUrl)) return [{ url: assetUrl, enforceMinSpeed: false }];
+    const githubUrl = blob || objectStorage || protectedCdn
       ? isGithubUrl(githubDownloadUrl)
         ? githubDownloadUrl
         : `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(assetName)}`
       : assetUrl;
+    if (objectStorage) {
+      return [
+        { url: assetUrl, enforceMinSpeed: true },
+        ...mirrorUrls(githubUrl).map((url) => ({ url, enforceMinSpeed: true })),
+        { url: githubUrl, enforceMinSpeed: true },
+        { url: githubUrl, enforceMinSpeed: false }
+      ];
+    }
     const websiteUrl = new URL('/api/download', WEBSITE_ORIGIN);
     websiteUrl.searchParams.set('tag', tag);
     websiteUrl.searchParams.set('asset', assetName);
@@ -523,8 +537,8 @@ class UpdateManager {
   }
 
   async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress, githubDownloadUrl = null, signal,
-    { expectedSize, sha256, verify } = {}) {
-    const initialCandidates = this.downloadCandidates(assetUrl, assetName, githubDownloadUrl);
+    { expectedSize, sha256, verify, objectStorageVerified = false } = {}) {
+    const initialCandidates = this.downloadCandidates(assetUrl, assetName, githubDownloadUrl, objectStorageVerified);
     const rankedCandidates = this.rankCandidates
       ? await this.rankCandidates(initialCandidates, { expectedSize, signal }) : initialCandidates;
     const candidates = [...rankedCandidates];
@@ -595,7 +609,11 @@ class UpdateManager {
       const expectedSha256 = await this.expectedSha256For(asset, signal);
       let sha256;
       if (this.rankCandidates) this.setState({ message: '正在测速并选择更新下载线路…' });
-      await this.downloadUpdateFile(asset.browser_download_url, asset.name, temporaryPath, (value) => {
+      const primaryUrl = isTrustedObjectStorageUrl(asset.object_storage_download_url, OBJECT_STORAGE_ORIGIN,
+        this.release?.tag_name ?? '', asset.name)
+        && asset.object_storage_verified === true
+        ? asset.object_storage_download_url : asset.browser_download_url;
+      await this.downloadUpdateFile(primaryUrl, asset.name, temporaryPath, (value) => {
         if (signal.aborted) return;
         const downloaded = percent(value);
         this.setState({
@@ -605,6 +623,7 @@ class UpdateManager {
         });
       }, asset.github_download_url, signal, {
         expectedSize: Number(asset.size), sha256: expectedSha256,
+        objectStorageVerified: asset.object_storage_verified === true,
         verify: async () => {
           this.setState({ status: 'verifying', progress: 100, message: '正在校验更新包…' });
           sha256 = await this.verifyDownloadedFile(asset, temporaryPath, signal, expectedSha256);

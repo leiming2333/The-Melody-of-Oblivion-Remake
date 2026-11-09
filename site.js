@@ -43,7 +43,7 @@ const translations = {
   "guide.data.question": "Where are my game files?",
   "guide.data.answer": "Games use the .minecraft folder next to the launcher by default. Select a game and click Open directory to access its data. Instance isolation is enabled by default, keeping mods, saves, and configuration separate. Back up the original game folder before moving the launcher or changing directories.",
   "guide.scene.question": "Where do I change backgrounds and download sources?",
-  "guide.scene.answer": "Choose and save a Background scene in Launch settings; scenes do not rotate automatically. Game download sources are also in settings. If this website's launcher download fails, click the download button to verify again and retry.",
+  "guide.scene.answer": "Choose and save a Background scene in Launch settings; scenes do not rotate automatically. Game download sources are also in settings. If this website's launcher download fails, try the GitHub or cloud download links below.",
   "scene.text": "Your world is waiting.<br>Let's go.",
   "download.title": "Your next adventure starts here.",
   "download.body": "Choose your system and architecture to get the latest build.",
@@ -54,16 +54,9 @@ const translations = {
   "download.changelogLoading": "Loading release notes…",
   "download.changelogAll": "View all releases ↗",
   "download.platform": "Choose system",
-  "download.source": "Download source (switch if a download fails)",
-  "download.auto": "Choose automatically (recommended)",
-  "download.blob": "Vercel Blob (Hong Kong)",
-  "download.cloudflare": "Cloudflare CDN",
-  "download.official": "GitHub official",
-  "download.button": "Verify and download",
-  "download.verification": "Complete human verification to start your download.",
+  "download.button": "Download launcher",
+  "download.browser": "View download progress in your browser's downloads list.",
   "download.alternative": "GitHub original download",
-  "download.progress": "Download progress",
-  "download.cancel": "Cancel download",
   "download.cloud": "Cloud downloads",
   "download.baidu": "Baidu Netdisk ↗",
   "download.lanzou": "Lanzou Cloud ↗",
@@ -83,20 +76,13 @@ const navigation = document.querySelector("#site-nav");
 const partnerWindow = document.querySelector("#partner-window");
 const downloadPlatform = document.querySelector("#download-platform");
 const downloadButton = document.querySelector("#download-button");
-const downloadTurnstile = document.querySelector("#download-turnstile");
+const downloadAlternative = document.querySelector("#download-alternative");
 const downloadStatus = document.querySelector("#download-status");
-const downloadProgressPanel = document.querySelector("#download-progress-panel");
-const downloadProgress = document.querySelector("#download-progress");
-const downloadProgressText = document.querySelector("#download-progress-text");
-const downloadCancel = document.querySelector("#download-cancel");
 const changelogDetails = document.querySelector("#changelog-details");
 const changelogList = document.querySelector("#changelog-list");
 const releaseApiUrl = "/api/latest-release";
 let latestRelease = null;
 let releaseLoadFailed = false;
-let websiteDownloadController = null;
-let websiteDownloadState = null;
-let downloadAvailability = "checking";
 const originalCopy = Object.fromEntries(
   [...document.querySelectorAll("[data-i18n]")].map((element) => [element.dataset.i18n, element.innerHTML])
 );
@@ -128,200 +114,80 @@ function detectPlatform() {
 function selectedDownloadAsset() {
   const target = downloadPlatform.value;
   const extension = target.startsWith("Windows") ? ".exe" : target.startsWith("macOS") ? ".zip" : ".AppImage";
-  if (!/^v\d+\.\d+\.\d+$/.test(latestRelease?.tag_name ?? "")) return null;
-  return latestRelease?.assets?.find((item) =>
-    item.name === `The-Melody-of-Oblivion-Remake-${target}${extension}`
+  if (!/^v\d+\.\d+\.\d+$/.test(latestRelease?.tag_name ?? "")
+    || latestRelease.draft === true || latestRelease.prerelease === true
+    || !Array.isArray(latestRelease.assets)) return null;
+  return latestRelease.assets.find((item) =>
+    item?.name === `The-Melody-of-Oblivion-Remake-${target}${extension}`
   );
+}
+
+function downloadTarget(asset) {
+  if (!asset) return null;
+  const githubUrl = `https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases/download/${encodeURIComponent(latestRelease.tag_name)}/${encodeURIComponent(asset.name)}`;
+  const verifiedMetadata = Number.isSafeInteger(asset.size) && asset.size > 0
+    && /^sha256:[a-f\d]{64}$/i.test(asset.digest ?? "");
+  if (verifiedMetadata) {
+    const objectStorageUrl = `https://downloads.melodyoblivion.xyz/releases/${encodeURIComponent(latestRelease.tag_name)}/${encodeURIComponent(asset.name)}`;
+    if (asset.object_storage_verified === true && asset.object_storage_download_url === objectStorageUrl) {
+      return { url: objectStorageUrl, githubUrl, objectStorage: true };
+    }
+    try {
+      const url = new URL(asset.browser_download_url);
+      if (url.protocol === "https:" && url.hostname.endsWith(".public.blob.vercel-storage.com")
+        && !url.username && !url.password && !url.port && !url.search && !url.hash) {
+        return { url: url.href, githubUrl, objectStorage: true };
+      }
+    } catch {}
+  }
+  return { url: githubUrl, githubUrl, objectStorage: false };
 }
 
 function updateDownloadLink() {
   const english = document.documentElement.lang === "en";
   document.querySelector("#latest-version").textContent = latestRelease?.tag_name ?? "—";
   const asset = selectedDownloadAsset();
-  downloadButton.querySelector("#download-button-label").textContent = downloadAvailability === "unavailable"
-    ? (english ? "Download temporarily unavailable" : "下载暂不可用")
-    : (english ? "Verify and download" : "验证并下载");
-  downloadStatus.textContent = downloadAvailability === "unavailable"
-    ? (english ? "Human verification is temporarily unavailable. Please try again later." : "真人验证暂不可用，请稍后重试。")
-    : asset
-    ? `${latestRelease.tag_name} · ${(asset.size / 1048576).toFixed(1)} MB · Cloudflare CDN · HTTPS`
+  const target = downloadTarget(asset);
+  downloadButton.querySelector("#download-button-label").textContent = target && !target.objectStorage
+    ? (english ? "Download from GitHub" : "从 GitHub 下载")
+    : (english ? "Download launcher" : "下载启动器");
+  downloadButton.setAttribute("aria-disabled", String(!target));
+  if (target) {
+    downloadButton.href = target.url;
+    downloadButton.download = asset.name;
+    downloadButton.removeAttribute("tabindex");
+    downloadAlternative.href = target.githubUrl;
+    downloadAlternative.download = asset.name;
+  } else {
+    downloadButton.removeAttribute("href");
+    downloadButton.removeAttribute("download");
+    downloadButton.setAttribute("tabindex", "-1");
+    downloadAlternative.removeAttribute("href");
+    downloadAlternative.removeAttribute("download");
+  }
+  downloadAlternative.hidden = !target?.objectStorage;
+  const size = Number.isSafeInteger(asset?.size) && asset.size > 0
+    ? ` · ${(asset.size / 1048576).toFixed(1)} MB` : "";
+  downloadStatus.textContent = target
+    ? `${latestRelease.tag_name}${size} · ${target.objectStorage ? (english ? "Object storage" : "对象存储") : "GitHub"} · HTTPS${target.objectStorage ? "" : (english ? " · Object storage is not ready" : " · 对象存储尚未就绪")}`
     : releaseLoadFailed
-      ? (english ? "Could not load the download list. Please refresh and try again." : "暂时无法读取安装包列表，请刷新重试。")
+      ? (english ? "Could not load the download list. Use GitHub Releases or the cloud links below." : "暂时无法读取安装包列表，请使用 GitHub Releases 或下方网盘下载。")
       : latestRelease
         ? (english ? "No build for this platform in the latest release." : "最新版本暂无该平台的安装包。")
         : (english ? "Checking the latest release…" : "正在查询最新版本…");
-  renderWebsiteDownload();
-}
-
-function renderWebsiteDownload() {
-  const state = websiteDownloadState;
-  const busy = Boolean(websiteDownloadController);
-  const english = document.documentElement.lang === "en";
-  downloadPlatform.disabled = busy;
-  downloadButton.disabled = busy || !selectedDownloadAsset() || downloadAvailability !== "available";
-  downloadButton.setAttribute("aria-disabled", String(downloadButton.disabled));
-  downloadTurnstile.hidden = state?.phase !== "authorizing";
-  downloadProgressPanel.hidden = !state;
-  downloadProgressPanel.setAttribute("aria-busy", String(busy));
-  downloadCancel.hidden = !busy;
-  downloadCancel.disabled = Boolean(websiteDownloadController?.signal.aborted);
-  if (!state) return;
-  const percent = state.total > 0 ? Math.min(100, state.loaded / state.total * 100) : 0;
-  if (busy && ["authorizing", "testing", "switching"].includes(state.phase)) downloadProgress.removeAttribute("value");
-  else downloadProgress.value = percent;
-  const source = state.source ? ` · ${state.source}` : "";
-  const messages = {
-    authorizing: english ? "Complete human verification below to start downloading…" : "请在下方完成真人验证，验证后开始下载…",
-    testing: english ? "Testing download sources…" : "正在测试下载线路…",
-    switching: english ? "Switching download source…" : "正在切换下载线路…",
-    verifying: english ? "Checking the downloaded file…" : "正在检查下载文件…",
-    cancelling: english ? "Cancelling download…" : "正在取消下载…",
-    cancelled: english ? "Download cancelled." : "已取消下载。",
-    complete: english ? "File verified and handed to your browser to save." : "文件已校验，已交给浏览器保存。",
-    invalid: english ? "Cannot verify this file yet. Please try again later." : "暂时无法校验此文件，请稍后重试。",
-    expired: english ? "Download authorization expired. Verify again to retry." : "下载授权已过期，请重新验证后重试。",
-    error: english ? "Download did not finish. Click Verify and download to retry." : "下载未完成，请点击“验证并下载”重试。"
-  };
-  if (state.phase === "downloading") {
-    const rate = state.speed > 0
-      ? `${(state.speed / (state.speed >= 1048576 ? 1048576 : 1024)).toFixed(1)} ${state.speed >= 1048576 ? "MB" : "KB"}/s`
-      : (english ? "measuring speed…" : "正在计算速度…");
-    downloadProgressText.textContent = `${english ? "Downloading" : "正在下载"}${source} · ${percent.toFixed(1)}% · ${rate}`;
-  } else downloadProgressText.textContent = `${messages[state.phase] ?? messages.error}${source}`;
-  if (busy) downloadButton.querySelector("#download-button-label").textContent = english ? "Download in progress…" : "正在下载…";
-}
-
-function updateWebsiteDownloadProgress(progress, controller) {
-  if (websiteDownloadController !== controller || controller.signal.aborted) return;
-  const now = Date.now();
-  const loaded = Math.max(0, Number(progress.loaded) || 0);
-  const previous = websiteDownloadState;
-  const continuing = progress.phase === "downloading" && previous?.phase === "downloading"
-    && previous.source === progress.source && loaded >= previous.loaded;
-  const startedAt = continuing ? previous.startedAt : now;
-  const startedBytes = continuing ? previous.startedBytes : loaded;
-  websiteDownloadState = {
-    ...progress, loaded, total: Number(progress.total) || 0, startedAt, startedBytes,
-    speed: now > startedAt ? (loaded - startedBytes) * 1000 / (now - startedAt) : 0
-  };
-  renderWebsiteDownload();
-}
-
-function loadWebsiteDownloader() {
-  return import("./website-downloader.mjs?v=20261101-download-3");
-}
-
-function loadWebsiteAuthorization() {
-  return import("./website-download-auth.mjs?v=20261109-turnstile");
-}
-
-async function loadDownloadConfiguration() {
-  try {
-    const response = await fetch("/api/download-config", { method: "GET", cache: "no-store", signal: AbortSignal.timeout(10000) });
-    const config = await response.json();
-    downloadAvailability = response.ok && config?.enabled === true ? "available" : "unavailable";
-  } catch { downloadAvailability = "unavailable"; }
-  updateDownloadLink();
-}
-
-async function abortableWebsiteDownload(task, signal) {
-  signal.throwIfAborted();
-  let rejectOnAbort;
-  const aborted = new Promise((_resolve, reject) => {
-    rejectOnAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", rejectOnAbort, { once: true });
-  });
-  try { return await Promise.race([task, aborted]); }
-  finally { signal.removeEventListener("abort", rejectOnAbort); }
-}
-
-function saveWebsiteDownload(result, asset) {
-  if (!(result.blob instanceof Blob) || result.blob.size !== asset.size || result.filename !== asset.name) {
-    throw new Error("Invalid downloaded file");
-  }
-  const objectUrl = URL.createObjectURL(result.blob);
-  const link = document.createElement("a");
-  try {
-    link.href = objectUrl;
-    link.download = result.filename;
-    document.body.append(link);
-    link.click();
-  } catch (error) {
-    URL.revokeObjectURL(objectUrl);
-    throw error;
-  } finally {
-    link.remove();
-  }
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
-}
-
-async function handleWebsiteDownload(event) {
-  event.preventDefault();
-  if (websiteDownloadController) { event.preventDefault(); return; }
-  const asset = selectedDownloadAsset();
-  if (!asset || downloadAvailability !== "available") return;
-  if (!Number.isSafeInteger(asset.size) || asset.size <= 0 || !/^sha256:[a-f\d]{64}$/i.test(asset.digest ?? "")) {
-    websiteDownloadState = { phase: "invalid", loaded: 0, total: 0 };
-    renderWebsiteDownload();
-    return;
-  }
-  const controller = new AbortController();
-  websiteDownloadController = controller;
-  websiteDownloadState = { phase: "authorizing", loaded: 0, total: asset.size };
-  renderWebsiteDownload();
-  try {
-    const { authorizeWebsiteDownload } = await abortableWebsiteDownload(loadWebsiteAuthorization(), controller.signal);
-    const authorization = await abortableWebsiteDownload(authorizeWebsiteDownload({
-      tag: latestRelease.tag_name, asset, container: downloadTurnstile, signal: controller.signal
-    }), controller.signal);
-    controller.signal.throwIfAborted();
-    const { downloadReleaseAsset } = await abortableWebsiteDownload(loadWebsiteDownloader(), controller.signal);
-    controller.signal.throwIfAborted();
-    const result = await abortableWebsiteDownload(downloadReleaseAsset({
-      asset, sources: [{ id: "cloudflare", label: "Cloudflare CDN", url: authorization.url }], signal: controller.signal,
-      autoSelect: false,
-      fetchImpl: async (url, options) => {
-        if (Date.now() >= Date.parse(authorization.expiresAt)) {
-          throw Object.assign(new Error("Download authorization expired"), { code: "AUTHORIZATION_EXPIRED" });
-        }
-        const response = await fetch(url, { ...options, referrerPolicy: "no-referrer", redirect: "error" });
-        if (response.status === 403) {
-          response.body?.cancel().catch(() => {});
-          throw Object.assign(new Error("Download authorization expired"), { code: "AUTHORIZATION_EXPIRED" });
-        }
-        return response;
-      },
-      onProgress: (progress) => updateWebsiteDownloadProgress(progress, controller)
-    }), controller.signal);
-    controller.signal.throwIfAborted();
-    saveWebsiteDownload(result, asset);
-    websiteDownloadState = {
-      phase: "complete", loaded: asset.size, total: asset.size,
-      source: typeof result.source === "string" ? result.source : result.source?.label
-    };
-  } catch (error) {
-    const cancelled = controller.signal.aborted || error.name === "AbortError" || error.code === "ABORT_ERR";
-    websiteDownloadState = { ...websiteDownloadState,
-      phase: cancelled ? "cancelled" : error.code === "INVALID_ASSET" ? "invalid"
-        : ["AUTHORIZATION_EXPIRED", "VERIFICATION_EXPIRED"].includes(error.code) ? "expired" : "error" };
-  } finally {
-    websiteDownloadController = null;
-    updateDownloadLink();
-  }
-}
-
-function clearWebsiteDownload() {
-  if (websiteDownloadController) return;
-  websiteDownloadState = null;
-  updateDownloadLink();
 }
 
 async function loadLatestRelease() {
   try {
     const response = await fetch(releaseApiUrl, { headers: { Accept: "application/vnd.github+json" } });
     if (!response.ok) throw new Error(`GitHub API: ${response.status}`);
-    latestRelease = await response.json();
+    const release = await response.json();
+    if (!/^v\d+\.\d+\.\d+$/.test(release?.tag_name ?? "") || !Array.isArray(release.assets)
+      || release.draft === true || release.prerelease === true) throw new Error("Invalid release metadata");
+    latestRelease = release;
+    releaseLoadFailed = false;
   } catch {
+    latestRelease = null;
     releaseLoadFailed = true;
   }
   updateDownloadLink();
@@ -383,14 +249,8 @@ document.querySelector("#partner-window-close").addEventListener("click", () => 
 
 document.querySelector("#current-year").textContent = String(new Date().getFullYear());
 downloadPlatform.value = detectPlatform();
-downloadPlatform.addEventListener("change", clearWebsiteDownload);
-downloadButton.addEventListener("click", handleWebsiteDownload);
-downloadCancel.addEventListener("click", () => {
-  if (!websiteDownloadController) return;
-  websiteDownloadController.abort();
-  websiteDownloadState = { ...websiteDownloadState, phase: "cancelling" };
-  renderWebsiteDownload();
-});
+downloadPlatform.addEventListener("change", updateDownloadLink);
+
 changelogDetails.addEventListener("toggle", () => {
   if (changelogDetails.open && !changelogDetails.dataset.loaded) {
     changelogDetails.dataset.loaded = "true";
@@ -405,4 +265,3 @@ let savedLanguage;
 try { savedLanguage = localStorage.getItem("melody-site-language"); } catch {}
 setLanguage(savedLanguage || (navigator.language?.toLowerCase().startsWith("zh") ? "zh" : "en"));
 loadLatestRelease();
-loadDownloadConfiguration();

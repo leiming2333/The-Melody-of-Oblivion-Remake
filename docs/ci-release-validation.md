@@ -39,11 +39,11 @@ ARMv7 曾尝试用 QEMU 用户态替代原生验收：`ubuntu-24.04` 上注册 b
 
 测试使用隔离安装目录和用户数据目录。健康确认由测试程序在新版启动报告成功后调用，实际产品则由主进程检测新版窗口显示、主框架本地页面加载和预加载桥接就绪。Java、账户与网络后台检查不阻挡健康确认。两类 macOS runner 还实际撤销隔离应用目录的写权限，要求系统拒绝写入后保留已校验 ZIP、降级为手动替换入口，且不退出或启动辅助进程；报告必须包含 `manualPermissionFallbackPassed:true`。App Translocation 降级、Windows 文件锁与辅助进程错误、回滚错误、不同安装路径隔离等故障分支另由事务测试覆盖。
 
-## 公开发布与 Blob
+## 公开发布与对象存储
 
 只有版本标签 `v<package.json.version>` 触发公开发布。流程校验标签与检出的源码、锁文件及包内版本，等待八包和七类原生报告完整通过，再上传 draft 并公开。已有公开版本仅允许相同摘要的幂等重跑；内容不同直接失败，不能覆盖。
 
-配置 Blob 后，只同步 Windows x64、ia32、arm64 三个已验证的 portable EXE；逐个上传并回读校验大小与 SHA-256，全部成功才更新仅含这三个 EXE 的 `releases/latest.json`，失败不切换 latest。完整 `release-manifest.json` 原样保存为 `releases/<tag>/manifest.json`，用于来源验证及同标签不可变校验。GitHub Releases 仍发布完整八包和校验文件，macOS、Linux 下载继续使用 GitHub。手动回填只下载三个 Windows EXE 和完整发布清单。未配置 Blob 时报告跳过，不伪造同步成功。手动分支构建始终不走公开发布与 Blob 同步步骤。
+配置 Cloudflare R2 后，同步 Windows、Linux 与 macOS 共八个安装包；逐个上传并回读校验大小与 SHA-256，全部成功才更新包含八包的 `releases/latest.json`，失败不切换 latest。完整 `release-manifest.json` 的内容保存为 `releases/<tag>/manifest.json`，用于来源验证及同标签不可变校验。已有安装包验证一致后复用，已有同版本清单验证一致后保持不变，可补齐该清单中的其他平台文件。GitHub Releases 继续提供八包和校验文件。手动回填下载八个安装包与完整发布清单，无需重建公开 Release。未配置 R2 时按 Blob 回退（若已配置）或跳过，不伪造同步成功。手动分支构建始终不走公开发布与对象存储同步步骤。官网使用浏览器原生下载直链，详见 [对象存储下载](object-storage-downloads.md)。
 
 ## 本地交付检查
 

@@ -170,7 +170,7 @@ test('publication rejects a moved or unrelated tag before creating or changing a
   assert.match(commands[0][1], /\/commits\//);
 });
 
-test('Blob only syncs Windows executables and changes latest after every Windows digest is verified', async t => {
+test('Blob syncs all eight platforms and changes latest only after the final package digest is verified', async t => {
   const { syncRelease } = await import('../scripts/sync-release-to-blob.mjs');
   const f = await fixture(t);
   const manifest = await f.prepare();
@@ -179,32 +179,45 @@ test('Blob only syncs Windows executables and changes latest after every Windows
   const blobs = new Map();
   blobs.set('releases/v0.0.1/The-Melody-of-Oblivion-Remake-Windows-x64.exe', Buffer.from('old tag'));
   const deleted = [];
+  const puts = [];
   let fail = true;
   const options = {
     token: 'fixture',
     listBlobs: async ({ prefix }) => ({ blobs: [...blobs.keys()].filter(key => key.startsWith(prefix)).map(pathname => ({ pathname, url: `https://blob.invalid/${pathname}` })) }),
     delBlobs: async (pathnames) => { for (const pathname of pathnames) { deleted.push(pathname); blobs.delete(pathname); } },
-    putBlob: async (pathname, contents) => { blobs.set(pathname, Buffer.from(contents)); return { url: `https://blob.invalid/${pathname}` }; },
+    putBlob: async (pathname, contents, options) => {
+      puts.push({ pathname, options });
+      if (pathname !== 'releases/latest.json') assert.equal(options.allowOverwrite, false);
+      blobs.set(pathname, Buffer.from(contents));
+      return { url: `https://blob.invalid/${pathname}` };
+    },
     fetchUrl: async url => {
       const key = url.slice('https://blob.invalid/'.length);
       const contents = blobs.get(key);
-      return new Response(fail && key.endsWith(windowsTargets[2].filename) ? 'corrupt' : contents, { status: contents ? 200 : 404 });
+      return new Response(fail && key.endsWith(targets.at(-1).filename) ? 'corrupt' : contents, { status: contents ? 200 : 404 });
     }
   };
   await assert.rejects(syncRelease(f.output, `v${version}`, metadataPath, options), /digest mismatch/);
   assert.equal(blobs.has('releases/latest.json'), false);
+  assert.equal(blobs.has(`releases/v${version}/manifest.json`), false);
+  assert.equal(puts.length, targets.length, 'all package readbacks, including macOS, must pass before publishing metadata');
   assert.deepEqual(deleted, []);
   fail = false;
   assert.equal((await syncRelease(f.output, `v${version}`, metadataPath, options)).latestUpdated, true);
   const latest = JSON.parse(blobs.get('releases/latest.json'));
-  assert.deepEqual(latest.assets.map(asset => asset.name).sort(), windowsTargets.map(target => target.filename).sort());
-  assert.deepEqual(latest.assets.map(asset => asset.platform).sort(), ['Windows-arm64', 'Windows-ia32', 'Windows-x64']);
+  assert.deepEqual(latest.assets.map(asset => asset.name).sort(), targets.map(target => target.filename).sort());
+  assert.deepEqual(latest.assets.map(asset => asset.platform).sort(), ['Linux-arm64', 'Linux-armv7l', 'Linux-x64',
+    'Windows-arm64', 'Windows-ia32', 'Windows-x64', 'macOS-arm64', 'macOS-x64']);
   assert.deepEqual(JSON.parse(blobs.get(`releases/v${version}/manifest.json`)), manifest);
   assert.deepEqual([...blobs.keys()].filter(key => key.startsWith(`releases/v${version}/`) && /\.(?:exe|zip|AppImage)$/.test(key)).sort(),
-    windowsTargets.map(target => `releases/v${version}/${target.filename}`).sort());
+    targets.map(target => `releases/v${version}/${target.filename}`).sort());
   assert.deepEqual(blobs.get('releases/v0.0.1/The-Melody-of-Oblivion-Remake-Windows-x64.exe'), Buffer.from('old tag'));
   blobs.set('releases/latest.json', Buffer.from(JSON.stringify({ tag_name: 'v999.0.0' })));
   assert.equal((await syncRelease(f.output, `v${version}`, metadataPath, options)).latestUpdated, false);
+  assert.equal(puts.filter(put => put.pathname.endsWith('/manifest.json')).length, 1,
+    'an unchanged published tag manifest must never be rewritten');
+  assert.equal(puts.filter(put => /\.(?:exe|zip|AppImage)$/.test(put.pathname)).length, targets.length,
+    'verified existing objects must be reused without overwriting');
   assert.equal(JSON.parse(blobs.get('releases/latest.json')).tag_name, 'v999.0.0');
   const immutableKey = `releases/v${version}/manifest.json`;
   const conflicting = JSON.parse(blobs.get(immutableKey));
@@ -214,13 +227,10 @@ test('Blob only syncs Windows executables and changes latest after every Windows
   assert.equal(JSON.parse(blobs.get('releases/latest.json')).tag_name, 'v999.0.0');
 });
 
-test('Blob accepts Windows-only downloads and rejects missing, duplicate or modified Windows packages before uploading', async t => {
+test('Blob requires all platforms and rejects missing, duplicate or modified packages before uploading', async t => {
   const { syncRelease } = await import('../scripts/sync-release-to-blob.mjs');
   const f = await fixture(t);
   await f.prepare();
-  for (const target of targets.filter(target => target.platform !== 'win32')) {
-    await fs.rm(path.join(f.output, target.filename));
-  }
   const metadataPath = path.join(f.output, 'release.json');
   await fs.writeFile(metadataPath, JSON.stringify({ tagName: `v${version}` }));
   const blobs = new Map();
@@ -234,11 +244,11 @@ test('Blob accepts Windows-only downloads and rejects missing, duplicate or modi
     fetchUrl: async url => new Response(blobs.get(url.slice('https://blob.invalid/'.length)))
   };
   const sync = () => syncRelease(f.output, `v${version}`, metadataPath, options);
-  for (const target of windowsTargets) {
+  for (const target of targets) {
     const file = path.join(f.output, target.filename);
     const contents = await fs.readFile(file);
     await fs.rm(file);
-    await assert.rejects(sync(), /Missing or duplicate package/);
+    await assert.rejects(sync(), /Expected 8 packages/);
     await fs.writeFile(file, Buffer.alloc(0));
     await assert.rejects(sync(), /Empty release package/);
     await fs.writeFile(file, Buffer.alloc(contents.length, 'x'));
@@ -246,14 +256,77 @@ test('Blob accepts Windows-only downloads and rejects missing, duplicate or modi
     await fs.writeFile(file, contents);
     assert.equal(blobs.size, 0);
   }
-  const duplicate = path.join(f.output, 'duplicate', windowsTargets[0].filename);
+  const duplicate = path.join(f.output, 'duplicate', targets[0].filename);
   await fs.mkdir(path.dirname(duplicate));
-  await fs.copyFile(path.join(f.output, windowsTargets[0].filename), duplicate);
-  await assert.rejects(sync(), /Missing or duplicate package/);
+  await fs.copyFile(path.join(f.output, targets[0].filename), duplicate);
+  await assert.rejects(sync(), /Expected 8 packages/);
   assert.equal(blobs.size, 0);
   await fs.rm(duplicate);
   const result = await sync();
   assert.equal(result.latestUpdated, true);
-  assert.deepEqual(result.assets.map(asset => asset.name).sort(), windowsTargets.map(target => target.filename).sort());
-  assert.equal(blobs.size, windowsTargets.length + 2);
+  assert.deepEqual(result.assets.map(asset => asset.name).sort(), targets.map(target => target.filename).sort());
+  assert.equal(blobs.size, targets.length + 2);
+});
+
+test('the existing immutable Windows-only tag can add its five missing platform objects without rewriting published bytes', async t => {
+  const { syncRelease } = await import('../scripts/sync-release-to-blob.mjs');
+  const f = await fixture(t);
+  const manifest = await f.prepare();
+  const metadataPath = path.join(f.output, 'release.json');
+  await fs.writeFile(metadataPath, JSON.stringify({ tagName: `v${version}` }));
+  const tagPath = `releases/v${version}`;
+  const immutableManifest = Buffer.from(JSON.stringify(manifest, null, 2));
+  const blobs = new Map([[`${tagPath}/manifest.json`, immutableManifest]]);
+  for (const target of windowsTargets) blobs.set(`${tagPath}/${target.filename}`, await fs.readFile(path.join(f.output, target.filename)));
+  blobs.set('releases/latest.json', Buffer.from(JSON.stringify({ tag_name: `v${version}`, assets: [] })));
+  const writes = [];
+  const options = {
+    token: 'fixture',
+    listBlobs: async ({ prefix }) => ({ blobs: [...blobs.keys()].filter(key => key.startsWith(prefix))
+      .map(pathname => ({ pathname, url: `https://blob.invalid/${pathname}` })) }),
+    putBlob: async (pathname, contents, options) => {
+      writes.push(pathname);
+      if (pathname !== 'releases/latest.json') {
+        assert.equal(options.allowOverwrite, false);
+        assert.equal(blobs.has(pathname), false);
+      }
+      blobs.set(pathname, Buffer.from(contents));
+      return { url: `https://blob.invalid/${pathname}` };
+    },
+    fetchUrl: async url => new Response(blobs.get(url.slice('https://blob.invalid/'.length)))
+  };
+  const result = await syncRelease(f.output, `v${version}`, metadataPath, options);
+  assert.equal(result.assets.length, targets.length);
+  assert.equal(result.latestUpdated, true);
+  assert.deepEqual(writes.sort(), [...targets.filter(target => target.platform !== 'win32')
+    .map(target => `${tagPath}/${target.filename}`), 'releases/latest.json'].sort());
+  assert.deepEqual(blobs.get(`${tagPath}/manifest.json`), immutableManifest);
+  assert.equal(JSON.parse(blobs.get('releases/latest.json')).assets.length, 8);
+  const writesBeforeConflict = writes.length;
+  blobs.set(`${tagPath}/${windowsTargets[0].filename}`, Buffer.from('changed published package'));
+  await assert.rejects(syncRelease(f.output, `v${version}`, metadataPath, options), /immutable or unavailable/);
+  assert.equal(writes.length, writesBeforeConflict);
+});
+
+test('manual Blob sync downloads all release platform families before publishing latest', async () => {
+  const yaml = require('js-yaml');
+  const workflow = yaml.load(await fs.readFile(path.join(__dirname, '../.github/workflows/sync-release-to-blob.yml'), 'utf8'));
+  const step = workflow.jobs.sync.steps.find(step => step.run?.includes('gh release download'));
+  for (const pattern of ['*-Windows-*.exe', '*-Linux-*.AppImage', '*-macOS-*.zip', 'release-manifest.json']) {
+    assert.ok(step.run.includes(`--pattern '${pattern}'`));
+  }
+});
+
+test('manual R2 sync downloads all release platform families and passes R2 configuration', async () => {
+  const yaml = require('js-yaml');
+  const workflow = yaml.load(await fs.readFile(path.join(__dirname, '../.github/workflows/sync-release-to-r2.yml'), 'utf8'));
+  const download = workflow.jobs.sync.steps.find(step => step.run?.includes('gh release download'));
+  for (const pattern of ['*-Windows-*.exe', '*-Linux-*.AppImage', '*-macOS-*.zip', 'release-manifest.json']) {
+    assert.ok(download.run.includes(`--pattern '${pattern}'`));
+  }
+  const sync = workflow.jobs.sync.steps.find(step => step.name?.includes('publish R2 latest'));
+  for (const variable of ['R2_ACCOUNT_ID', 'R2_BUCKET_NAME', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_PUBLIC_BASE_URL']) {
+    assert.equal(typeof sync.env[variable], 'string');
+  }
+  assert.match(sync.run, /sync-release-to-r2\.mjs/);
 });

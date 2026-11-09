@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#平台支持与使用前提)
-[![Source](https://img.shields.io/badge/Source-v1.9.2-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.9.3-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.9.2`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://melodyoblivion.xyz/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.9.3`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://melodyoblivion.xyz/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -129,7 +129,7 @@ styles.css                落地页样式
 
 官网位于仓库根目录，Electron 启动器界面位于 `src/renderer`。官网不嵌入启动器截图，`assets/launcher-screenshot.png` 和 `assets/launcher-accounts.png` 两张真实截图仅供 README 展示；界面变化后需重新采集截图。
 
-官网可选接入 Cloudflare CDN：将已验收的 Worker HTTPS 根地址写入 `src/shared/website-cdn-config.json` 的 `baseUrl`，随网站代码发布；也可在网站部署环境设置优先级更高的 `CDN_BASE_URL`。两处默认都不配置时沿用现有下载线路。CDN 提供 `/releases/<tag>/<官方文件名>`；网站将其加入自动测速和手动选线，自动模式的浏览器备用直链也优先使用该地址。安装包大小和 SHA-256 仍以 GitHub 官方发布信息为准。
+官网使用 Cloudflare R2 对象存储直链，由浏览器直接下载；R2 不可用时保留 GitHub 回退。GitHub 官方发布决定版本、文件大小和 SHA-256；对应 R2 文件全部上传并回读校验成功后才更新下载清单。完整同步涵盖八类安装包，尚未同步的文件显示 GitHub 下载。配置、回填和旧服务清理见 [对象存储下载](docs/object-storage-downloads.md)。
 
 ## 安全说明
 
