@@ -62,9 +62,10 @@ jobs:
       RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-toolchain
         with:
-          node-version: 26.10.0
+          omit-dev: 'true'
+          skip-electron: 'true'
       - uses: actions/download-artifact@v4
         with:
           path: release-input
@@ -79,6 +80,57 @@ jobs:
           set -euo pipefail
           if [ -z "$RELEASE_TAG" ]; then export RELEASE_TAG=$(node -p "'v' + require('./package.json').version"); fi
           node scripts/release-assets.cjs release-input release-verified smoke-input
+      - name: Find previous stable release for delta patches
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json isDraft,assets \
+            > "$RUNNER_TEMP/current-release.json" 2>/dev/null; then
+            if ! jq -e '.isDraft == true' "$RUNNER_TEMP/current-release.json" >/dev/null; then
+              if jq -e '[.assets[].name] | index("patch-manifest.json")' "$RUNNER_TEMP/current-release.json" >/dev/null; then
+                gh release download "$RELEASE_TAG" --repo "$GH_REPO" --dir release-verified \
+                  --pattern 'patch-manifest.json*' --pattern 'patch-*'
+              fi
+              echo '::notice::A published release already exists; skipping delta regeneration.'
+              exit 0
+            fi
+          fi
+          PREVIOUS_RELEASES=$(gh api "repos/$GH_REPO/releases?per_page=30" \
+            --jq "[.[] | select(.draft == false and .prerelease == false and .tag_name != \"$RELEASE_TAG\")][0:3] | .[].tag_name")
+          if [ -z "$PREVIOUS_RELEASES" ]; then
+            echo '::notice::No previous stable release; publishing full packages only.'
+            exit 0
+          fi
+          while IFS= read -r previous; do
+            [ -z "$previous" ] && continue
+            mkdir -p "previous-release/$previous"
+            gh release download "$previous" --repo "$GH_REPO" --dir "previous-release/$previous" \
+              --pattern '*-Windows-*.exe' --pattern '*-Linux-*.AppImage' \
+              --pattern '*-macOS-*.zip' --pattern 'release-manifest.json'
+          done <<< "$PREVIOUS_RELEASES"
+      - name: Generate and verify delta patches
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d previous-release ] || [ -z "$(find previous-release -mindepth 1 -maxdepth 1 -type d -print -quit)" ]; then
+            echo '::notice::No previous stable release; publishing full packages only.'
+            exit 0
+          fi
+          ARCHIVE="$RUNNER_TEMP/zig-bsdiff.tar.gz"
+          curl -fsSL --retry 8 --retry-all-errors --connect-timeout 20 --max-time 180 \
+            -o "$ARCHIVE" https://github.com/blackboardsh/zig-bsdiff/releases/download/v0.1.26/zig-bsdiff-linux-x64.tar.gz
+          echo 'e417735e3373c6660789216638bd847c7fba49a96d8770968a0b438e6587bd57  '"$ARCHIVE" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/zig-bsdiff"
+          tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP/zig-bsdiff"
+          BIN=$(find "$RUNNER_TEMP/zig-bsdiff" -type f -name bsdiff | head -n 1)
+          test -n "$BIN"
+          chmod +x "$BIN"
+          ZIG_BSDIFF="$BIN" node scripts/build-patches.cjs release-verified previous-release
       - uses: actions/upload-artifact@v4
         with:
           name: verified-release-bundle

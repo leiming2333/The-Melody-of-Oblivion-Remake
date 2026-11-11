@@ -37,6 +37,10 @@ builder-debug.yml
 # Environment files and local credentials must never be uploaded
 .env
 .env.*
+.dev.vars*
+.wrangler/
+cloudflare/
+scripts/verify-website-download-browser.cjs
 *.env
 .npmrc
 .netrc

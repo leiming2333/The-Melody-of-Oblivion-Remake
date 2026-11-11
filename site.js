@@ -54,9 +54,12 @@ const translations = {
   "download.changelogLoading": "Loading release notes…",
   "download.changelogAll": "View all releases ↗",
   "download.platform": "Choose system",
-  "download.button": "Download launcher",
-  "download.browser": "View download progress in your browser's downloads list.",
+  "download.button": "Verify and download",
+  "download.browser": "Downloads use 1 MiB parts and four parallel requests, then verify SHA-256 before saving. Keep this page open.",
+  "download.verification": "Complete Cloudflare human verification to start the download.",
   "download.alternative": "GitHub original download",
+  "download.progress": "Download progress",
+  "download.cancel": "Cancel download",
   "download.cloud": "Cloud downloads",
   "download.baidu": "Baidu Netdisk ↗",
   "download.lanzou": "Lanzou Cloud ↗",
@@ -77,12 +80,21 @@ const partnerWindow = document.querySelector("#partner-window");
 const downloadPlatform = document.querySelector("#download-platform");
 const downloadButton = document.querySelector("#download-button");
 const downloadAlternative = document.querySelector("#download-alternative");
+const downloadTurnstile = document.querySelector("#download-turnstile");
 const downloadStatus = document.querySelector("#download-status");
+const downloadProgressPanel = document.querySelector("#download-progress-panel");
+const downloadProgress = document.querySelector("#download-progress");
+const downloadProgressText = document.querySelector("#download-progress-text");
+const downloadCancel = document.querySelector("#download-cancel");
 const changelogDetails = document.querySelector("#changelog-details");
 const changelogList = document.querySelector("#changelog-list");
 const releaseApiUrl = "/api/latest-release";
 let latestRelease = null;
 let releaseLoadFailed = false;
+let downloadAvailability = "checking";
+let downloadController = null;
+let downloadState = null;
+let downloadBaseUrl = null;
 const originalCopy = Object.fromEntries(
   [...document.querySelectorAll("[data-i18n]")].map((element) => [element.dataset.i18n, element.innerHTML])
 );
@@ -130,17 +142,17 @@ function downloadTarget(asset) {
   if (verifiedMetadata) {
     const objectStorageUrl = `https://downloads.melodyoblivion.xyz/releases/${encodeURIComponent(latestRelease.tag_name)}/${encodeURIComponent(asset.name)}`;
     if (asset.object_storage_verified === true && asset.object_storage_download_url === objectStorageUrl) {
-      return { url: objectStorageUrl, githubUrl, objectStorage: true };
+      return { url: objectStorageUrl, githubUrl, objectStorage: true, verifiedMetadata };
     }
     try {
       const url = new URL(asset.browser_download_url);
       if (url.protocol === "https:" && url.hostname.endsWith(".public.blob.vercel-storage.com")
         && !url.username && !url.password && !url.port && !url.search && !url.hash) {
-        return { url: url.href, githubUrl, objectStorage: true };
+        return { url: url.href, githubUrl, objectStorage: true, verifiedMetadata };
       }
     } catch {}
   }
-  return { url: githubUrl, githubUrl, objectStorage: false };
+  return { url: githubUrl, githubUrl, objectStorage: false, verifiedMetadata };
 }
 
 function updateDownloadLink() {
@@ -148,33 +160,197 @@ function updateDownloadLink() {
   document.querySelector("#latest-version").textContent = latestRelease?.tag_name ?? "—";
   const asset = selectedDownloadAsset();
   const target = downloadTarget(asset);
-  downloadButton.querySelector("#download-button-label").textContent = target && !target.objectStorage
-    ? (english ? "Download from GitHub" : "从 GitHub 下载")
-    : (english ? "Download launcher" : "下载启动器");
-  downloadButton.setAttribute("aria-disabled", String(!target));
+  const busy = Boolean(downloadController);
+  const configured = downloadAvailability === "available" && Boolean(downloadBaseUrl);
+  const enabled = Boolean(target?.verifiedMetadata && configured && !busy);
+  downloadPlatform.disabled = busy;
+  downloadButton.disabled = !enabled;
+  downloadButton.setAttribute("aria-disabled", String(!enabled));
+  downloadButton.querySelector("#download-button-label").textContent = busy
+    ? downloadState?.phase === "authorizing"
+      ? (english ? "Verifying…" : "正在验证…")
+      : (english ? "Download in progress…" : "正在下载…")
+    : !configured
+      ? (english ? "Download temporarily unavailable" : "下载暂不可用")
+      : (english ? "Verify and download" : "验证并下载");
+  downloadTurnstile.hidden = !busy || downloadState?.phase !== "authorizing";
   if (target) {
-    downloadButton.href = target.url;
-    downloadButton.download = asset.name;
-    downloadButton.removeAttribute("tabindex");
     downloadAlternative.href = target.githubUrl;
     downloadAlternative.download = asset.name;
   } else {
-    downloadButton.removeAttribute("href");
-    downloadButton.removeAttribute("download");
-    downloadButton.setAttribute("tabindex", "-1");
     downloadAlternative.removeAttribute("href");
     downloadAlternative.removeAttribute("download");
   }
-  downloadAlternative.hidden = !target?.objectStorage;
+  // Public alternatives remain available even while the verification gateway
+  // is unconfigured or an R2 asset has not been synchronized.
+  downloadAlternative.hidden = !target;
   const size = Number.isSafeInteger(asset?.size) && asset.size > 0
     ? ` · ${(asset.size / 1048576).toFixed(1)} MB` : "";
-  downloadStatus.textContent = target
-    ? `${latestRelease.tag_name}${size} · ${target.objectStorage ? (english ? "Object storage" : "对象存储") : "GitHub"} · HTTPS${target.objectStorage ? "" : (english ? " · Object storage is not ready" : " · 对象存储尚未就绪")}`
-    : releaseLoadFailed
-      ? (english ? "Could not load the download list. Use GitHub Releases or the cloud links below." : "暂时无法读取安装包列表，请使用 GitHub Releases 或下方网盘下载。")
-      : latestRelease
-        ? (english ? "No build for this platform in the latest release." : "最新版本暂无该平台的安装包。")
-        : (english ? "Checking the latest release…" : "正在查询最新版本…");
+  const baseStatus = downloadAvailability === "unavailable"
+    ? (english ? "Human verification is unavailable. Use GitHub or the cloud links below." : "真人验证暂不可用，请使用 GitHub 或下方网盘下载。")
+    : target && !target.verifiedMetadata
+      ? (english ? "Trusted file size or SHA-256 is missing. Use GitHub Releases below." : "缺少可信的文件大小或 SHA-256，请使用下方 GitHub 下载。")
+      : target
+        ? `${latestRelease.tag_name}${size} · ${target.objectStorage ? (english ? "Object storage" : "对象存储") : (english ? "GitHub fallback" : "GitHub 回退")} · ${english ? "4 parallel parts + SHA-256" : "4 路分段 + SHA-256"}`
+        : releaseLoadFailed
+          ? (english ? "Could not load the download list. Use GitHub Releases or the cloud links below." : "暂时无法读取安装包列表，请使用 GitHub Releases 或下方网盘下载。")
+          : latestRelease
+            ? (english ? "No build for this platform in the latest release." : "最新版本暂无该平台的安装包。")
+            : (english ? "Checking the latest release…" : "正在查询最新版本…");
+  downloadStatus.textContent = baseStatus;
+  renderWebsiteDownload();
+}
+
+function loadWebsiteAuthorization() {
+  return import("./website-download-auth.mjs?v=20261111-segmented");
+}
+
+function loadWebsiteDownloader() {
+  return import("./website-downloader.mjs?v=20261111-segmented");
+}
+
+function renderWebsiteDownload() {
+  const state = downloadState;
+  const busy = Boolean(downloadController);
+  const english = document.documentElement.lang === "en";
+  downloadProgressPanel.hidden = !state;
+  downloadProgressPanel.setAttribute("aria-busy", String(busy));
+  downloadCancel.hidden = !busy;
+  downloadCancel.disabled = Boolean(downloadController?.signal.aborted);
+  downloadTurnstile.hidden = !busy || state?.phase !== "authorizing";
+  if (!state) return;
+  const percent = state.total > 0 ? Math.min(100, Math.max(0, state.loaded / state.total * 100)) : 0;
+  if (busy && ["authorizing", "testing", "switching"].includes(state.phase)) downloadProgress.removeAttribute("value");
+  else downloadProgress.value = percent;
+  const source = state.source ? ` · ${state.source}` : "";
+  const messages = {
+    authorizing: english ? "Complete human verification below to start downloading…" : "请在下方完成真人验证，验证后开始下载…",
+    testing: english ? "Testing the download connection…" : "正在测试下载线路…",
+    switching: english ? "Switching download source…" : "正在切换下载线路…",
+    verifying: english ? "Checking the complete file's SHA-256…" : "正在检查完整文件的 SHA-256…",
+    cancelling: english ? "Cancelling download…" : "正在取消下载…",
+    cancelled: english ? "Download cancelled. Verify again to retry." : "下载已取消，可重新验证后重试。",
+    complete: english ? "File verified and handed to your browser to save." : "文件已校验，已交给浏览器保存。",
+    expired: english ? "Verification or download authorization expired. Verify again to retry." : "验证或下载授权已过期，请重新验证后重试。",
+    invalid: english ? "File information or downloaded bytes could not be verified. No file was saved." : "文件信息或下载内容校验失败，未保存文件。",
+    error: english ? "Download did not finish. Verify again to retry, or use GitHub below." : "下载未完成，请重新验证后重试，或使用下方 GitHub 下载。"
+  };
+  if (state.phase === "downloading") {
+    const unit = state.speed >= 1048576 ? "MB" : "KB";
+    const rate = state.speed > 0 ? `${(state.speed / (unit === "MB" ? 1048576 : 1024)).toFixed(1)} ${unit}/s`
+      : (english ? "measuring speed…" : "正在计算速度…");
+    downloadProgressText.textContent = `${english ? "Downloading" : "正在下载"}${source} · ${percent.toFixed(1)}% · ${rate}`;
+  } else downloadProgressText.textContent = `${messages[state.phase] ?? messages.error}${source}`;
+}
+
+function updateWebsiteDownloadProgress(progress, controller) {
+  if (downloadController !== controller || controller.signal.aborted) return;
+  const now = Date.now();
+  const loaded = Math.max(0, Number(progress.loaded) || 0);
+  const previous = downloadState;
+  const continuing = progress.phase === "downloading" && previous?.phase === "downloading"
+    && previous.source === progress.source && loaded >= previous.loaded;
+  const startedAt = continuing ? previous.startedAt : now;
+  const startedBytes = continuing ? previous.startedBytes : loaded;
+  downloadState = { ...progress, loaded, total: Number(progress.total) || 0, startedAt, startedBytes,
+    speed: now > startedAt ? (loaded - startedBytes) * 1000 / (now - startedAt) : 0 };
+  updateDownloadLink();
+}
+
+async function abortableWebsiteDownload(task, signal) {
+  signal.throwIfAborted();
+  let rejectOnAbort;
+  const aborted = new Promise((_resolve, reject) => {
+    rejectOnAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", rejectOnAbort, { once: true });
+  });
+  try { return await Promise.race([task, aborted]); }
+  finally { signal.removeEventListener("abort", rejectOnAbort); }
+}
+
+function saveWebsiteDownload(result, asset) {
+  if (!(result?.blob instanceof Blob) || result.blob.size !== asset.size || result.filename !== asset.name) {
+    throw Object.assign(new Error("Invalid downloaded file"), { code: "SIZE_MISMATCH" });
+  }
+  const objectUrl = URL.createObjectURL(result.blob);
+  const link = document.createElement("a");
+  try {
+    link.href = objectUrl;
+    link.download = result.filename;
+    link.rel = "noreferrer";
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  } finally { link.remove(); }
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+}
+
+async function loadDownloadConfiguration() {
+  try {
+    const response = await fetch("/api/download-config", { method: "GET", cache: "no-store", signal: AbortSignal.timeout(10000) });
+    const config = await response.json();
+    downloadBaseUrl = null;
+    downloadAvailability = response.ok && config?.enabled === true
+      && typeof config.siteKey === "string" && config.siteKey.length > 0
+      && config.action === "download" ? "available" : "unavailable";
+    if (downloadAvailability === "available") {
+      const { validatedDownloadBaseUrl } = await loadWebsiteAuthorization();
+      downloadBaseUrl = validatedDownloadBaseUrl(config.baseUrl);
+    }
+  } catch { downloadAvailability = "unavailable"; downloadBaseUrl = null; }
+  updateDownloadLink();
+}
+
+async function handleWebsiteDownload(event) {
+  event.preventDefault();
+  if (downloadController) return;
+  const asset = selectedDownloadAsset();
+  const target = downloadTarget(asset);
+  if (!asset || !target?.verifiedMetadata || !downloadBaseUrl || downloadAvailability !== "available") return;
+  const tag = latestRelease.tag_name;
+  const controller = new AbortController();
+  downloadController = controller;
+  downloadState = { phase: "authorizing", loaded: 0, total: asset.size };
+  updateDownloadLink();
+  try {
+    const { authorizeWebsiteDownload } = await abortableWebsiteDownload(loadWebsiteAuthorization(), controller.signal);
+    const authorization = await abortableWebsiteDownload(authorizeWebsiteDownload({
+      tag, asset, expectedUrl: `${downloadBaseUrl}/releases/${encodeURIComponent(tag)}/${encodeURIComponent(asset.name)}`,
+      container: downloadTurnstile, signal: controller.signal
+    }), controller.signal);
+    controller.signal.throwIfAborted();
+    const { downloadReleaseAsset } = await abortableWebsiteDownload(loadWebsiteDownloader(), controller.signal);
+    const result = await abortableWebsiteDownload(downloadReleaseAsset({
+      asset, sources: [{ id: "cloudflare", label: "Cloudflare CDN", url: authorization.url }],
+      signal: controller.signal, segmentBytes: 1048576, concurrency: 4, autoSelect: true,
+      fetchImpl: async (url, options) => {
+        if (Date.now() >= Date.parse(authorization.expiresAt)) {
+          throw Object.assign(new Error("Download authorization expired"), { code: "AUTHORIZATION_EXPIRED" });
+        }
+        const response = await fetch(url, { ...options, referrerPolicy: "no-referrer", redirect: "error" });
+        if (response.status === 403) {
+          try { await response.body?.cancel(); } catch {}
+          throw Object.assign(new Error("Download authorization expired"), { code: "AUTHORIZATION_EXPIRED" });
+        }
+        return response;
+      },
+      onProgress: progress => updateWebsiteDownloadProgress(progress, controller)
+    }), controller.signal);
+    controller.signal.throwIfAborted();
+    saveWebsiteDownload(result, asset);
+    downloadState = { phase: "complete", loaded: asset.size, total: asset.size, source: result.source };
+  } catch (error) {
+    const cancelled = controller.signal.aborted || error?.name === "AbortError" || error?.code === "ABORT_ERR";
+    downloadState = { ...downloadState, phase: cancelled ? "cancelled"
+      : ["AUTHORIZATION_EXPIRED", "VERIFICATION_EXPIRED"].includes(error?.code) ? "expired"
+      : ["INVALID_ASSET", "SIZE_MISMATCH", "CHECKSUM_MISMATCH", "INVALID_AUTHORIZATION"].includes(error?.code) ? "invalid" : "error" };
+  } finally {
+    downloadController = null;
+    updateDownloadLink();
+  }
 }
 
 async function loadLatestRelease() {
@@ -249,7 +425,14 @@ document.querySelector("#partner-window-close").addEventListener("click", () => 
 
 document.querySelector("#current-year").textContent = String(new Date().getFullYear());
 downloadPlatform.value = detectPlatform();
-downloadPlatform.addEventListener("change", updateDownloadLink);
+downloadPlatform.addEventListener("change", () => { downloadState = null; updateDownloadLink(); });
+downloadButton.addEventListener("click", handleWebsiteDownload);
+downloadCancel.addEventListener("click", () => {
+  if (!downloadController) return;
+  downloadController.abort();
+  downloadState = { ...downloadState, phase: "cancelling" };
+  updateDownloadLink();
+});
 
 changelogDetails.addEventListener("toggle", () => {
   if (changelogDetails.open && !changelogDetails.dataset.loaded) {
@@ -265,3 +448,4 @@ let savedLanguage;
 try { savedLanguage = localStorage.getItem("melody-site-language"); } catch {}
 setLanguage(savedLanguage || (navigator.language?.toLowerCase().startsWith("zh") ? "zh" : "en"));
 loadLatestRelease();
+loadDownloadConfiguration();

@@ -97,6 +97,15 @@ h2{font-size:clamp(32px,3.3vw,48px);line-height:1.3;font-weight:800;margin-botto
 .download-alternative:focus-visible{outline:2px solid #648a51;outline-offset:3px}
 .download-alternative[hidden]{display:none}
 .download-action small{color:#647365;font-size:11px;line-height:1.5}
+.download-turnstile{width:100%;min-height:65px}
+.download-turnstile[hidden]{display:none}
+.download-progress-panel{display:flex;flex-direction:column;gap:9px;padding:13px 0;border-top:1px solid #9bac9a}
+.download-progress-panel[hidden]{display:none}
+.download-progress-panel progress{width:100%;height:9px;accent-color:#476348}
+.download-cancel{align-self:flex-start;min-height:40px;padding:7px 12px;border:1px solid #9bac9a;border-radius:2px;background:#f5f7f0;color:#35523a;font-size:12px}
+.download-cancel[hidden]{display:none}
+.download-cancel:disabled{cursor:wait;opacity:.65}
+.download-cancel:focus-visible{outline:2px solid #648a51;outline-offset:3px}
 #download-status{min-height:17px}
 .download-action .button[aria-disabled="true"]{transform:none;filter:none;opacity:.65;cursor:wait;pointer-events:none}
 .changelog-details{margin-top:48px;border-top:1px solid #9bac9a;padding-top:18px}

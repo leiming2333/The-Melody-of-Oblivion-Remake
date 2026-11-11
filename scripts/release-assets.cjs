@@ -6,6 +6,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { targets } = require('./release-targets.cjs');
 const { versions } = require('./toolchain.cjs');
+const { PATCH_MANIFEST_NAME, readPatchManifest } = require('../src/main/updater/update-patch');
 
 async function hashFile(file) {
   const hash = createHash('sha256');
@@ -46,6 +47,33 @@ async function collectPackages(directory) {
     packages.push({ target, file, name: target.filename, size: stat.size, sha256: await hashFile(file) });
   }
   return packages;
+}
+
+async function verifyPatchManifest(directory, releaseManifest) {
+  const manifestPath = path.join(directory, PATCH_MANIFEST_NAME);
+  const exists = await fs.stat(manifestPath).then(stat => stat.isFile(), () => false);
+  if (!exists) return null;
+  const value = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+  const manifest = readPatchManifest(value, { currentTag: value?.from, targetTag: releaseManifest?.tag });
+  const sidecar = await fs.readFile(path.join(directory, `${PATCH_MANIFEST_NAME}.sha256`), 'utf8')
+    .catch(() => null);
+  if (!sidecar) throw new Error(`Missing ${PATCH_MANIFEST_NAME}.sha256`);
+  if (sidecar !== `${await hashFile(manifestPath)}  ${PATCH_MANIFEST_NAME}\n`) {
+    throw new Error(`Invalid ${PATCH_MANIFEST_NAME}.sha256`);
+  }
+  const patches = manifest.sources.flatMap(source => source.patches);
+  for (const patch of patches) {
+    const asset = releaseManifest.assets?.find(entry => entry?.name === patch.asset);
+    if (!asset || asset.sha256 !== patch.toSha256 || asset.size !== patch.toSize) {
+      throw new Error(`Patch target does not match release asset: ${patch.name}`);
+    }
+    const file = path.join(directory, patch.name);
+    const stat = await fs.stat(file).catch(() => null);
+    if (!stat?.isFile() || stat.size !== patch.size || await hashFile(file) !== patch.sha256) {
+      throw new Error(`Patch file mismatch: ${patch.name}`);
+    }
+  }
+  return { ...manifest, patches };
 }
 
 async function verifyManifest(directory, manifest) {
@@ -118,4 +146,4 @@ if (require.main === module) {
     .then(manifest => console.log(`Verified ${manifest.assets.length} final packages for ${manifest.tag}`))
     .catch(error => { console.error(error); process.exitCode = 1; });
 }
-module.exports = { hashFile, walk, assertTag, checksumLines, collectPackages, verifyManifest, prepareRelease };
+module.exports = { hashFile, walk, assertTag, checksumLines, collectPackages, verifyManifest, verifyPatchManifest, prepareRelease };

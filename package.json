@@ -1,6 +1,6 @@
 {
   "name": "melody-of-oblivion-launcher",
-  "version": "1.9.3",
+  "version": "1.9.4",
   "description": "我的世界忘却的旋律启动器",
   "author": {
     "name": "leiming2333",
@@ -20,7 +20,10 @@
     "verify:toolchain": "node scripts/toolchain.cjs",
     "smoke": "electron . --smoke-test",
     "check": "node scripts/check.js",
-    "lint": "eslint site.js src api scripts test eslint.config.js",
+    "lint": "eslint site.js website-download-auth.mjs website-downloader.mjs cloudflare src api scripts test eslint.config.js",
+    "benchmark:website": "node --dns-result-order=ipv4first scripts/benchmark-website-downloads.mjs",
+    "verify:website-browser": "electron scripts/verify-website-download-browser.cjs",
+    "patches:build": "node scripts/build-patches.cjs",
     "test": "node --test test/*.test.js"
   },
   "engines": {
@@ -31,6 +34,9 @@
     "appId": "com.melodyofoblivion.launcher",
     "productName": "Melody of Oblivion Launcher",
     "asar": true,
+    "asarUnpack": [
+      "node_modules/binpatch/**"
+    ],
     "compression": "normal",
     "directories": {
       "output": "release"
@@ -42,6 +48,7 @@
     },
     "files": [
       "src/**/*",
+      "node_modules/binpatch/**/*",
       "package.json",
       "src/main/accounts/microsoft-client-id.json"
     ],
@@ -80,6 +87,7 @@
   },
   "dependencies": {
     "@vercel/blob": "2.8.1",
+    "binpatch": "0.4.2",
     "iconv-lite": "0.7.3"
   }
 }

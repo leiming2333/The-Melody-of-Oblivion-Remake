@@ -14,6 +14,8 @@ const { TransactionStore, identity, transactionPaths, assertManagedAncestors } =
 const { startInstallHelper, startWindowsHelper } = require('./install-helper');
 const { downloadToFile } = require('./update-downloader');
 const { rankDownloadCandidates } = require('./update-source-selector');
+const { PATCH_MANIFEST_MAX_BYTES, PATCH_MANIFEST_NAME, applyDeltaPatch,
+  readPatchManifest, selectPatch } = require('./update-patch');
 
 const UPDATE_CHANNEL = 'updater:state';
 const WEBSITE_ORIGIN = 'https://melodyoblivion.xyz';
@@ -362,7 +364,7 @@ class UpdateManager {
     throw lastError ?? new Error('获取 Release 信息失败');
   }
 
-  async fetchText(url, signal) {
+  async fetchText(url, signal, validate = null) {
     const candidates = [url, ...mirrorUrls(url)];
     let lastError = null;
     for (const candidate of candidates) {
@@ -373,13 +375,274 @@ class UpdateManager {
           signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(API_TIMEOUT_MS)]) : AbortSignal.timeout(API_TIMEOUT_MS)
         });
         if (!response.ok) throw new Error(`下载校验文件失败（HTTP ${response.status}）`);
-        return await response.text();
+        const text = await response.text();
+        if (validate && !validate(text)) throw new Error('下载文件校验失败');
+        return text;
       } catch (error) {
         throwIfAborted(signal);
         lastError = error;
       }
     }
     throw lastError ?? new Error('下载校验文件失败');
+  }
+
+  releaseAsset(name) {
+    return (Array.isArray(this.release?.assets) ? this.release.assets : [])
+      .find((asset) => asset?.name === name) ?? null;
+  }
+
+  patchTargetId() {
+    const platform = { win32: 'windows', darwin: 'macos', linux: 'linux' }[this.platform];
+    const arch = this.arch === 'arm' ? 'armv7l' : this.arch;
+    return platform && arch ? `${platform}-${arch}` : null;
+  }
+
+  patchCdnUrl(tag, name) {
+    if (!/^v\d+\.\d+\.\d+$/.test(String(tag ?? '')) || typeof name !== 'string' || !name) return null;
+    try {
+      const base = new URL(OBJECT_STORAGE_ORIGIN);
+      const url = new URL(`/patches/${encodeURIComponent(tag)}/${encodeURIComponent(name)}`, base);
+      return url.origin === base.origin && !url.username && !url.password && !url.port
+        && !url.search && !url.hash ? url.href : null;
+    } catch { return null; }
+  }
+
+  async fetchPatchManifest(signal) {
+    const asset = this.releaseAsset(PATCH_MANIFEST_NAME);
+    if (!asset?.browser_download_url) return null;
+    let expected = /^sha256:([a-f\d]{64})$/i.exec(String(asset.digest ?? ''))?.[1]?.toLowerCase();
+    if (!expected) {
+      const sidecar = this.releaseAsset(`${PATCH_MANIFEST_NAME}.sha256`);
+      if (!sidecar?.browser_download_url) return null;
+      expected = parseSha256(await this.fetchText(sidecar.browser_download_url, signal));
+    }
+    if (!expected) return null;
+    const validate = (value) => Buffer.byteLength(value, 'utf8') <= PATCH_MANIFEST_MAX_BYTES
+      && crypto.createHash('sha256').update(value).digest('hex') === expected;
+    let text;
+    const cdnUrl = this.patchCdnUrl(this.release?.tag_name, PATCH_MANIFEST_NAME);
+    if (cdnUrl) {
+      try { text = await this.fetchText(cdnUrl, signal, validate); }
+      catch (error) { throwIfAborted(signal); }
+    }
+    text ??= await this.fetchText(asset.browser_download_url, signal, validate);
+    let value;
+    try { value = JSON.parse(text); } catch { return null; }
+    try {
+      return readPatchManifest(value, {
+        currentTag: this.state.currentVersion,
+        targetTag: this.release?.tag_name
+      });
+    } catch { return null; }
+  }
+
+  macPatchBasePath(version, assetName) {
+    if (this.platform !== 'darwin' || !this.app?.getPath) return null;
+    const normalized = String(version ?? '').replace(/^v/i, '');
+    if (!/^\d+\.\d+\.\d+$/.test(normalized) || typeof assetName !== 'string'
+      || !assetName || assetName === '.' || assetName === '..'
+      || /[\\/\u0000-\u001f]/.test(assetName)) return null;
+    return path.join(this.app.getPath('userData'), 'update-base', normalized, assetName);
+  }
+
+  async loadMacPatchBase(asset, version) {
+    if (this.platform !== 'darwin') return null;
+    const basePath = this.macPatchBasePath(version, asset?.name);
+    if (!basePath) return null;
+    let metadata;
+    try { metadata = JSON.parse(await this.fileSystem.readFile(`${basePath}.json`, 'utf8')); }
+    catch { return null; }
+    if (metadata?.schemaVersion !== 1 || metadata.asset !== asset.name
+      || metadata.version !== String(version).replace(/^v/i, '')
+      || !/^[a-f\d]{64}$/i.test(metadata.sha256 ?? '')
+      || !Number.isSafeInteger(metadata.size) || metadata.size <= 0) return null;
+    try {
+      const stat = await this.fileSystem.stat(basePath);
+      if (!stat.isFile() || stat.size !== metadata.size) return null;
+      const sha256 = await this.hashFile(basePath);
+      return sha256 === metadata.sha256.toLowerCase() ? { path: basePath, sha256, size: stat.size } : null;
+    } catch { return null; }
+  }
+
+  async preserveMacPatchBase(asset, version, sourcePath, sha256) {
+    if (this.platform !== 'darwin' || !sha256) return;
+    const basePath = this.macPatchBasePath(version, asset?.name);
+    if (!basePath) return;
+    try {
+      const stat = await this.fileSystem.stat(sourcePath);
+      if (!stat.isFile() || stat.size !== Number(asset.size)) return;
+      await this.fileSystem.mkdir(path.dirname(basePath), { recursive: true });
+      const temporary = `${basePath}.${crypto.randomUUID()}.part`;
+      try {
+        await this.fileSystem.copyFile(sourcePath, temporary);
+        await this.hashFile(temporary).then(hash => {
+          if (hash !== sha256) throw new Error('增量基线复制校验失败');
+        });
+        await this.fileSystem.rename(temporary, basePath);
+        const metadataPath = `${basePath}.json`;
+        const metadataTemporary = `${metadataPath}.${crypto.randomUUID()}.tmp`;
+        await this.fileSystem.writeFile(metadataTemporary, `${JSON.stringify({
+          schemaVersion: 1, version: String(version).replace(/^v/i, ''), asset: asset.name,
+          size: stat.size, sha256
+        }, null, 2)}\n`, { mode: 0o600 });
+        await this.fileSystem.rename(metadataTemporary, metadataPath);
+      } finally {
+        await this.fileSystem.rm(temporary, { force: true }).catch(() => {});
+      }
+      await this.cleanupMacPatchBases(String(version).replace(/^v/i, ''));
+    } catch {
+      // The cache is optional; a failed copy must never fail an otherwise valid update.
+    }
+  }
+
+  async cleanupMacPatchBases(keepVersion) {
+    if (this.platform !== 'darwin' || !this.app?.getPath) return;
+    const root = path.join(this.app.getPath('userData'), 'update-base');
+    const entries = await this.fileSystem.readdir(root, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.name === keepVersion || !entry.isDirectory?.() || entry.isSymbolicLink?.()) continue;
+      await this.fileSystem.rm(path.join(root, entry.name), { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  async currentPatchBase(asset) {
+    if (this.platform === 'darwin') {
+      return this.loadMacPatchBase(asset, this.state.currentVersion);
+    }
+    const target = this.getInstallationTarget();
+    if (!target) return null;
+    try {
+      const stat = await this.fileSystem.stat(target);
+      if (!stat.isFile()) return null;
+      return { path: target, sha256: await this.hashFile(target), size: stat.size };
+    } catch { return null; }
+  }
+
+  downloadContext(asset) {
+    const store = this.ensureStore();
+    const id = crypto.randomUUID();
+    const managed = store ? transactionPaths(store.target, id, this.platform) : null;
+    const directory = store
+      ? (this.platform === 'darwin'
+        ? path.join(path.dirname(store.filePath), 'packages', id)
+        : managed.stagingRoot)
+      : this.getUpdateDirectory();
+    return { store, id, managed, directory, targetPath: path.join(directory, asset.name) };
+  }
+
+  async tryDeltaDownload(asset, signal) {
+    let manifest;
+    try { manifest = await this.fetchPatchManifest(signal); }
+    catch (error) {
+      throwIfAborted(signal);
+      return null;
+    }
+    if (!manifest) return null;
+    const patch = selectPatch(manifest, {
+      from: this.state.currentVersion, assetName: asset.name, target: this.patchTargetId()
+    });
+    if (!patch) return null;
+    let expectedSha256;
+    try { expectedSha256 = await this.expectedSha256For(asset, signal); }
+    catch (error) {
+      throwIfAborted(signal);
+      return null;
+    }
+    if (expectedSha256 !== patch.toSha256 || Number(asset.size) !== patch.toSize) return null;
+    const patchAsset = this.releaseAsset(patch.name);
+    if (!patchAsset?.browser_download_url) return null;
+    if (Number.isSafeInteger(Number(patchAsset.size)) && Number(patchAsset.size) !== patch.size) return null;
+    const releasedDigest = /^sha256:([a-f\d]{64})$/i.exec(String(patchAsset.digest ?? ''))?.[1]?.toLowerCase();
+    if (releasedDigest && releasedDigest !== patch.sha256) return null;
+    const base = await this.currentPatchBase(asset);
+    if (!base || base.sha256 !== patch.fromSha256) return null;
+
+    const { store, id, managed, directory, targetPath } = this.downloadContext(asset);
+    const patchPath = `${targetPath}.patch`;
+    const temporaryPatch = `${patchPath}.part`;
+    this.setState({ status: 'downloading', progress: 0, manualInstallReason: null, recovery: null,
+      message: '正在下载增量补丁 0%' });
+    try {
+      if (store) await assertManagedAncestors(this.fileSystem, directory, this.platform === 'darwin'
+        ? path.dirname(store.filePath) : path.dirname(store.target));
+      await this.fileSystem.mkdir(directory, { recursive: true });
+      await this.fileSystem.rm(temporaryPatch, { force: true }).catch(() => {});
+      await this.fileSystem.rm(patchPath, { force: true }).catch(() => {});
+      await this.assertEnoughStorage(directory, Number(asset.size) + patch.size);
+      throwIfAborted(signal);
+      const cdnPatchUrl = this.patchCdnUrl(this.release?.tag_name, patch.name);
+      await this.downloadUpdateFile(cdnPatchUrl ?? patchAsset.browser_download_url, patch.name, temporaryPatch, (value) => {
+        if (signal.aborted) return;
+        const downloaded = percent(value);
+        this.setState({ status: 'downloading', progress: downloaded, message: `正在下载增量补丁 ${downloaded}%` });
+      }, patchAsset.browser_download_url, signal, {
+        expectedSize: patch.size, sha256: patch.sha256, segmentThresholdBytes: 1024 * 1024,
+        verify: async () => {
+          const actual = await this.hashFile(temporaryPatch, signal);
+          if (actual !== patch.sha256) {
+            throw Object.assign(new Error('增量补丁校验失败'), { code: 'UPDATE_HASH_MISMATCH' });
+          }
+        }
+      });
+      throwIfAborted(signal);
+      await this.fileSystem.rename(temporaryPatch, patchPath);
+      this.setState({ status: 'verifying', progress: 100, message: '正在应用增量补丁…' });
+      const result = await applyDeltaPatch({
+        oldPath: base.path, patchData: await this.fileSystem.readFile(patchPath), destPath: targetPath,
+        expectedSize: asset.size, expectedSha256: expectedSha256, signal,
+        onBytes: (bytes) => {
+          if (signal.aborted) return;
+          const applied = percent(bytes / Math.max(1, asset.size) * 100);
+          this.setState({ status: 'verifying', progress: applied, message: `正在应用增量补丁 ${applied}%` });
+        }
+      });
+      const actualSha256 = await this.verifyDownloadedFile(asset, targetPath, signal, expectedSha256);
+      if (actualSha256 !== result.sha256) throw new Error('增量补丁输出 SHA-256 不一致');
+      if (this.platform === 'linux') await this.fileSystem.chmod(targetPath, 0o755);
+      if (this.platform === 'darwin') {
+        await this.preserveMacPatchBase(asset, this.release?.tag_name ?? this.state.availableVersion,
+          targetPath, actualSha256);
+      }
+      throwIfAborted(signal);
+      if (store) {
+        const record = {
+          id, platform: this.platform, arch: this.arch, fromVersion: this.state.currentVersion,
+          toVersion: this.state.availableVersion, targetPath: store.target, ...managed,
+          phase: 'prepared', createdAt: new Date().toISOString(), error: '',
+          sourcePath: targetPath, downloadPath: targetPath, sha256: actualSha256
+        };
+        await store.save(record);
+        this.transaction = record;
+      }
+      this.updateFilePath = targetPath;
+      this.downloadedSha256 = actualSha256;
+      this.setState({
+        status: 'downloaded', progress: 100,
+        installAction: this.platform === 'darwin' && !store ? 'open-folder' : 'relaunch',
+        message: this.platform === 'darwin' && !store
+          ? '增量更新已下载，请解压压缩包并替换旧版本'
+          : '增量更新已就绪，重启启动器即可完成更新'
+      });
+      this.onUpdateReady?.(this.state.availableVersion, this.state.installAction);
+      return this.publicState();
+    } catch (error) {
+      await this.fileSystem.rm(temporaryPatch, { force: true }).catch(() => {});
+      await this.fileSystem.rm(patchPath, { force: true }).catch(() => {});
+      await this.fileSystem.rm(targetPath, { force: true }).catch(() => {});
+      if (signal.aborted || isAbortError(error)) {
+        if (this.transaction?.sha256) {
+          this.setState({ status: 'downloaded', progress: 100, installAction: 'relaunch',
+            message: '更新已就绪，安装准备已取消' });
+        } else {
+          this.setState({ status: 'available', progress: 0, message: '更新下载已取消，可重新下载' });
+        }
+        return this.publicState();
+      }
+      return null;
+    } finally {
+      await this.fileSystem.rm(temporaryPatch, { force: true }).catch(() => {});
+      await this.fileSystem.rm(patchPath, { force: true }).catch(() => {});
+    }
   }
 
   getUpdateDirectory() {
@@ -503,6 +766,29 @@ class UpdateManager {
   }
 
   downloadCandidates(assetUrl, assetName, githubDownloadUrl = null, objectStorageVerified = false) {
+    // Delta patches are release assets, not package blobs; never route them through
+    // the package proxy, which only knows the eight installer names.
+    if (/\.patch$/i.test(String(assetName ?? ''))) {
+      const candidates = [];
+      const seen = new Set();
+      const push = (url, strict) => {
+        if (typeof url !== 'string' || !url || seen.has(url)) return;
+        seen.add(url);
+        candidates.push({ url, enforceMinSpeed: strict });
+      };
+      // Prefer the immutable R2 mirror, then GitHub and its mirrors.
+      push(assetUrl, true);
+      if (isGithubUrl(githubDownloadUrl)) {
+        for (const url of mirrorUrls(githubDownloadUrl)) push(url, true);
+      }
+      if (githubDownloadUrl && githubDownloadUrl !== assetUrl) push(githubDownloadUrl, true);
+      if (isGithubUrl(assetUrl)) {
+        for (const url of mirrorUrls(assetUrl)) push(url, true);
+      }
+      const fallbackUrl = isGithubUrl(githubDownloadUrl) ? githubDownloadUrl : (assetUrl || githubDownloadUrl);
+      if (fallbackUrl) candidates.push({ url: fallbackUrl, enforceMinSpeed: false });
+      return candidates;
+    }
     const blob = isPublicBlobUrl(assetUrl);
     const objectStorage = objectStorageVerified && isTrustedObjectStorageUrl(assetUrl, OBJECT_STORAGE_ORIGIN,
       this.release?.tag_name ?? '', assetName);
@@ -537,7 +823,7 @@ class UpdateManager {
   }
 
   async downloadUpdateFile(assetUrl, assetName, targetPath, onProgress, githubDownloadUrl = null, signal,
-    { expectedSize, sha256, verify, objectStorageVerified = false } = {}) {
+    { expectedSize, sha256, verify, objectStorageVerified = false, segmentThresholdBytes } = {}) {
     const initialCandidates = this.downloadCandidates(assetUrl, assetName, githubDownloadUrl, objectStorageVerified);
     const rankedCandidates = this.rankCandidates
       ? await this.rankCandidates(initialCandidates, { expectedSize, signal }) : initialCandidates;
@@ -553,7 +839,7 @@ class UpdateManager {
         await this.downloadFile(candidate.url, targetPath, onProgress, {
           enforceMinSpeed: candidate.enforceMinSpeed,
           minSpeedBytesPerSecond: candidate.minSpeedBytesPerSecond,
-          expectedSize, sha256, resumeState, signal
+          expectedSize, sha256, resumeState, signal, segmentThresholdBytes
         });
         await verify?.();
         return candidate.url;
@@ -580,7 +866,10 @@ class UpdateManager {
     if (this.state.status !== 'available') throw new Error('当前没有可下载的启动器更新');
     const asset = pickAsset(this.release?.assets, this.platform, this.arch);
     if (!asset) throw new Error('Release 中未找到适合当前系统的更新文件');
-    return this.withOperation((signal) => this.performDownload(asset, signal));
+    return this.withOperation(async (signal) => {
+      const delta = await this.tryDeltaDownload(asset, signal);
+      return delta ?? this.performDownload(asset, signal);
+    });
   }
 
   async performDownload(asset, signal) {
@@ -634,6 +923,10 @@ class UpdateManager {
       this.updateFilePath = targetPath;
       this.downloadedSha256 = sha256;
       if (this.platform === 'linux') await this.fileSystem.chmod(targetPath, 0o755);
+      if (this.platform === 'darwin') {
+        await this.preserveMacPatchBase(asset, this.release?.tag_name ?? this.state.availableVersion,
+          targetPath, sha256);
+      }
       if (record) {
         record = { ...record, sourcePath: targetPath, downloadPath: targetPath, sha256 };
         await store.save(record);

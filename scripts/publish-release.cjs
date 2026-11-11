@@ -5,11 +5,17 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
-const { hashFile, verifyManifest, assertTag, checksumLines } = require('./release-assets.cjs');
+const { hashFile, verifyManifest, verifyPatchManifest, assertTag, checksumLines } = require('./release-assets.cjs');
 const exec = promisify(execFile);
 
 async function verifyPublicationFiles(directory, manifest) {
-  const expected = ['release-manifest.json', 'SHA256SUMS', ...manifest.assets.flatMap(asset => [asset.name, `${asset.name}.sha256`])].sort();
+  const patches = await verifyPatchManifest(directory, manifest);
+  const expected = [
+    'release-manifest.json', 'SHA256SUMS',
+    ...manifest.assets.flatMap(asset => [asset.name, `${asset.name}.sha256`]),
+    ...(patches ? ['patch-manifest.json', 'patch-manifest.json.sha256',
+      ...patches.patches.map(patch => patch.name)] : [])
+  ].sort();
   if (JSON.stringify((await fs.readdir(directory)).sort()) !== JSON.stringify(expected)) throw new Error('Publication directory contains missing or unexpected files');
   for (const asset of manifest.assets) {
     if (await fs.readFile(path.join(directory, `${asset.name}.sha256`), 'utf8') !== `${asset.sha256}  ${asset.name}\n`) throw new Error(`Invalid checksum sidecar: ${asset.name}`);

@@ -5,7 +5,8 @@ import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import releaseAssets from './release-assets.cjs';
 
-const { assertTag, verifyManifest } = releaseAssets;
+const { assertTag, verifyManifest, verifyPatchManifest } = releaseAssets;
+const PATCH_MANIFEST_NAME = 'patch-manifest.json';
 const SERVICE = 's3';
 const REGION = 'auto';
 const EMPTY_HASH = createHash('sha256').update('').digest('hex');
@@ -171,6 +172,24 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
   if (existingManifest && !isDeepStrictEqual(existingManifest, manifest)) {
     throw new Error('Published R2 tag is immutable; use a new version');
   }
+  async function uploadVerified(pathname, body, expected, contentType) {
+    const head = await client.request('HEAD', pathname);
+    let existingObject = head.status === 200;
+    if (head.status === 404) {
+      const put = await client.request('PUT', pathname, body, {
+        'if-none-match': '*', 'content-type': contentType,
+        'content-disposition': `attachment; filename="${expected.name}"`,
+        'cache-control': 'public, max-age=31536000, immutable'
+      });
+      if (![200, 201, 204, 412].includes(put.status)) throw new Error(`R2 upload failed: ${expected.name}`);
+      existingObject = put.status === 412;
+    } else if (head.status !== 200) {
+      throw new Error(`Cannot inspect existing R2 object: ${expected.name} (HTTP ${head.status})`);
+    }
+    if (existingObject) await verifyResponse(await client.request('GET', pathname), expected, `origin ${pathname}`);
+    await publicVerify(config, fetchImpl, pathname, expected);
+  }
+
   const assets = [];
   for (const item of packages) {
     const pathname = `releases/${tag}/${item.name}`;
@@ -197,6 +216,21 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
       object_storage_verified: true,
       github_download_url: `https://github.com/${env.GITHUB_REPOSITORY || 'leiming2333/The-Melody-of-Oblivion-Remake'}/releases/download/${encode(tag)}/${encode(item.name)}` });
   }
+  const patchManifest = await verifyPatchManifest(assetDirectory, manifest);
+  let patchCount = 0;
+  if (patchManifest) {
+    for (const patch of patchManifest.patches) {
+      patchCount += 1;
+      await uploadVerified(`patches/${tag}/${patch.name}`,
+        await readFile(path.join(assetDirectory, patch.name)), patch, 'application/octet-stream');
+    }
+    const patchManifestPath = path.join(assetDirectory, PATCH_MANIFEST_NAME);
+    const patchManifestBytes = await readFile(patchManifestPath);
+    await uploadVerified(`patches/${tag}/${PATCH_MANIFEST_NAME}`, patchManifestBytes,
+      { name: PATCH_MANIFEST_NAME, size: patchManifestBytes.length,
+        sha256: createHash('sha256').update(patchManifestBytes).digest('hex') },
+      'application/json; charset=utf-8');
+  }
   if (!existingManifest) {
     const putManifest = await client.request('PUT', manifestPath, Buffer.from(JSON.stringify(manifest)), {
       'if-none-match': '*', 'content-type': 'application/json; charset=utf-8',
@@ -221,14 +255,16 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
     else if (latestResponse.status !== 404) {
       throw new Error(`Cannot inspect existing R2 latest metadata (HTTP ${latestResponse.status})`);
     }
-    if (latest?.tag_name && newerVersion(latest.tag_name, tag)) return { tag, assets, latestUpdated: false };
+    if (latest?.tag_name && newerVersion(latest.tag_name, tag)) {
+      return { tag, assets, patches: patchCount, latestUpdated: false };
+    }
     const etag = latestResponse.headers.get('etag');
     if (latestResponse.status === 200 && !etag) throw new Error('R2 latest metadata has no conditional-write ETag');
     const putLatest = await client.request('PUT', latestPath, Buffer.from(JSON.stringify(release)), {
       'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=60',
       ...(etag ? { 'if-match': etag } : { 'if-none-match': '*' })
     });
-    if ([200, 201, 204].includes(putLatest.status)) return { ...release, latestUpdated: true };
+    if ([200, 201, 204].includes(putLatest.status)) return { ...release, patches: patchCount, latestUpdated: true };
     if (putLatest.status !== 412) {
       throw new Error(`R2 latest metadata upload failed (HTTP ${putLatest.status})`);
     }
@@ -246,6 +282,6 @@ function newerVersion(left, right) {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const [assetDirectory, tag, metadataPath] = process.argv.slice(2);
   syncReleaseToR2(assetDirectory, tag, metadataPath)
-    .then(result => console.log(`Verified ${result.assets.length} R2 packages for ${tag}; latest updated: ${result.latestUpdated}.`))
+    .then(result => console.log(`Verified ${result.assets.length} R2 packages and ${result.patches} patches for ${tag}; latest updated: ${result.latestUpdated}.`))
     .catch(error => { console.error(error.message); process.exitCode = 1; });
 }

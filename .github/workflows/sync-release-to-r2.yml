@@ -37,7 +37,8 @@ jobs:
           mkdir -p release-published
           gh release download "$RELEASE_TAG" --repo "$GH_REPO" --dir release-published \
             --pattern '*-Windows-*.exe' --pattern '*-Linux-*.AppImage' \
-            --pattern '*-macOS-*.zip' --pattern 'release-manifest.json'
+            --pattern '*-macOS-*.zip' --pattern 'release-manifest.json' \
+            --pattern 'patch-manifest.json*' --pattern 'patch-*'
           gh release view "$RELEASE_TAG" --repo "$GH_REPO" \
             --json tagName,name,url,body,publishedAt > release-published/release.json
 

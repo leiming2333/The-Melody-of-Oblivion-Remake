@@ -25,7 +25,7 @@ runner 标签不是不可变镜像；每个构建另记实际 `ImageOS`、`Image
 - [package-smoke.yml](../.github/workflows/package-smoke.yml) 提供 PR 和手动运行的原生打包检查。
 - [build.yml](../.github/workflows/build.yml) 构建八个目标，再调用 [release-smoke.yml](../.github/workflows/release-smoke.yml) 检查最终包。普通手动运行只上传 Actions 产物，不创建公开 Release。
 
-每个 `dist-<目标>` 包含安装包和 `build-metadata.json`；`smoke-<目标>` 保存启动与升级报告。所有构建及七类原生验收通过后，`verified-release-bundle` 汇总八个安装包、校验侧文件、排序后的 `SHA256SUMS` 和内含验证报告的 `release-manifest.json`。Actions 产物有保留期限，交付时需下载保存。
+每个 `dist-<目标>` 包含安装包和 `build-metadata.json`；`smoke-<目标>` 保存启动与升级报告。所有构建及七类原生验收通过后，`verified-release-bundle` 汇总八个安装包、校验侧文件、排序后的 `SHA256SUMS` 和内含验证报告的 `release-manifest.json`。标签构建还会下载最近 3 个稳定 Release，生成并实际还原验证 bsdiff + Zstandard 增量补丁；补丁、`patch-manifest.json` 与其 `.sha256` 一并进入发布目录。超过新包大小 60% 的补丁会被丢弃，全部超限时不发布补丁清单，更新回退完整包。Actions 产物有保留期限，交付时需下载保存。
 
 汇总器严格检查预期文件名、非空内容、重复或缺失文件、源码提交、锁文件摘要、工具链、包内版本以及报告与安装包摘要的对应关系。构建清单记录文件大小、SHA-256、runner、源提交和验证状态。校验文件的文件项只包含文件名，不含构建机器绝对路径。ARMv7 没有运行时验收，清单中记为 `not-verified`。
 
@@ -41,9 +41,9 @@ ARMv7 曾尝试用 QEMU 用户态替代原生验收：`ubuntu-24.04` 上注册 b
 
 ## 公开发布与对象存储
 
-只有版本标签 `v<package.json.version>` 触发公开发布。流程校验标签与检出的源码、锁文件及包内版本，等待八包和七类原生报告完整通过，再上传 draft 并公开。已有公开版本仅允许相同摘要的幂等重跑；内容不同直接失败，不能覆盖。
+只有版本标签 `v<package.json.version>` 触发公开发布。流程校验标签与检出的源码、锁文件及包内版本，等待八包和七类原生报告完整通过，再生成并验证上一版本到当前版本的增量补丁，最后上传 draft 并公开。已有公开版本仅允许相同摘要的幂等重跑；内容不同直接失败，不能覆盖。补丁清单和目标包摘要、补丁文件大小及 SHA-256 都必须在发布前核对，不能只检查补丁文件存在。
 
-配置 Cloudflare R2 后，同步 Windows、Linux 与 macOS 共八个安装包；逐个上传并回读校验大小与 SHA-256，全部成功才更新包含八包的 `releases/latest.json`，失败不切换 latest。完整 `release-manifest.json` 的内容保存为 `releases/<tag>/manifest.json`，用于来源验证及同标签不可变校验。已有安装包验证一致后复用，已有同版本清单验证一致后保持不变，可补齐该清单中的其他平台文件。GitHub Releases 继续提供八包和校验文件。手动回填下载八个安装包与完整发布清单，无需重建公开 Release。未配置 R2 时按 Blob 回退（若已配置）或跳过，不伪造同步成功。手动分支构建始终不走公开发布与对象存储同步步骤。官网使用浏览器原生下载直链，详见 [对象存储下载](object-storage-downloads.md)。
+配置 Cloudflare R2 后，同步 Windows、Linux 与 macOS 共八个安装包；逐个上传并回读校验大小与 SHA-256，全部成功才更新包含八包的 `releases/latest.json`，失败不切换 latest。存在增量补丁时，同样把补丁文件和 `patch-manifest.json` 上传到 `patches/<tag>/`，逐个回读校验后才进入 latest 更新步骤；启动器优先使用该镜像，失败回退 GitHub。完整 `release-manifest.json` 的内容保存为 `releases/<tag>/manifest.json`，用于来源验证及同标签不可变校验。已有安装包验证一致后复用，已有同版本清单验证一致后保持不变，可补齐该清单中的其他平台文件。GitHub Releases 继续提供八包和校验文件。手动回填下载八个安装包与完整发布清单，无需重建公开 Release。未配置 R2 时按 Blob 回退（若已配置）或跳过，不伪造同步成功。手动分支构建始终不走公开发布与对象存储同步步骤。官网使用浏览器原生下载直链，详见 [对象存储下载](object-storage-downloads.md)。
 
 ## 本地交付检查
 

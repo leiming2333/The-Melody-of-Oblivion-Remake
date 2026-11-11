@@ -10,6 +10,8 @@ remotion-promo/
 
 .env
 .env.*
+.dev.vars*
+.wrangler/
 !.env.example
 electron-builder.env
 accounts.json

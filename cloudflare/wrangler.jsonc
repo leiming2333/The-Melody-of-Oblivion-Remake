@@ -1,0 +1,7 @@
+{
+  "name": "melody-verified-downloads",
+  "main": "download-worker.mjs",
+  "compatibility_date": "2026-11-11",
+  "workers_dev": false,
+  "preview_urls": false
+}

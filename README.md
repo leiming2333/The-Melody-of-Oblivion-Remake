@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#平台支持与使用前提)
-[![Source](https://img.shields.io/badge/Source-v1.9.3-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.9.4-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.9.3`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://melodyoblivion.xyz/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.9.4`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://melodyoblivion.xyz/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -41,7 +41,7 @@
 - **Java 管理**：匹配游戏所需的 Java 主版本，检测系统安装与启动器托管环境。首页启动按钮实时显示所选版本的 Java 就绪状态；启动时缺少所需 Java 会提供一键下载并自动重试，也可在 Java 路径设置旁手动下载 Java 8、16、17、21 或 25（支持进度与取消；优先 Azul JRE，失败后切换 Adoptium，使用并行下载与 SHA-256 校验）。
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
 - **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides、Fabric、Forge、NeoForge 与 Quilt。导入确认显示游戏、加载器和文件数，可选文件默认不安装；可选文件的远端解析或下载失败仅警告，必需文件失败可重试；磁盘、权限或安全检查错误会中止安装。CurseForge 受限文件可从官方页面下载后选择本地文件，通过可信摘要校验再继续安装。
-- **启动器更新**：启动时检测 GitHub Releases 新版本；提供三档更新策略（自动下载 / 仅提示 / 从不检查），发现新版本与更新就绪时发送系统通知，设置页可查看 Release 更新日志。更新前对 Blob、GitHub 镜像和官方源做小流量并行测速；大文件支持四段并发，切源时复用本次下载已完成的分段，不支持 Range 时回退单流。低速判断参考实测结果，文件大小或 SHA-256 不匹配会清除分段并尝试其他源，通过校验后才可安装。旧版布尔更新设置会自动迁移为新策略。
+- **启动器更新**：启动时检测 GitHub Releases 新版本；提供三档更新策略（自动下载 / 仅提示 / 从不检查），发现新版本与更新就绪时发送系统通知，设置页可查看 Release 更新日志。更新前对 Blob、GitHub 镜像和官方源做小流量并行测速；大文件支持四段并发，切源时复用本次下载已完成的分段，不支持 Range 时回退单流。最近 3 个稳定版本存在时优先下载 bsdiff + Zstandard 增量补丁，校验旧文件与补丁后还原，再校验完整目标文件大小和官方 SHA-256；补丁优先从 R2 镜像读取，缺失或失败时回退 GitHub/镜像；补丁缺失、过期、损坏或当前文件被修改时自动回退完整包。macOS 保留一份已验证的官方 ZIP 作为补丁基线。低速判断参考实测结果，文件大小或 SHA-256 不匹配会清除分段并尝试其他源，通过校验后才可安装。旧版布尔更新设置会自动迁移为新策略，详见 [增量更新](docs/patch-updates.md)。
 - **桌面界面**：紧凑的固定尺寸无边框 Electron 窗口，覆盖版本、账户、下载、启动及设置流程。首页可重新打开后台任务，问题对话框提供重试和复制脱敏详情；关闭弹窗继续任务，取消按钮停止任务，最终提交期间禁用取消。
 
 自动化测试覆盖账户、身份验证、下载、Java 选择、游戏启动、加载器、整合包、设置、本地版本管理及启动器更新等领域。
@@ -54,7 +54,7 @@
 
 ![v1.6.5 账户管理实际界面](assets/launcher-accounts.png)
 
-官网不展示启动器真实界面截图，上面的截图仅在 README 中展示。下载区可选择系统、架构和下载来源，默认测速选择可由网页读取的线路；支持并发分段、慢速或断流后换源，并保留本次已完成的分段。文件大小和官方 SHA-256 校验通过后才交给浏览器保存，取消或关闭页面不会保留分段。GitHub 官方源及备用直链由浏览器直接下载，不经过网页下载器。版本更新公告默认展开，只展示最新一个版本。官网不展示 SHA-256 数值；启动器安装更新前也会校验文件。
+官网不展示启动器真实界面截图，上面的截图仅在 README 中展示。下载区可选择系统和架构，主按钮完成 Cloudflare Turnstile 真人验证后通过独立签名 Worker 进行 1 MiB 分块、默认 4 路并发下载，显示速度、进度及取消，并在固定源失败时回退。文件大小和官方 SHA-256 校验通过后才交给浏览器保存，取消或关闭页面不会保留分段。GitHub 原始下载和网盘仍公开，不经过网页下载器。版本更新公告默认展开，只展示最新一个版本。官网不展示 SHA-256 数值；启动器安装更新前也会校验文件。配置和配套部署完成前，验证下载按钮保持不可用。
 
 ## 平台支持与使用前提
 
@@ -129,7 +129,7 @@ styles.css                落地页样式
 
 官网位于仓库根目录，Electron 启动器界面位于 `src/renderer`。官网不嵌入启动器截图，`assets/launcher-screenshot.png` 和 `assets/launcher-accounts.png` 两张真实截图仅供 README 展示；界面变化后需重新采集截图。
 
-官网使用 Cloudflare R2 对象存储直链，由浏览器直接下载；R2 不可用时保留 GitHub 回退。GitHub 官方发布决定版本、文件大小和 SHA-256；对应 R2 文件全部上传并回读校验成功后才更新下载清单。完整同步涵盖八类安装包，尚未同步的文件显示 GitHub 下载。配置、回填和旧服务清理见 [对象存储下载](docs/object-storage-downloads.md)。
+R2 公共对象存储保留八类安装包与发布清单，继续供启动器更新及官网签名下载网关读取；默认验证入口是独立的 `verified-downloads.melodyoblivion.xyz`，不接管公共 `downloads` 域名。GitHub 官方发布决定版本、大小和 SHA-256，R2 文件全部上传并回读校验后才更新下载清单。官网主按钮恢复真人验证与分段并发，GitHub 原始下载和网盘仍公开。配置、回填、部署与性能测试见 [对象存储下载](docs/object-storage-downloads.md) 和 [Cloudflare 下载网关](cloudflare/README.md)。
 
 ## 安全说明
 

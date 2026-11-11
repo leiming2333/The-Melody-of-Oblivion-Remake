@@ -16,7 +16,7 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-async function fixture(t) {
+async function fixture(t, { patches = false } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-r2-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const assets = [];
@@ -31,6 +31,22 @@ async function fixture(t) {
     assets
   };
   await fs.writeFile(path.join(root, 'release-manifest.json'), JSON.stringify(manifest));
+  if (patches) {
+    const target = targets[0], asset = assets[0];
+    const patchName = 'patch-v1.9.1-to-v1.9.2-windows-x64.patch';
+    const patchBytes = Buffer.from('fixture delta patch');
+    await fs.writeFile(path.join(root, patchName), patchBytes);
+    const patchManifest = {
+      schemaVersion: 1, from: 'v1.9.1', to: TAG,
+      patches: [{ target: target.id, asset: target.filename,
+        fromSha256: 'c'.repeat(64), toSha256: asset.sha256, toSize: asset.size,
+        name: patchName, size: patchBytes.length, sha256: sha256(patchBytes) }]
+    };
+    const text = `${JSON.stringify(patchManifest, null, 2)}\n`;
+    await fs.writeFile(path.join(root, 'patch-manifest.json'), text);
+    await fs.writeFile(path.join(root, 'patch-manifest.json.sha256'),
+      `${sha256(text)}  patch-manifest.json\n`);
+  }
   const metadataPath = path.join(root, 'release.json');
   await fs.writeFile(metadataPath, JSON.stringify({
     tagName: TAG, name: 'Melody release', url: 'https://github.com/example/release', body: '', publishedAt: null
@@ -177,6 +193,27 @@ test('R2 synchronization uploads and verifies all eight packages before publishi
   assert.ok(r2.requests.filter(request => request.method === 'PUT').every(request => request.headers.Authorization?.startsWith('AWS4-HMAC-SHA256 ')));
   assert.ok(r2.requests.filter(request => request.url.startsWith(`https://${ACCOUNT}`)).every(request =>
     request.headers['x-amz-date'] && request.headers['x-amz-content-sha256']));
+});
+
+test('R2 synchronization mirrors verified patch files and the patch manifest', async t => {
+  const fixtureData = await fixture(t, { patches: true });
+  const r2 = mockR2();
+  const { syncReleaseToR2 } = await import('../scripts/sync-release-to-r2.mjs');
+  const result = await syncReleaseToR2(fixtureData.root, TAG, fixtureData.metadataPath, {
+    env: env(), fetchImpl: r2.fetchImpl, now: () => new Date('2026-11-09T00:00:00.000Z')
+  });
+  assert.equal(result.patches, 1);
+  assert.equal(result.latestUpdated, true);
+  const patchName = 'patch-v1.9.1-to-v1.9.2-windows-x64.patch';
+  assert.equal(r2.objects.has(`patches/${TAG}/${patchName}`), true);
+  assert.equal(r2.objects.has(`patches/${TAG}/patch-manifest.json`), true);
+  assert.deepEqual(r2.objects.get(`patches/${TAG}/${patchName}`), Buffer.from('fixture delta patch'));
+  const patchManifest = JSON.parse(r2.objects.get(`patches/${TAG}/patch-manifest.json`));
+  assert.equal(patchManifest.patches[0].name, patchName);
+  assert.ok(r2.requests.some(request => request.url ===
+    `${PUBLIC_BASE}/patches/${TAG}/${patchName}`));
+  assert.ok(r2.requests.some(request => request.url ===
+    `${PUBLIC_BASE}/patches/${TAG}/patch-manifest.json`));
 });
 
 test('R2 synchronization refuses a changed immutable object without overwriting it', async t => {

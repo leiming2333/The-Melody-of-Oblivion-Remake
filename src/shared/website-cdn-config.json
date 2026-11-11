@@ -1,0 +1,8 @@
+{
+  "baseUrl": "https://verified-downloads.melodyoblivion.xyz",
+  "allowedBases": [
+    "https://verified-downloads.melodyoblivion.xyz",
+    "https://www.melodyoblivion.xyz/verified-downloads",
+    "https://melodyoblivion.xyz/verified-downloads"
+  ]
+}
