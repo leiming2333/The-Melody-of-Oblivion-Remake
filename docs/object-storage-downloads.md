@@ -8,6 +8,7 @@ Cloudflare R2 保留公共安装包和发布清单，供启动器自动更新以
 - 标签发布流程在八包构建与既定原生验收通过、GitHub Release 公开后同步对象存储。
 - 同步覆盖 Windows x64、ia32、ARM64，Linux x64、ARM64、ARMv7，以及 macOS x64、ARM64。
 - 对象按 `releases/<tag>/<官方文件名>` 保存。每个对象须从 R2 源站和公开地址回读，并匹配已发布清单中的大小与 SHA-256；全部完成后才更新 `releases/latest.json`。失败时保留之前的 latest。
+- R2 对 gzip 响应返回弱 ETag，而 `If-Match` 使用强比较；更新 latest 时显式请求 `Accept-Encoding: identity` 以取得强 ETag 并做条件写入。并发冲突会重试，连续失败不会覆盖旧 latest。
 - 增量补丁单独保存在 `patches/<tag>/patch-manifest.json` 和 `patches/<tag>/patch-*.patch`，同样回读校验后才进入 latest 更新步骤。补丁路径与完整包路径互不覆盖，启动器优先读取该镜像，失败回退 GitHub。
 - 已存在的同版本发布清单必须一致；已存在的安装包须验证一致后复用。补齐同版本其他平台不更改已公开 GitHub Release。
 - 保留历史版本需要相应存储空间，下载产生对象存储传输用量。扩容与删除历史文件应单独决定。
