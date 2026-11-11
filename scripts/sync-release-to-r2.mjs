@@ -249,7 +249,8 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
     html_url: metadata.url || `https://github.com/${env.GITHUB_REPOSITORY || 'leiming2333/The-Melody-of-Oblivion-Remake'}/releases/tag/${encode(tag)}`,
     body: metadata.body || '', published_at: metadata.publishedAt || null, assets };
   for (let attempt = 0; attempt < 3; attempt++) {
-    const latestResponse = await client.request('GET', latestPath);
+    // R2 returns a weak ETag for gzip-compressed responses; If-Match needs a strong ETag.
+    const latestResponse = await client.request('GET', latestPath, null, { 'accept-encoding': 'identity' });
     let latest = null;
     if (latestResponse.status === 200) latest = await readJson(latestResponse, 'latest metadata');
     else if (latestResponse.status !== 404) {

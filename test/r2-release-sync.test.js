@@ -71,14 +71,28 @@ function mockR2() {
       if (!object) return new Response('missing', { status: 404 });
       return new Response(Readable.toWeb(Readable.from([object])), { status: 200 });
     }
+    const header = name => Object.entries(options.headers)
+      .find(([key]) => key.toLowerCase() === name)?.[1];
     if (method === 'GET' || method === 'HEAD') {
       if (!object) return new Response('missing', { status: 404 });
-      return method === 'HEAD' ? new Response(null, { status: 200 })
-        : new Response(object, { status: 200, headers: { 'content-type': 'application/json' } });
+      const identity = header('accept-encoding') === 'identity';
+      const etag = `"${createHash('md5').update(object).digest('hex')}"`;
+      const headers = {
+        'content-type': 'application/json',
+        etag: identity ? etag : `W/${etag}`,
+        ...(identity ? {} : { 'content-encoding': 'gzip' })
+      };
+      return method === 'HEAD' ? new Response(null, { status: 200, headers })
+        : new Response(object, { status: 200, headers });
     }
     if (method === 'PUT') {
-      const ifNoneMatch = Object.entries(options.headers).find(([key]) => key.toLowerCase() === 'if-none-match')?.[1];
+      const ifNoneMatch = header('if-none-match');
       if (ifNoneMatch === '*' && objects.has(pathname)) return new Response('exists', { status: 412 });
+      const ifMatch = header('if-match');
+      if (ifMatch !== undefined) {
+        const strong = `"${createHash('md5').update(objects.get(pathname) ?? '').digest('hex')}"`;
+        if (ifMatch !== strong) return new Response('precondition', { status: 412 });
+      }
       const body = options.body instanceof Uint8Array ? Buffer.from(options.body)
         : Buffer.from(await new Response(options.body).arrayBuffer());
       objects.set(pathname, body);
@@ -193,6 +207,24 @@ test('R2 synchronization uploads and verifies all eight packages before publishi
   assert.ok(r2.requests.filter(request => request.method === 'PUT').every(request => request.headers.Authorization?.startsWith('AWS4-HMAC-SHA256 ')));
   assert.ok(r2.requests.filter(request => request.url.startsWith(`https://${ACCOUNT}`)).every(request =>
     request.headers['x-amz-date'] && request.headers['x-amz-content-sha256']));
+});
+
+test('R2 latest updates use a strong ETag from an identity-encoded response', async t => {
+  const fixtureData = await fixture(t);
+  const r2 = mockR2();
+  r2.objects.set('releases/latest.json', Buffer.from(JSON.stringify({ tag_name: 'v1.9.1', assets: [] })));
+  const { syncReleaseToR2 } = await import('../scripts/sync-release-to-r2.mjs');
+  const result = await syncReleaseToR2(fixtureData.root, TAG, fixtureData.metadataPath, {
+    env: env(), fetchImpl: r2.fetchImpl, now: () => new Date('2026-11-09T00:00:00.000Z')
+  });
+  assert.equal(result.latestUpdated, true);
+  const latestGet = r2.requests.find(request => request.method === 'GET'
+    && request.url.endsWith('/releases/latest.json'));
+  assert.equal(latestGet.headers['accept-encoding'], 'identity');
+  const latestPut = r2.requests.find(request => request.method === 'PUT'
+    && request.url.endsWith('/releases/latest.json'));
+  assert.match(latestPut.headers['if-match'], /^"[a-f0-9]{32}"$/);
+  assert.equal(JSON.parse(r2.objects.get('releases/latest.json')).tag_name, TAG);
 });
 
 test('R2 synchronization mirrors verified patch files and the patch manifest', async t => {
