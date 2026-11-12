@@ -404,11 +404,15 @@ test('the gateway supports all configured bases and the API produces compatible 
   }
 });
 
-test('deployment config never claims the existing public R2 domain', () => {
+test('deployment config binds only the verified downloads subdomain', () => {
   const fs = require('node:fs');
   const config = JSON.parse(fs.readFileSync(require.resolve('../cloudflare/wrangler.jsonc'), 'utf8'));
   assert.equal(config.workers_dev, false);
   assert.equal(config.preview_urls, false);
-  assert.equal(config.routes, undefined);
+  assert.deepEqual(config.routes, [
+    { pattern: 'verified-downloads.melodyoblivion.xyz', custom_domain: true }
+  ]);
+  assert.ok(!config.routes.some(route => route.pattern === 'downloads.melodyoblivion.xyz'
+    || route.pattern.includes('*')));
   assert.equal(config.vars, undefined);
 });

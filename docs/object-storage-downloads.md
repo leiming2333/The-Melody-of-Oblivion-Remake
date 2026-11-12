@@ -34,7 +34,7 @@ Worker 原生流式转发固定的 R2 安装包，失败时尝试固定 Blob（�
 - `DOWNLOAD_ALLOWED_HOSTNAMES`：`www.melodyoblivion.xyz,melodyoblivion.xyz`。
 - `DOWNLOAD_AUTH_SECRET`：至少 32 个 UTF-8 字节的随机共享密钥，以完全相同的值同时保存为 Vercel Secret 与 Worker Secret；不能多出空格或换行。
 - `DOWNLOAD_CDN_BASE_URL`：默认 `https://verified-downloads.melodyoblivion.xyz`，不是 R2 公共下载域名；API、浏览器和 Worker 使用相同允许列表。
-- `DOWNLOAD_URL_TTL_SECONDS`：可选，默认 `900`，表示真实签名有效 15 分钟，可设 `60` 至 `3600`。
+- `DOWNLOAD_URL_TTL_SECONDS`：可选，代码默认 `900`，生产建议 `3540`（59 分钟，慢速连接下载约 100 MB 可能需要更久），可设 `60` 至 `3600`。
 
 完整后台操作、部署顺序及窄路径选项见 [Cloudflare 下载网关](../cloudflare/README.md)。真实凭据不能进入前端、仓库、截图或聊天。配置变量后必须部署新版本；只有源码恢复或变量保存不代表线上已经生效。
 

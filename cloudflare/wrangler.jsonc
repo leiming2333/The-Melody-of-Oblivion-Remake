@@ -3,5 +3,8 @@
   "main": "download-worker.mjs",
   "compatibility_date": "2026-11-11",
   "workers_dev": false,
-  "preview_urls": false
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "verified-downloads.melodyoblivion.xyz", "custom_domain": true }
+  ]
 }

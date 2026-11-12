@@ -5,8 +5,8 @@
 ## 不影响现有服务
 
 - `downloads.melodyoblivion.xyz` 保留为公共 R2 域名，发布清单、同步校验和启动器更新继续使用。
-- 默认创建独立 Worker `melody-verified-downloads`，下载入口为 `verified-downloads.melodyoblivion.xyz`。不要把它绑定到旧公共下载域名。
-- `wrangler.jsonc` 不预设生产路由；`workers.dev` 和预览 URL 关闭。只部署文件不会自动接管任何域名。添加生产域名或路径需要先确认用途。
+- 独立 Worker `melody-verified-downloads`，下载入口为 `verified-downloads.melodyoblivion.xyz`。不要把它绑定到旧公共下载域名。
+- `wrangler.jsonc` 已包含该自定义域名路由；`wrangler deploy` 会创建或更新 Worker 并绑定域名。`workers.dev` 和预览 URL 关闭。不要添加 `downloads.melodyoblivion.xyz` 或其他宽路由。
 - 不需要新建 R2 桶、迁移文件或给本 Worker 配置 R2 S3 密钥；Worker 读取固定公共 R2 源。
 
 ## 1. Cloudflare Turnstile
@@ -31,7 +31,7 @@ Secret Key 只放到 Vercel 服务端，Worker 不需要它。
 | `DOWNLOAD_ALLOWED_HOSTNAMES` | `www.melodyoblivion.xyz,melodyoblivion.xyz` | Config |
 | `DOWNLOAD_AUTH_SECRET` | 随机共享密钥，见下 | Secret |
 | `DOWNLOAD_CDN_BASE_URL` | `https://verified-downloads.melodyoblivion.xyz` | Config |
-| `DOWNLOAD_URL_TTL_SECONDS` | `900`（15 分钟） | Config |
+| `DOWNLOAD_URL_TTL_SECONDS` | `3540`（59 分钟，适合慢速连接；代码默认 900） | Config |
 
 本地生成一次共享密钥：
 
@@ -60,7 +60,7 @@ npx wrangler deploy --config cloudflare/wrangler.jsonc
 npx wrangler secret put DOWNLOAD_AUTH_SECRET --config cloudflare/wrangler.jsonc
 ```
 
-共享密钥通过交互输入，不放在命令参数中。此配置不自动创建生产路由，域名仍按上面的控制台步骤确认后添加。
+`wrangler.jsonc` 已配置 `verified-downloads.melodyoblivion.xyz` 自定义域名；部署后确认域名和证书就绪。共享密钥通过交互输入，不放在命令参数中。
 
 只检查打包、不上传代码或修改云端，可运行：
 
@@ -68,7 +68,13 @@ npx wrangler secret put DOWNLOAD_AUTH_SECRET --config cloudflare/wrangler.jsonc
 npx wrangler deploy --config cloudflare/wrangler.jsonc --dry-run
 ```
 
-当前源码已通过 Wrangler `4.160.0` 的 dry-run（约 `15.14 KiB`，gzip `4.71 KiB`），但这不是已上线，也不代表生产 Secrets/域名已经配置。
+部署后运行生产检查（需要与 Vercel/Worker 相同的 `DOWNLOAD_AUTH_SECRET`，从安全存储读取，不要写入命令历史）：
+
+```powershell
+npm run verify:production-downloads
+```
+
+检查会验证 `/api/download-config`、DNS、CORS、未签名 403 和签名 Range 206。只做打包检查可运行 `npx wrangler deploy --config cloudflare/wrangler.jsonc --dry-run`。
 
 ## 可选：官网窄路径
 
@@ -94,7 +100,7 @@ API、网页与 Worker 仅允许 `src/shared/website-cdn-config.json` 中的三�
 
 先准备并验证 Worker，再发布包含 `api/download-config.js`、`api/download-authorization.js`、`website-download-auth.mjs`、`website-downloader.mjs` 及网页改动的网站版本。环境变量只在新部署生效；代码已经发布但变量刚修改时，进入 **Vercel → Deployments → 对应部署 `…` → Redeploy**。
 
-1. 官网 `/api/download-config` 返回 `enabled: true`，仅包含公开 Site Key、action 和受保护 baseUrl，不包含任何 Secret。
+1. 运行 `npm run verify:production-downloads`，确认官网 `/api/download-config` 返回 `enabled: true`、仅包含公开 Site Key/action/受保护 baseUrl，且 Worker 的 CORS、未签名 403 和签名 Range 206 均通过。
 2. 验证失败、错误 action/hostname、过期或已消费的 token 不签发下载许可。真实 token 的单次消费由 Cloudflare Siteverify 校验。
 3. 签名 Worker 的合法安装包路径在无许可、伪造/重复/过期签名时返回 403；共享密钥缺失返回 503。请求缓存与回源前都校验签名。
 4. 真实官网完成一次验证后，安装包请求带 `expires` 和 `signature`；Range 返回正确的 206、Content-Range、Content-Length 和 CORS。
@@ -102,7 +108,7 @@ API、网页与 Worker 仅允许 `src/shared/website-cdn-config.json` 中的三�
 6. 公共 `https://downloads.melodyoblivion.xyz/releases/latest.json`、版本清单和原始安装包仍可访问，启动器自动更新不用验证码。
 7. 测冷/热缓存与整包实际速度，查看 Worker 请求量、CPU 和失败结果。一次短样本或离线测试通过不等于生产性能保证。
 
-GitHub 原始下载和网盘继续提供公开备用入口，这不意味着 R2/GitHub 文件已私有化。签名协议为 `HMAC-SHA256("download-v1\n<完整 pathname>\n<Unix 秒>")`，无填充 Base64URL。签名链接可以在有效期内被转发，不是严格一次性下载；许可默认 900 秒，最多 3600 秒。密钥轮换需要两端协调，会使旧链接失效。
+GitHub 原始下载和网盘继续提供公开备用入口，这不意味着 R2/GitHub 文件已私有化。签名协议为 `HMAC-SHA256("download-v1\n<完整 pathname>\n<Unix 秒>")`，无填充 Base64URL。签名链接可以在有效期内被转发，不是严格一次性下载；生产环境建议 3540 秒（59 分钟，慢速连接下载约 100 MB 可能超过 15 分钟），最多 3600 秒。密钥轮换需要两端协调，会使旧链接失效。
 
 离线检查：
 
@@ -123,4 +129,4 @@ npm run verify:website-browser
 - 网页下载器在浏览器内存中拼接并校验完整安装包，内存需求可能高于文件大小；下载时保持页面打开。公共 GitHub/网盘仍适用于无法使用网页下载器的环境。
 - 当前网络的短样本显示 R2 四路比单路快约 1.5 倍，不能证明未部署的独立域名一定快于官网窄路径。网关上线后需测实际完整文件、冷/热缓存、失败率与 CPU，再决定是否调整入口或并发，不盲目加到 32 路。
 
-常见排错：`enabled: false` 查环境、真实 widget key、共享密钥及受保护 baseUrl；验证 API 403 查 hostname/action/token；Worker 403 查两端密钥与有效期；404 查精确路径/文件名；502 查固定上游与 Range 表示。授权错误不会关闭验证或自动开放公共下载。
+常见排错：`enabled: false` 查环境、真实 widget key、共享密钥及受保护 baseUrl；DNS NXDOMAIN 或 Worker 不存在时先运行 `npx wrangler deployments list --name melody-verified-downloads` 并部署 `wrangler.jsonc`；验证 API 403 查 hostname/action/token；Worker 403 查两端密钥与有效期；404 查精确路径/文件名；502 查固定上游与 Range 表示。授权错误不会关闭验证或自动开放公共下载。
