@@ -190,8 +190,20 @@ test('download HTML includes the verification gate and does not publish a direct
   assert.match(html, /1 MiB 分块、4 路并发/);
   assert.doesNotMatch(html, /id="download-button"[^>]*href=/);
   for (const target of targets) assert.ok(html.includes(`value="${target}"`));
-  assert.ok(html.includes('https://pan.baidu.com/s/1H_Glo2r43eftFvzdItooWA?pwd=2333'));
-  assert.ok(html.includes('https://wwayi.lanzoum.com/b01gicolti'));
+  for (const url of [
+    'https://pan.baidu.com/s/1Vl9HrV07wQXbHRvHnyqC0A?pwd=2333',
+    'https://pan.baidu.com/s/1FXccyrw0VI93lefYu2i2nQ?pwd=2333',
+    'https://pan.baidu.com/s/1ic0OzXT28sITeLHuE-FG-w?pwd=2333',
+    'https://pan.baidu.com/s/1346_XbYBw1fyeFT7h4pavg?pwd=2333',
+    'https://pan.baidu.com/s/18IMi-o8Hi7o_5Qq5kt_IpA?pwd=2333',
+    'https://pan.baidu.com/s/1Io_mueE1z1RHGWr9g3VJDg?pwd=2333',
+    'https://pan.baidu.com/s/1tghBkgFUBBC_6kK8hcA3LA?pwd=2333',
+    'https://pan.baidu.com/s/1U2XLcC79bmWB3lsAarlkXg?pwd=2333'
+  ]) assert.ok(html.includes(url));
+  assert.ok(html.includes('https://wwayi.lanzoum.com/iE8J84fp5euj'));
+  assert.ok(html.includes('https://wwayi.lanzoum.com/iMm454fp4uhg'));
+  assert.ok(html.includes('<code>dywd</code>'));
+  assert.ok(html.includes('<code>gpqs</code>'));
 });
 
 test('a verified click completes real parallel Range reads and saves only the checked Blob', async () => {
