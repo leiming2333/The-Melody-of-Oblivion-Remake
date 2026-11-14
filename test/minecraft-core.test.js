@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {
   BMCLAPI_BASE,
+  BMCLAPI_MIRRORED_TYPES,
   LSS233_LIBRARY_BASE,
   MinecraftSourceManager,
   OFFICIAL_MANIFEST,
@@ -14,6 +15,9 @@ const {
   resolveSourceUrl
 } = require('../src/main/minecraft/source-manager');
 const {
+  MIRROR_ATTEMPT_CONCURRENCY,
+  MIRROR_QUARANTINE_FAILURES,
+  MIRROR_SEGMENT_CONCURRENCY,
   MinecraftDownloader,
   createDownloadProgressTracker,
   createDownloadSegments,
@@ -21,6 +25,7 @@ const {
   hasValidInstallationMarker,
   isLibraryAllowed,
   mavenPathFromName,
+  resetMirrorDownloadState,
   runPool,
   safePath
 } = require('../src/main/minecraft/downloader');
@@ -82,6 +87,34 @@ test('BMCLAPI 版本、依赖库与资源地址正确', () => {
     resolveSourceUrl('bmclapi', 'asset', { hash: 'abcdef0123456789abcdef0123456789abcdef01' }),
     `${BMCLAPI_BASE}/assets/ab/abcdef0123456789abcdef0123456789abcdef01`
   );
+  assert.equal(
+    resolveSourceUrl('bmclapi', 'client', { versionId: '1.21.5' }),
+    `${BMCLAPI_BASE}/version/1.21.5/client`
+  );
+  assert.equal(
+    resolveSourceUrl('bmclapi', 'asset-index', {
+      originalUrl: 'https://piston-meta.mojang.com/v1/packages/abc/34.json'
+    }),
+    `${BMCLAPI_BASE}/v1/packages/abc/34.json`
+  );
+});
+
+test('日志配置没有 BMCLAPI 缓存，候选地址只保留官方来源', () => {
+  const manager = new MinecraftSourceManager();
+  const originalUrl = 'https://piston-data.mojang.com/v1/objects/abc/client-1.21.2.xml';
+  assert.equal(resolveSourceUrl('bmclapi', 'logging', { originalUrl }), undefined);
+  assert.equal(BMCLAPI_MIRRORED_TYPES.includes('logging'), false);
+  assert.deepEqual(manager.getCandidateUrls('logging', { originalUrl }, 'bmclapi'), [originalUrl]);
+});
+
+test('Quilt 依赖库不经过 BMCLAPI，直接使用官方仓库并保留聚合镜像', () => {
+  const manager = new MinecraftSourceManager();
+  const libraryPath = 'org/quiltmc/quilt-loader/0.27.0/quilt-loader-0.27.0.jar';
+  const originalUrl = `https://maven.quiltmc.org/repository/release/${libraryPath}`;
+  assert.equal(resolveSourceUrl('bmclapi', 'library', { path: libraryPath, originalUrl }), undefined);
+  const urls = manager.getCandidateUrls('library', { path: libraryPath, originalUrl }, 'bmclapi');
+  assert.equal(urls[0], originalUrl);
+  assert.ok(urls.every((url) => !url.startsWith(BMCLAPI_BASE)));
 });
 
 test('自动模式会把 Lss233 聚合镜像加入依赖库候选地址', () => {
@@ -685,6 +718,342 @@ test('持续有数据的慢速连接可以超过无数据超时完成下载', { 
   assert.ok(Date.now() - startedAt > 1500);
   assert.equal(result.bytes, content.length);
   assert.deepEqual(await fs.readFile(destination), content);
+});
+
+test('镜像线路限制同主机并发请求数', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  t.after(() => resetMirrorDownloadState());
+  resetMirrorDownloadState();
+  const content = Buffer.from('mirror asset');
+  let active = 0;
+  let peak = 0;
+  const requested = [];
+  global.fetch = async (url) => {
+    requested.push(url);
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    active -= 1;
+    return new Response(content);
+  };
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-mirror-gate-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const tasks = Array.from({ length: MIRROR_ATTEMPT_CONCURRENCY * 2 }, (_value, index) => ({
+    label: `镜像文件 ${index}`,
+    destination: path.join(temporaryRoot, `asset-${index}`),
+    urls: [`${BMCLAPI_BASE}/assets/ab/asset-${index}`]
+  }));
+  await runPool(tasks, tasks.length, async (task) => { await downloadFile(task); });
+
+  assert.equal(requested.length, tasks.length);
+  assert.ok(peak <= MIRROR_ATTEMPT_CONCURRENCY,
+    `镜像并发峰值 ${peak} 超过上限 ${MIRROR_ATTEMPT_CONCURRENCY}`);
+  assert.ok(peak > 1, '镜像请求应保持并行，而不是被串行化');
+  for (const task of tasks) {
+    assert.deepEqual(await fs.readFile(task.destination), content);
+  }
+});
+
+test('镜像连续失败后临时隔离，后续文件直接走备用源', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  t.after(() => resetMirrorDownloadState());
+  resetMirrorDownloadState();
+  const content = Buffer.from('official asset');
+  const mirrorRequests = [];
+  const officialRequests = [];
+  global.fetch = async (url) => {
+    if (url.startsWith(BMCLAPI_BASE)) {
+      mirrorRequests.push(url);
+      return new Response('', { status: 302 });
+    }
+    officialRequests.push(url);
+    return new Response(content);
+  };
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-mirror-quarantine-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const totalFiles = MIRROR_QUARANTINE_FAILURES + 3;
+  const results = [];
+  for (let index = 0; index < totalFiles; index += 1) {
+    results.push(await downloadFile({
+      label: `文件 ${index}`,
+      destination: path.join(temporaryRoot, `asset-${index}`),
+      urls: [
+        `${BMCLAPI_BASE}/assets/ab/asset-${index}`,
+        `https://piston-data.mojang.com/objects/asset-${index}`
+      ]
+    }));
+  }
+
+  assert.equal(mirrorRequests.length, MIRROR_QUARANTINE_FAILURES);
+  assert.equal(officialRequests.length, totalFiles);
+  assert.ok(results.every((result) => result.sourceId === 'official'));
+});
+
+test('镜像隔离时仍会尝试作为最后候选的镜像地址并在成功后恢复', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  t.after(() => resetMirrorDownloadState());
+  resetMirrorDownloadState();
+  const content = Buffer.from('recovered asset');
+  let mirrorBroken = true;
+  let officialBroken = true;
+  const mirrorRequests = [];
+  global.fetch = async (url) => {
+    if (url.startsWith(BMCLAPI_BASE)) {
+      mirrorRequests.push(url);
+      if (mirrorBroken) return new Response('', { status: 302 });
+      return new Response(content);
+    }
+    if (officialBroken) return new Response('', { status: 500 });
+    return new Response(content);
+  };
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-mirror-recovery-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+
+  for (let index = 0; index < MIRROR_QUARANTINE_FAILURES; index += 1) {
+    await assert.rejects(downloadFile({
+      label: `双源失败 ${index}`,
+      destination: path.join(temporaryRoot, `failed-${index}`),
+      urls: [`${BMCLAPI_BASE}/assets/ab/failed-${index}`, 'https://piston-data.mojang.com/objects/failed']
+    }), /下载失败/);
+  }
+
+  mirrorBroken = false;
+  const lastResort = await downloadFile({
+    label: '最后候选镜像',
+    destination: path.join(temporaryRoot, 'last-resort'),
+    urls: ['https://piston-data.mojang.com/objects/last-resort', `${BMCLAPI_BASE}/assets/ab/last-resort`]
+  });
+  assert.equal(lastResort.sourceId, 'bmclapi');
+  assert.equal(lastResort.bytes, content.length);
+
+  const restored = await downloadFile({
+    label: '恢复后的镜像',
+    destination: path.join(temporaryRoot, 'restored'),
+    urls: [`${BMCLAPI_BASE}/assets/ab/restored`, 'https://piston-data.mojang.com/objects/restored']
+  });
+  assert.equal(restored.sourceId, 'bmclapi');
+  assert.ok(mirrorRequests.includes(`${BMCLAPI_BASE}/assets/ab/restored`));
+});
+
+test('镜像大文件收敛分段数，避免并发连接数放大', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  t.after(() => resetMirrorDownloadState());
+  resetMirrorDownloadState();
+  const content = Buffer.alloc(13 * 1024 * 1024, 0x5a);
+  global.fetch = async (url, options) => {
+    const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers?.Range ?? '');
+    if (!match) return new Response('', { status: 200 });
+    const start = Number(match[1]);
+    const end = Math.min(Number(match[2]), content.length - 1);
+    return new Response(content.subarray(start, end + 1), {
+      status: 206,
+      headers: {
+        'Content-Range': `bytes ${start}-${end}/${content.length}`,
+        'Accept-Ranges': 'bytes'
+      }
+    });
+  };
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-mirror-segment-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const result = await downloadFile({
+    label: '镜像大文件',
+    destination: path.join(temporaryRoot, 'client.jar'),
+    urls: [`${BMCLAPI_BASE}/version/26.3/client`],
+    size: content.length,
+    sha1: crypto.createHash('sha1').update(content).digest('hex'),
+    segmentConcurrency: 8
+  });
+
+  assert.equal(result.segmented, true);
+  assert.equal(result.segments, MIRROR_SEGMENT_CONCURRENCY);
+  assert.ok(result.segments < 8, '镜像分段数应小于请求的 8 段');
+  assert.deepEqual(await fs.readFile(path.join(temporaryRoot, 'client.jar')), content);
+});
+
+test('镜像候选全部被隔离时不再因慢速切换而失败', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  t.after(() => resetMirrorDownloadState());
+  resetMirrorDownloadState();
+  const content = Buffer.alloc(64 * 1024, 0x33);
+  let officialDrips = false;
+  global.fetch = async (url) => {
+    if (url.startsWith(BMCLAPI_BASE)) return new Response('', { status: 302 });
+    if (officialDrips && url.endsWith('/slow')) {
+      let timer;
+      const stream = new (require('node:stream/web').ReadableStream)({
+        start(controller) {
+          let sent = 0;
+          timer = setInterval(() => {
+            const chunk = content.subarray(sent, sent + 1024);
+            controller.enqueue(chunk);
+            sent += chunk.length;
+            if (sent >= content.length) {
+              clearInterval(timer);
+              controller.close();
+            }
+          }, 20);
+        },
+        cancel() { clearInterval(timer); }
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Length': String(content.length) }
+      });
+    }
+    return new Response(content);
+  };
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-mirror-slow-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const slowTask = (destination, urls, extras = {}) => ({
+    label: '慢速官方源',
+    destination,
+    urls,
+    sha1: crypto.createHash('sha1').update(content).digest('hex'),
+    size: content.length,
+    slowMinimumSize: 1,
+    slowThresholdBytesPerSecond: 10 * 1024 * 1024,
+    slowGraceMs: 200,
+    slowCheckIntervalMs: 100,
+    ...extras
+  });
+
+  officialDrips = true;
+  const controlSwitches = [];
+  const control = await downloadFile(slowTask(
+    path.join(temporaryRoot, 'control'),
+    ['https://piston-data.mojang.com/objects/slow', 'https://piston-data.mojang.com/objects/fast'],
+    { onSourceSwitch: (event) => controlSwitches.push(event) }
+  ));
+  assert.equal(control.url, 'https://piston-data.mojang.com/objects/fast');
+  assert.equal(controlSwitches.length, 1);
+
+  for (let index = 0; index < MIRROR_QUARANTINE_FAILURES; index += 1) {
+    await downloadFile({
+      label: `制造隔离 ${index}`,
+      destination: path.join(temporaryRoot, `warmup-${index}`),
+      urls: [`${BMCLAPI_BASE}/assets/ab/warmup-${index}`, 'https://piston-data.mojang.com/objects/warmup']
+    });
+  }
+
+  const switches = [];
+  const result = await downloadFile(slowTask(
+    path.join(temporaryRoot, 'slow'),
+    ['https://piston-data.mojang.com/objects/slow', `${BMCLAPI_BASE}/assets/ab/slow`],
+    { onSourceSwitch: (event) => switches.push(event) }
+  ));
+
+  assert.equal(result.sourceId, 'official');
+  assert.deepEqual(switches, []);
+  assert.deepEqual(await fs.readFile(path.join(temporaryRoot, 'slow')), content);
+});
+
+test('排队等待镜像额度时取消下载立即返回', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  t.after(() => resetMirrorDownloadState());
+  resetMirrorDownloadState();
+  const content = Buffer.from('queued asset');
+  let releaseFetch;
+  const released = new Promise((resolve) => { releaseFetch = resolve; });
+  let started = 0;
+  global.fetch = async () => {
+    started += 1;
+    await released;
+    return new Response(content);
+  };
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-mirror-cancel-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+
+  const heldTasks = Array.from({ length: MIRROR_ATTEMPT_CONCURRENCY }, (_value, index) => downloadFile({
+    label: `占用额度 ${index}`,
+    destination: path.join(temporaryRoot, `held-${index}`),
+    urls: [`${BMCLAPI_BASE}/assets/ab/held-${index}`]
+  }));
+  await new Promise((resolve) => {
+    const check = () => {
+      if (started === MIRROR_ATTEMPT_CONCURRENCY) resolve();
+      else setTimeout(check, 5);
+    };
+    check();
+  });
+
+  const controller = new AbortController();
+  const queued = downloadFile({
+    label: '排队文件',
+    destination: path.join(temporaryRoot, 'queued'),
+    urls: [`${BMCLAPI_BASE}/assets/ab/queued`],
+    signal: controller.signal
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  controller.abort();
+  await assert.rejects(queued, (error) =>
+    error.name === 'AbortError' && error.message === '下载已取消');
+  assert.equal(started, MIRROR_ATTEMPT_CONCURRENCY);
+
+  releaseFetch();
+  const heldResults = await Promise.all(heldTasks);
+  assert.ok(heldResults.every((result) => result.sourceId === 'bmclapi'));
+  await assert.rejects(fs.stat(path.join(temporaryRoot, 'queued')), { code: 'ENOENT' });
+});
+
+test('单文件瞬时失败不中止安装，结束后统一重试', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  t.after(() => resetMirrorDownloadState());
+  resetMirrorDownloadState();
+  const content = Buffer.from('retry asset');
+  const calls = new Map();
+  global.fetch = async (url) => {
+    const count = (calls.get(url) ?? 0) + 1;
+    calls.set(url, count);
+    if (url.endsWith('/flaky') && count === 1) return new Response('', { status: 500 });
+    if (url.endsWith('/broken')) return new Response('', { status: 500 });
+    return new Response(content);
+  };
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-retry-pool-test-'));
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const downloader = new MinecraftDownloader({ gameDirectory: temporaryRoot, sourceManager: {} });
+  const tasks = ['stable-a', 'flaky', 'stable-b'].map((name) => ({
+    label: `文件 ${name}`,
+    destination: path.join(temporaryRoot, name),
+    urls: [`https://example.test/files/${name}`]
+  }));
+  const progress = [];
+  const tracker = createDownloadProgressTracker({
+    tasks,
+    onProgress: (event) => progress.push(event),
+    emitIntervalMs: 0
+  });
+  tracker.start('开始');
+
+  await downloader.runDownloadPool(tasks, tracker, (event) => progress.push(event));
+
+  assert.ok(progress.some((event) => event.message === '1 个文件下载失败，正在重试…'));
+  assert.equal(calls.get('https://example.test/files/flaky'), 2);
+  assert.deepEqual(await fs.readFile(path.join(temporaryRoot, 'flaky')), content);
+  assert.deepEqual(await fs.readFile(path.join(temporaryRoot, 'stable-a')), content);
+  assert.deepEqual(tracker.snapshot().completedFiles, tasks.length);
+
+  const permanentTasks = [
+    { label: '永久失败', destination: path.join(temporaryRoot, 'broken'),
+      urls: ['https://example.test/files/broken'] },
+    { label: '稳定文件', destination: path.join(temporaryRoot, 'stable-c'),
+      urls: ['https://example.test/files/stable-c'] }
+  ];
+  const permanentTracker = createDownloadProgressTracker({
+    tasks: permanentTasks, onProgress: () => {}, emitIntervalMs: 0
+  });
+  await assert.rejects(
+    downloader.runDownloadPool(permanentTasks, permanentTracker, () => {}),
+    /仍然下载失败/
+  );
+  assert.deepEqual(await fs.readFile(path.join(temporaryRoot, 'stable-c')), content);
+  assert.equal(calls.get('https://example.test/files/broken'), 2);
 });
 
 test('只有完整文件检测通过后版本才会标记为已安装', async (t) => {

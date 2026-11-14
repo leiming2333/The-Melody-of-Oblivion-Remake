@@ -20,6 +20,17 @@ const DEFAULT_SLOW_THRESHOLD_BYTES_PER_SECOND = 96 * 1024;
 const DEFAULT_SLOW_CHECK_INTERVAL_MS = 1000;
 const DEFAULT_SLOW_MINIMUM_SIZE = 2 * 1024 * 1024;
 const DEFAULT_IDLE_TIMEOUT_MS = 15000;
+// BMCLAPI 对单 IP 的并发请求模式敏感：以文件池全并发（32 路）直冲镜像会触发
+// 其 WAF 封禁（实测 2026-11-14：全站返回无 Location 的 302，约持续 1 小时），
+// 封禁期间镜像完全不可用。镜像线路因此限制同主机在途请求数，并在连续失败时
+// 临时隔离，让文件直接改走后续候选源，避免整个安装随镜像一起失败。
+const MIRROR_ATTEMPT_CONCURRENCY = 6;
+const MIRROR_SEGMENT_CONCURRENCY = 4;
+const MIRROR_QUARANTINE_FAILURES = 5;
+const MIRROR_QUARANTINE_WINDOW_MS = 60000;
+const MIRROR_QUARANTINE_MS = 5 * 60 * 1000;
+const mirrorGates = new Map();
+const mirrorHealth = new Map();
 const { safePath, installationMarkerPath, hasInstallationMarker, INSTALLATION_MARKER_FILE } = require('./installation-files');
 
 function sourceDetailsFromUrl(url) {
@@ -133,6 +144,101 @@ function throwIfAborted(signal) {
 
 function isAbortError(error, signal) {
   return signal?.aborted || error?.name === 'AbortError';
+}
+
+function mirrorHostname(url) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname.includes('bmclapi') || hostname.endsWith('bangbang93.com')
+      || hostname.endsWith('littleservice.cn')
+      ? hostname
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mirrorGate(url) {
+  const hostname = mirrorHostname(url);
+  if (!hostname) return undefined;
+  let gate = mirrorGates.get(hostname);
+  if (!gate) {
+    gate = { active: 0, queue: [] };
+    mirrorGates.set(hostname, gate);
+  }
+  return gate;
+}
+
+function acquireMirrorGate(gate, signal) {
+  if (gate.active < MIRROR_ATTEMPT_CONCURRENCY) {
+    gate.active += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const entry = {
+      resolve,
+      onAbort: () => {
+        const index = gate.queue.indexOf(entry);
+        if (index >= 0) {
+          gate.queue.splice(index, 1);
+          reject(createAbortError());
+        }
+      },
+      signal
+    };
+    signal?.addEventListener('abort', entry.onAbort, { once: true });
+    gate.queue.push(entry);
+  });
+}
+
+function releaseMirrorGate(gate) {
+  const next = gate.queue.shift();
+  if (!next) {
+    gate.active = Math.max(0, gate.active - 1);
+    return;
+  }
+  next.signal?.removeEventListener('abort', next.onAbort);
+  next.resolve();
+}
+
+function noteMirrorResult(url, ok) {
+  const hostname = mirrorHostname(url);
+  if (!hostname) return;
+  let health = mirrorHealth.get(hostname);
+  if (!health) {
+    health = { failures: 0, lastFailureAt: 0, quarantinedUntil: 0 };
+    mirrorHealth.set(hostname, health);
+  }
+  const now = Date.now();
+  if (ok) {
+    health.failures = 0;
+    health.quarantinedUntil = 0;
+    return;
+  }
+  if (now - health.lastFailureAt > MIRROR_QUARANTINE_WINDOW_MS) health.failures = 0;
+  health.failures += 1;
+  health.lastFailureAt = now;
+  if (health.failures >= MIRROR_QUARANTINE_FAILURES) {
+    health.quarantinedUntil = now + MIRROR_QUARANTINE_MS;
+    health.failures = 0;
+  }
+}
+
+function mirrorQuarantined(url) {
+  const hostname = mirrorHostname(url);
+  if (!hostname) return false;
+  const health = mirrorHealth.get(hostname);
+  return Boolean(health && Date.now() < health.quarantinedUntil);
+}
+
+function skipQuarantinedUrl(url, urls, urlIndex) {
+  if (!mirrorQuarantined(url)) return false;
+  return urls.slice(urlIndex + 1).some((candidate) => !mirrorQuarantined(candidate));
+}
+
+function resetMirrorDownloadState() {
+  mirrorGates.clear();
+  mirrorHealth.clear();
 }
 
 function isLibraryAllowed(library) {
@@ -358,7 +464,11 @@ async function downloadSegment(url, segment, destination, signal, onChunk, valid
 }
 
 async function downloadFileSegmented(url, temporary, task) {
-  const segments = createDownloadSegments(task.size, task.segmentConcurrency);
+  // 镜像按单 IP 限制总吞吐，额外分段不提速，反而放大并发连接数、更容易触发封禁。
+  const segmentConcurrency = mirrorHostname(url)
+    ? Math.min(task.segmentConcurrency ?? DEFAULT_SEGMENT_CONCURRENCY, MIRROR_SEGMENT_CONCURRENCY)
+    : task.segmentConcurrency;
+  const segments = createDownloadSegments(task.size, segmentConcurrency);
   if (segments.length < 2 || !(await supportsRangeDownloads(url, task.size, task.signal, task.validateRedirect))) {
     return undefined;
   }
@@ -409,10 +519,23 @@ async function downloadFile(task) {
   for (let urlIndex = 0; urlIndex < task.urls.length; urlIndex += 1) {
     const url = task.urls[urlIndex];
     const nextUrl = task.urls[urlIndex + 1];
+
+    if (skipQuarantinedUrl(url, task.urls, urlIndex)) {
+      errors.push(`${url}: 线路近期连续失败，已临时跳过`);
+      continue;
+    }
+
+    const gate = mirrorGate(url);
+    if (gate) await acquireMirrorGate(gate, task.signal);
+
     const attemptController = new AbortController();
     const signals = [task.signal, attemptController.signal].filter(Boolean);
     const attemptSignal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
-    const monitor = createTransferMonitor(task, attemptController, Boolean(nextUrl));
+    // 慢速中止的前提是切走后有更可用的线路；剩余候选全被隔离时保留当前连接慢慢下完，
+    // 否则会出现“官方源还能走通，却因为切换到已失效镜像而失败”的自毁切换。
+    const viableNextUrl = Boolean(nextUrl)
+      && task.urls.slice(urlIndex + 1).some((candidate) => !mirrorQuarantined(candidate));
+    const monitor = createTransferMonitor(task, attemptController, viableNextUrl);
     const currentSource = sourceDetailsFromUrl(url);
     task.onBytes?.(0);
     task.onSourceChange?.(currentSource);
@@ -470,6 +593,7 @@ async function downloadFile(task) {
 
       const stat = await fsPromises.stat(temporary);
       await replaceFileAtomic(temporary, task.destination, task.signal);
+      noteMirrorResult(url, true);
       return {
         skipped: false,
         bytes: stat.size,
@@ -482,6 +606,7 @@ async function downloadFile(task) {
     } catch (error) {
       await fsPromises.rm(temporary, { force: true });
       if (task.signal?.aborted) throw createAbortError();
+      noteMirrorResult(url, false);
       if ((monitor.slow || monitor.idle) && nextUrl) {
         const nextSource = sourceDetailsFromUrl(nextUrl);
         task.onBytes?.(0);
@@ -507,6 +632,7 @@ async function downloadFile(task) {
       errors.push(`${url}: ${error.message}`);
     } finally {
       monitor.stop();
+      if (gate) releaseMirrorGate(gate);
     }
   }
 
@@ -819,6 +945,55 @@ class MinecraftDownloader {
     this.segmentConcurrency = segmentConcurrency;
   }
 
+  // 单个文件瞬时失败（镜像限流、线路偶发慢速）不应让整个包含数千文件的安装作废；
+  // 先收齐失败项继续下载其余文件，结束后统一重试一轮，仍失败的才终止安装。
+  async runDownloadPool(downloadTasks, progressTracker, onProgress, { signal } = {}) {
+    const attemptTask = async (task, poolSignal) => {
+      const result = await downloadFile({
+        ...task,
+        signal: poolSignal,
+        segmentConcurrency: this.segmentConcurrency,
+        ...progressTracker.hooks(task)
+      });
+      progressTracker.complete(
+        task,
+        result,
+        result.segmented ? `${task.label} · ${result.segments} 段并行` : task.label
+      );
+    };
+
+    const failures = [];
+    await runPool(downloadTasks, this.concurrency, async (task, _index, poolSignal) => {
+      try {
+        await attemptTask(task, poolSignal);
+      } catch (error) {
+        throwIfAborted(poolSignal);
+        failures.push({ task, error });
+      }
+    }, signal);
+
+    if (failures.length === 0) return;
+    throwIfAborted(signal);
+    onProgress?.({
+      phase: 'downloading',
+      message: `${failures.length} 个文件下载失败，正在重试…`,
+      ...progressTracker.snapshot()
+    });
+    const finalFailures = [];
+    await runPool(failures.map((entry) => entry.task), this.concurrency,
+      async (task, _index, poolSignal) => {
+        try {
+          await attemptTask(task, poolSignal);
+        } catch (error) {
+          throwIfAborted(poolSignal);
+          finalFailures.push(`${task.label}：${error.message}`);
+        }
+      }, signal);
+    if (finalFailures.length > 0) {
+      throw new Error(`共 ${finalFailures.length} 个文件重试后仍然下载失败\n${finalFailures.join('\n')}`);
+    }
+  }
+
   async listVersions({ force = false } = {}) {
     const { manifest, source } = await this.sourceManager.getVersionManifest({ force });
     let localVersionIds = new Set();
@@ -1042,11 +1217,7 @@ class MinecraftDownloader {
     const tracker = createDownloadProgressTracker({ tasks: downloadTasks, onProgress,
       phase: 'downloading', baseProgress: { versionId: profileId }, initialSourceId: preferredSourceId });
     tracker.start(`正在检查并补全 ${downloadTasks.length} 个游戏文件`);
-    await runPool(downloadTasks, this.concurrency, async (task, _index, poolSignal) => {
-      const result = await downloadFile({ ...task, signal: poolSignal,
-        segmentConcurrency: this.segmentConcurrency, ...tracker.hooks(task) });
-      tracker.complete(task, result);
-    }, signal);
+    await this.runDownloadPool(downloadTasks, tracker, onProgress, { signal });
     if (assetIndexId) await materializeLegacyAssets(assetIndex, assetIndexId, this.gameDirectory, signal);
     const verification = await this.verifyVersion(profileId, (progress) => onProgress({
       ...progress, phase: 'verifying', message: '正在验证补全后的游戏文件…'
@@ -1182,19 +1353,7 @@ class MinecraftDownloader {
       `准备下载 ${downloadTasks.length} 个文件（${this.concurrency} 路并发）`
     );
 
-    await runPool(downloadTasks, this.concurrency, async (task, _index, poolSignal) => {
-      const result = await downloadFile({
-        ...task,
-        signal: poolSignal,
-        segmentConcurrency: this.segmentConcurrency,
-        ...progressTracker.hooks(task)
-      });
-      progressTracker.complete(
-        task,
-        result,
-        result.segmented ? `${task.label} · ${result.segments} 段并行` : task.label
-      );
-    }, signal);
+    await this.runDownloadPool(downloadTasks, progressTracker, onProgress, { signal });
 
     if (assetIndexId) {
       await materializeLegacyAssets(assetIndex, assetIndexId, this.gameDirectory, signal);
@@ -1243,6 +1402,10 @@ module.exports = {
   DEFAULT_SLOW_MINIMUM_SIZE,
   DEFAULT_SLOW_THRESHOLD_BYTES_PER_SECOND,
   INSTALLATION_MARKER_FILE,
+  MIRROR_ATTEMPT_CONCURRENCY,
+  MIRROR_QUARANTINE_FAILURES,
+  MIRROR_QUARANTINE_MS,
+  MIRROR_SEGMENT_CONCURRENCY,
   MinecraftDownloader,
   SEGMENT_THRESHOLD_BYTES,
   createAbortError,
@@ -1256,6 +1419,8 @@ module.exports = {
   isLibraryAllowed,
   libraryTasks,
   mavenPathFromName,
+  mirrorHostname,
+  resetMirrorDownloadState,
   runPool,
   safePath,
   sourceDetailsFromUrl,

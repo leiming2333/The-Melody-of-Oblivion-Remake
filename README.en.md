@@ -44,6 +44,12 @@ The current repository starts a new implementation; its version numbers and code
 - **Launcher updates** — checks GitHub Releases on startup with a three-level policy (auto-download / notify only / never); system notifications announce new versions and ready updates, and settings show release notes. Small parallel probes choose among Blob, GitHub mirrors, and GitHub. Large packages use four concurrent ranges and retain completed ranges when changing sources during the same download; servers without Range support use a single stream. When one of the latest three stable releases is installed, a bsdiff + Zstandard delta patch is preferred: patches are read from the R2 mirror first with GitHub/mirror fallback, the installed file and patch are verified, the exact target bytes are reconstructed, and the full size and official SHA-256 are checked before installation. Missing, stale, corrupt, or mismatched patches fall back to the complete segmented package; macOS retains one verified official ZIP as its patch base. Slow-speed detection adapts to measured throughput. Size or SHA-256 mismatches discard completed ranges and try another source; installation requires successful verification. Legacy boolean update settings migrate automatically. See [delta updates](docs/patch-updates.md).
 - **Desktop UI** — a compact fixed-size frameless Electron window with version, account, download, launch, and settings flows. Reopen background tasks from home; retry failures or copy redacted details from the problem dialog. Closing a dialog keeps the task running. Cancel stops it and becomes unavailable during final commit.
 
+### Download source coverage
+
+- **BMCLAPI** — version manifest, version JSON, client, asset index, asset objects, libraries, and Forge / NeoForge installers, always with the official Mojang URL retained as a fallback.
+- **Not via BMCLAPI** — logging configuration (`piston-data.mojang.com/v1/objects`) and per-game Quilt metadata / libraries. BMCLAPI does not expose these endpoints, so the launcher uses the official addresses directly (libraries still keep the aggregate mirror as a last resort) instead of sending requests that are guaranteed to fail.
+- **Java runtimes** — supplied by Azul and Adoptium and are outside BMCLAPI's mirror scope.
+
 The automated test suite covers accounts, authentication, downloads, Java selection, launching, loaders, modpacks, settings, local version management, and launcher updates.
 
 ## Actual interface

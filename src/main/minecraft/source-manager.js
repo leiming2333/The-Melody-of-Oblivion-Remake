@@ -25,6 +25,16 @@ const DEFAULT_HEADERS = Object.freeze({
 });
 
 const DOWNLOAD_SOURCE_OPTIONS = Object.freeze(['auto', 'bmclapi', 'official']);
+// BMCLAPI 代理清单、版本 JSON、客户端、资源、依赖库和资源索引；日志配置
+// 仍位于 piston-data.mojang.com 的 /v1/objects 下，BMCLAPI 没有对应缓存。
+const BMCLAPI_MIRRORED_TYPES = Object.freeze([
+  'manifest',
+  'version-json',
+  'client',
+  'asset',
+  'library',
+  'asset-index'
+]);
 const BENCHMARK_SAMPLE_BYTES = 128 * 1024;
 const BENCHMARK_CONCURRENCY = 3;
 
@@ -110,6 +120,10 @@ function officialAssetUrl(hash) {
 }
 
 function mirrorUrl(type, context) {
+  if (!BMCLAPI_MIRRORED_TYPES.includes(type)) {
+    return undefined;
+  }
+
   switch (type) {
     case 'manifest':
       return BMCLAPI_MANIFEST;
@@ -119,10 +133,19 @@ function mirrorUrl(type, context) {
       return `${BMCLAPI_BASE}/version/${encodeURIComponent(context.versionId)}/client`;
     case 'asset':
       return `${BMCLAPI_BASE}/assets/${context.hash.slice(0, 2)}/${context.hash}`;
-    case 'library':
+    case 'library': {
+      // BMCLAPI 的 Maven 代理覆盖 Mojang、Forge、NeoForge、Fabric 与 Central，
+      // 但不覆盖 Quilt 自己的仓库；直接回退官方，避免每次都先吃一个 404。
+      if (context.originalUrl) {
+        try {
+          if (new URL(context.originalUrl).hostname.toLowerCase() === 'maven.quiltmc.org') {
+            return undefined;
+          }
+        } catch {}
+      }
       return `${BMCLAPI_BASE}/maven/${context.path.replace(/^\/+/, '')}`;
-    case 'asset-index':
-    case 'logging': {
+    }
+    case 'asset-index': {
       if (!context.originalUrl) {
         return undefined;
       }
@@ -130,7 +153,7 @@ function mirrorUrl(type, context) {
       return `${BMCLAPI_BASE}${parsed.pathname}${parsed.search}`;
     }
     default:
-      return context.originalUrl;
+      return undefined;
   }
 }
 
@@ -476,6 +499,7 @@ class MinecraftSourceManager {
 module.exports = {
   BENCHMARK_SAMPLE_BYTES,
   BMCLAPI_BASE,
+  BMCLAPI_MIRRORED_TYPES,
   DOWNLOAD_SOURCE_OPTIONS,
   LSS233_LIBRARY_BASE,
   OFFICIAL_MANIFEST,
