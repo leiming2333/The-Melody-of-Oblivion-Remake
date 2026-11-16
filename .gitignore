@@ -6,6 +6,8 @@ release*/
 pet-diagnostics/
 site-backup/
 remotion-promo/
+.screenshots/
+.trae-html-share-packages/
 .minecraft/
 
 .env

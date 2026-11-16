@@ -75,9 +75,20 @@ async function fixture(t, { holdJava = false, accountType = 'offline', microsoft
   const owner = new EventEmitter();
   Object.assign(owner, { id: 1, isDestroyed: () => false, messages: [] });
   owner.send = (channel, value) => owner.messages.push({ channel, value });
+  const launcherWindow = {
+    hideCount: 0,
+    showCount: 0,
+    hide() { this.hideCount += 1; },
+    show() { this.showCount += 1; },
+    isDestroyed: () => false
+  };
   const handlers = new Map();
   registerMinecraftIpc({ app,
     ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
+    BrowserWindow: { fromWebContents: (contents) => {
+      if (contents.isDestroyed()) throw new Error('Object has been destroyed');
+      return launcherWindow;
+    } },
     settingsStore: { getState: async () => ({ ...settings }) },
     accountStore: { getCurrentAccount: async () => ({ type: accountType, id: 'fixture-account', name: 'FixturePlayer', uuid: '0'.repeat(32) }) },
     microsoftAuth,
@@ -92,7 +103,8 @@ async function fixture(t, { holdJava = false, accountType = 'offline', microsoft
     });
     await fs.rm(root, { recursive: true, force: true });
   });
-  return { directories, children, launchers, mutations, trashed, owner, javaStarted, releaseJava,
+  return { directories, children, launchers, mutations, trashed, owner, launcherWindow, javaStarted, releaseJava,
+    invokeRawFrom: (sender, name, ...args) => handlers.get(name)({ sender }, ...args),
     invokeRaw: (name, ...args) => handlers.get(name)({ sender: owner }, ...args),
     invoke: async (name, ...args) => {
       const result = await handlers.get(name)({ sender: owner }, ...args);
@@ -107,6 +119,42 @@ async function fixture(t, { holdJava = false, accountType = 'offline', microsoft
     }
   };
 }
+
+test('launcher window hides while games run and shows after the last game exits', async (t) => {
+  const f = await fixture(t);
+  await f.invoke('minecraft:launch-version', 'fixture');
+  assert.equal(f.launcherWindow.hideCount, 1);
+  assert.equal(f.launcherWindow.showCount, 0);
+
+  await f.switchTo('system');
+  await f.invoke('minecraft:launch-version', 'fixture');
+  assert.equal(f.launcherWindow.hideCount, 1, 'the already hidden launcher is not hidden again');
+  f.children[0].finish();
+  await until(() => f.launchers[0].activeGames.size === 0);
+  assert.equal(f.launcherWindow.showCount, 0, 'the launcher stays hidden while another game runs');
+  f.children[1].finish();
+  await until(() => f.launchers[1].activeGames.size === 0);
+  assert.equal(f.launcherWindow.showCount, 1);
+});
+
+test('game exit after renderer destruction releases visibility ownership for the next renderer', async (t) => {
+  const f = await fixture(t);
+  await f.invoke('minecraft:launch-version', 'fixture');
+  t.mock.method(f.owner, 'isDestroyed', () => true);
+  const sentMessages = f.owner.messages.length;
+  f.children[0].finish();
+  await until(() => f.launchers[0].activeGames.size === 0);
+  assert.equal(f.owner.messages.length, sentMessages);
+  assert.equal(f.launcherWindow.showCount, 0);
+
+  const replacementSender = { id: 2, isDestroyed: () => false, send() {} };
+  const result = await f.invokeRawFrom(replacementSender, 'minecraft:launch-version', 'fixture');
+  assert.ok(result.pid, 'the replacement renderer can launch the same target');
+  assert.equal(f.launcherWindow.hideCount, 2, 'the exited game no longer owns hidden state');
+  f.children[1].finish();
+  await until(() => f.launchers[0].activeGames.size === 0);
+  assert.equal(f.launcherWindow.showCount, 1);
+});
 
 test('switching away and back preserves Mod and deletion protection for a running game', async (t) => {
   const f = await fixture(t);
@@ -194,6 +242,7 @@ test('launch IPC preserves missing-resource error codes and repair details witho
   assert.equal(result.__launcherTaskError.retryable, true);
   assert.ok(result.__launcherTaskError.details.missingFiles.some((name) => name.includes('资源索引')));
   assert.equal(f.children.length, 0);
+  assert.equal(f.launcherWindow.showCount, 0, 'a failed launch does not change launcher visibility');
   // The failed preparation must release its reservation for a future repair/retry.
   await assert.rejects(f.invoke('minecraft:launch-version', 'fixture'), { code: 'GAME_FILES_INCOMPLETE' });
 });

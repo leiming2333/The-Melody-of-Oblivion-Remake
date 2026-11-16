@@ -50,6 +50,10 @@ function registerMinecraftIpc({
 }) {
   const activeDownloads = new Map();
   const gameProcesses = new (require('./game-process-registry').GameProcessRegistry)();
+  // Keep the launcher hidden until every game started from it has exited. A
+  // launcher can be rebound to another game directory while an older game is
+  // still running, so this state cannot live in a directory-scoped service.
+  const hiddenGameKeys = new Set();
   let gameDirectory;
   let services;
   let serviceSettings;
@@ -478,7 +482,23 @@ function registerMinecraftIpc({
     const reservation = { exitCode: null, preparing: true };
     directoryGames.set(preparingKey, reservation);
     const sendStatus = (status) => {
-      if (!event.sender.isDestroyed()) event.sender.send('minecraft:launch-status', { ...status, gameDirectory: launchDirectory });
+      const statusWithDirectory = { ...status, gameDirectory: launchDirectory };
+      const senderDestroyed = event.sender.isDestroyed();
+      if (!senderDestroyed) event.sender.send('minecraft:launch-status', statusWithDirectory);
+
+      const launcherWindow = senderDestroyed ? undefined : BrowserWindow?.fromWebContents?.(event.sender);
+      const gameKey = `${launchDirectory}\u0000${status.targetId ?? status.profileId ?? requestedTargetId}`;
+      if (status.phase === 'running') {
+        const wasHidden = hiddenGameKeys.size > 0;
+        hiddenGameKeys.add(gameKey);
+        if (!wasHidden && launcherWindow && !launcherWindow.isDestroyed?.()) launcherWindow.hide?.();
+      } else if (status.phase === 'exited' || status.phase === 'failed') {
+        const wasRunning = hiddenGameKeys.delete(gameKey);
+        if (wasRunning && hiddenGameKeys.size === 0 && launcherWindow && !launcherWindow.isDestroyed?.()) {
+          if (launcherWindow.isMinimized?.()) launcherWindow.restore?.();
+          launcherWindow.show?.();
+        }
+      }
     };
     try {
       sendStatus({ phase: 'preparing', profileId: requestedTargetId, targetId: requestedTargetId });

@@ -116,11 +116,36 @@ h2{font-size:clamp(32px,3.3vw,48px);line-height:1.3;font-weight:800;margin-botto
 .changelog-details h3{font-size:15px;margin:0 0 7px}
 .changelog-details li p{font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;color:#526254}
 .changelog-all{font-size:12px;font-weight:700;text-decoration:underline;text-underline-offset:3px}
-.cloud-downloads{display:flex;flex-direction:column;gap:12px;padding:16px 0;border-top:1px solid #9bac9a;border-bottom:1px solid #9bac9a}
-.cloud-downloads>span{font-size:12px;font-weight:700;color:#476348}
-.cloud-download{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.cloud-download a{font-size:14px;font-weight:700;text-decoration:underline;text-underline-offset:3px}
-.cloud-download code{font-size:13px;color:#263629;user-select:all}
+.platform-icon-sprite{position:absolute;overflow:hidden;pointer-events:none}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.cloud-downloads{margin-top:48px;padding-top:30px;border-top:1px solid #9bac9a}
+.cloud-downloads-heading{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px 20px;margin-bottom:20px}
+.cloud-downloads-heading h3{font-size:23px;line-height:1.4;margin:0}
+.cloud-downloads-heading p{font-size:13px;line-height:1.6;color:#526254;margin:0}
+.cloud-provider-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:20px}
+.cloud-provider{min-width:0;padding:24px;background:#f2f5ed;border:1px solid #b7c5b1;border-radius:8px}
+.cloud-provider-heading{display:flex;align-items:center;gap:12px;min-height:44px;margin-bottom:24px}
+.cloud-provider-icon{display:grid;place-items:center;width:44px;height:44px;flex-shrink:0;background:#fff;border:1px solid #e0e7dc;border-radius:12px}
+.cloud-provider-icon svg{display:block;width:32px;height:32px}
+.cloud-provider-heading h4{font-size:18px;line-height:1.4;margin:0}
+.cloud-access-code{display:inline-flex;align-items:center;gap:4px;color:#526254;font-size:11px;line-height:1.5;white-space:nowrap}
+.cloud-provider-heading .cloud-access-code{margin-left:auto;padding:7px 9px;background:#e5ecdf;border-radius:4px}
+.cloud-access-code code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;font-weight:700;letter-spacing:.3px;color:#263629;user-select:all}
+.cloud-platform-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+.cloud-platform h5{display:flex;align-items:center;gap:9px;font-size:13px;line-height:1.4;margin:0 0 14px}
+.platform-icon{display:block;width:23px;height:23px;flex-shrink:0;color:#263629}
+.platform-icon-windows{color:#1875c9}
+.cloud-platform ul{list-style:none;display:grid;gap:8px;margin:0;padding:0}
+.cloud-download{display:flex;align-items:center;gap:12px;min-width:0}
+.cloud-download a{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:42px;padding:9px 12px;border:1px solid #c6d1bf;border-radius:4px;background:#fbfcf8;color:#304833;font-size:13px;font-weight:600;line-height:1.4;transition:background .16s,border-color .16s,box-shadow .16s}
+.cloud-link-arrow{margin-left:auto;color:#62745e;font-size:16px;line-height:1}
+.cloud-download a:hover{background:#e4eddb;border-color:#809772;box-shadow:0 2px 6px #2636290a}
+.cloud-download a:focus-visible{outline:2px solid #476348;outline-offset:3px}
+.download-note{max-width:900px;margin:20px 0 0;color:#526254;font-size:11px;line-height:1.8}
+@media(max-width:1100px){.cloud-provider-grid{grid-template-columns:minmax(0,1.7fr) minmax(0,1fr)}.cloud-provider{padding:20px}.cloud-platform-grid{gap:12px}.cloud-provider-lanzou .cloud-download{gap:8px}}
+@media(max-width:950px){.cloud-provider-grid{grid-template-columns:1fr}.cloud-provider-lanzou .cloud-platform ul{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}}
+@media(max-width:600px){.cloud-downloads{margin-top:32px;padding-top:24px}.cloud-downloads-heading{gap:6px;margin-bottom:18px}.cloud-downloads-heading h3{width:100%;font-size:21px}.cloud-provider-grid{gap:14px}.cloud-provider{padding:18px}.cloud-provider-heading{gap:10px;margin-bottom:22px;flex-wrap:wrap}.cloud-provider-heading h4{font-size:17px}.cloud-provider-heading .cloud-access-code{padding:6px 8px}.cloud-platform-grid{grid-template-columns:1fr;gap:22px}.cloud-platform h5{margin-bottom:10px}.cloud-platform ul{grid-template-columns:repeat(3,minmax(0,1fr))}.cloud-platform:nth-child(2) ul{grid-template-columns:repeat(2,minmax(0,1fr))}.cloud-download a{padding-inline:10px}.cloud-provider-lanzou .cloud-platform ul{grid-template-columns:1fr;gap:8px}.cloud-provider-lanzou .cloud-download a{max-width:55%}.cloud-provider-lanzou .cloud-access-code{margin-left:auto}}
+@media(max-width:380px){.cloud-platform ul{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .site-footer{background:#111915;border-top:1px solid #344037;padding:28px 0}
 .footer-inner{display:flex;align-items:center;gap:30px}
 .footer-inner p{font-size:11px;color:#89998b;margin:0 auto}
