@@ -44,6 +44,27 @@ function installerProcess() {
   return child;
 }
 
+test('installer network timeouts are JVM options and do not stop a processor after thirty seconds', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const child = installerProcess();
+  const installerPath = path.join('中文 缓存', 'forge-installer.jar');
+  const gameDirectory = path.join('中文 游戏', '.minecraft');
+  const pending = runJavaInstaller({ javaExecutable: 'fixture-java', installerPath, gameDirectory,
+    spawnProcess: (executable, args, options) => {
+      assert.equal(executable, 'fixture-java');
+      assert.deepEqual(args, ['-Dsun.net.client.defaultConnectTimeout=15000',
+        '-Dsun.net.client.defaultReadTimeout=30000', '-jar', installerPath, '--installClient', gameDirectory]);
+      assert.equal(options.cwd, gameDirectory);
+      assert.equal(options.windowsHide, true);
+      return child;
+    } });
+  child.stdout.emit('data', Buffer.from('Running processors\n'));
+  t.mock.timers.tick(30001);
+  assert.deepEqual(child.kills, [], 'HTTP read timeout must not become a process timeout');
+  child.emit('close', 0);
+  await pending;
+});
+
 test('installer cancellation waits for process closure and preserves all output chunks for the log', async () => {
   const child = installerProcess();
   const controller = new AbortController();

@@ -297,7 +297,13 @@ async function detectJava(explicitPath, probe = javaMajorVersion, discover = dis
 }
 
 function buildInstallerArguments(installerPath, gameDirectory) {
-  return ['-jar', installerPath, '--installClient', gameDirectory];
+  // Forge/NeoForge use Java's URL connections for downloads that remain after
+  // cache preparation. Bound each network wait without timing out processors.
+  return [
+    '-Dsun.net.client.defaultConnectTimeout=15000',
+    '-Dsun.net.client.defaultReadTimeout=30000',
+    '-jar', installerPath, '--installClient', gameDirectory
+  ];
 }
 
 async function installedJavaExecutable(gameDirectory, majorVersion, probe = javaMajorVersion,

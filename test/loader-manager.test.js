@@ -9,6 +9,7 @@ const { ensureLauncherProfiles, fetchTrustedInstallerChecksum } = require('../sr
 const { ManagedJavaRuntime } = require('../src/main/minecraft/managed-java-runtime');
 const { findJavaExecutable } = require('../src/main/minecraft/java-runtime');
 const { MinecraftSourceManager } = require('../src/main/minecraft/source-manager');
+const { zip } = require('./helpers/zip-fixture');
 
 for (const preference of ['auto', 'official']) {
   test(`loader metadata body remains covered by timeout (${preference})`, async (t) => {
@@ -74,7 +75,9 @@ async function installerFixture(t, {
   systemVersions = new Map(),
   managed = false,
   gameVersion: requestedGameVersion,
-  loaderVersion: requestedLoaderVersion
+  loaderVersion: requestedLoaderVersion,
+  installerProfile = { libraries: [] },
+  installerVersion
 } = {}) {
   const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-loader-java-test-'));
   t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
@@ -108,7 +111,10 @@ async function installerFixture(t, {
     await fs.mkdir(path.dirname(managedExecutable), { recursive: true });
     await fs.writeFile(managedExecutable, 'fixture managed runtime');
   }
-  const installerContents = Buffer.from('installer archive');
+  const installerContents = zip([
+    ['install_profile.json', JSON.stringify(installerProfile)],
+    ...(installerVersion ? [['version.json', JSON.stringify(installerVersion)]] : [])
+  ]);
   const fetchRequests = [];
   t.mock.method(globalThis, 'fetch', async (url) => {
     fetchRequests.push(String(url));
@@ -373,4 +379,85 @@ test('NeoForge 1.20.1 uses its historical official Maven coordinates and real in
   assert.equal(result.profileId, '1.20.1-forge-47.1.106');
   assert.deepEqual(fixture.installerExecutables, ['java-17']);
   assert.equal(fixture.fetchRequests[0], `${loaderArtifact('neoforge', '1.20.1', '47.1.106').officialUrl}.sha256`);
+});
+
+function installerLibrary(name, contents, url = 'https://maven.minecraftforge.net/') {
+  const [group, artifact, version] = name.split(':');
+  const artifactPath = `${group.replaceAll('.', '/')}/${artifact}/${version}/${artifact}-${version}.jar`;
+  return { name, downloads: { artifact: { path: artifactPath, url: url ? `${url}${artifactPath}` : '',
+    size: contents.length, sha1: crypto.createHash('sha1').update(contents).digest('hex') } } };
+}
+
+test('Forge prefetches processor and launch libraries with mirror fallback before starting Java', async (t) => {
+  const processorBytes = Buffer.from('processor library');
+  const launchBytes = Buffer.from('launch library');
+  const processor = installerLibrary('net.example:processor:1.0', processorBytes);
+  const launch = installerLibrary('net.example:launcher:1.0', launchBytes);
+  const fixture = await installerFixture(t, { systemVersions: new Map([['java-21', 21]]),
+    installerProfile: { libraries: [processor, installerLibrary('net.example:generated:1.0', Buffer.from('generated'), '')] },
+    installerVersion: { libraries: [processor, launch] } });
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    const value = String(url);
+    requests.push(value);
+    if (value.endsWith('.sha256')) return new Response(crypto.createHash('sha256').update(fixture.installerContents).digest('hex'));
+    if (value.endsWith('-installer.jar')) return new Response(fixture.installerContents);
+    if (value.includes('processor-1.0.jar')) return new Response(value.includes('bmclapi') ? 'corrupt mirror data' : processorBytes);
+    if (value.includes('launcher-1.0.jar')) return new Response(launchBytes);
+    throw new Error(`Unexpected request ${value}`);
+  });
+  const originalInstaller = fixture.manager.runInstaller;
+  fixture.manager.runInstaller = async (options) => {
+    for (const [library, bytes] of [[processor, processorBytes], [launch, launchBytes]]) {
+      assert.deepEqual(await fs.readFile(path.join(fixture.gameDirectory, 'libraries', library.downloads.artifact.path)), bytes);
+    }
+    return originalInstaller(options);
+  };
+  const progress = [];
+  await fixture.manager.installLoader(fixture.request, (event) => progress.push(event));
+  assert.equal(requests.filter((url) => url === processor.downloads.artifact.url).length, 1);
+  assert.ok(requests.some((url) => url.includes('bmclapi') && url.endsWith('processor-1.0.jar')));
+  assert.ok(!requests.some((url) => url.includes('generated')));
+  assert.ok(progress.some((event) => event.phase === 'downloading-loader' && event.totalFiles === 2 && event.completedFiles === 2));
+  assert.deepEqual(fixture.installerExecutables, ['java-21']);
+});
+
+test('verified installer dependencies are reused and legacy embedded/server libraries are skipped', async (t) => {
+  const contents = Buffer.from('cached library');
+  const library = installerLibrary('net.example:cached:1.0', contents);
+  const fixture = await installerFixture(t, { systemVersions: new Map([['java-21', 21]]),
+    installerProfile: { install: { path: 'net.minecraftforge:forge:legacy' }, versionInfo: { libraries: [library,
+      { name: 'net.minecraftforge:forge:legacy' },
+      { name: 'net.example:server:1.0', clientreq: false }] } } });
+  const target = path.join(fixture.gameDirectory, 'libraries', library.downloads.artifact.path);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, contents);
+  await fixture.manager.installLoader(fixture.request);
+  assert.equal(fixture.fetchRequests.length, 2, 'only installer checksum and installer archive require network access');
+  assert.deepEqual(await fs.readFile(target), contents);
+});
+
+test('cancelling an installer dependency download stops before Java runs', async (t) => {
+  const contents = Buffer.from('pending library');
+  const library = installerLibrary('net.example:pending:1.0', contents);
+  const fixture = await installerFixture(t, { systemVersions: new Map([['java-21', 21]]),
+    installerProfile: { libraries: [library] } });
+  const controller = new AbortController();
+  let started;
+  const downloading = new Promise((resolve) => { started = resolve; });
+  t.mock.method(globalThis, 'fetch', async (url, { signal }) => {
+    if (String(url).endsWith('.sha256')) return new Response(crypto.createHash('sha256').update(fixture.installerContents).digest('hex'));
+    if (String(url).endsWith('-installer.jar')) return new Response(fixture.installerContents);
+    started();
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  });
+  const pending = fixture.manager.installLoader(fixture.request, () => {}, { signal: controller.signal });
+  const rejected = assert.rejects(pending, { name: 'AbortError' });
+  await downloading;
+  controller.abort();
+  await rejected;
+  assert.deepEqual(fixture.installerExecutables, []);
+  await assert.rejects(fs.access(path.join(fixture.gameDirectory, 'versions', fixture.profileId, '.melody-installed.json')), { code: 'ENOENT' });
 });

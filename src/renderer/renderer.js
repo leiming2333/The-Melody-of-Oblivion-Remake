@@ -1267,6 +1267,8 @@ function updateDownloadProgress(progress) {
     benchmarking: '测速',
     'downloading-base': '基础游戏下载',
     'base-ready': '基础游戏就绪',
+    'verifying-installer': '校验安装器',
+    'preparing-loader': '读取加载器依赖',
     'downloading-loader': '加载器下载',
     'installing-loader': '安装加载器',
     'installing-base': '安装基础游戏',

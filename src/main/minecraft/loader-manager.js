@@ -24,6 +24,7 @@ const { runJavaInstaller } = require('./java-runtime');
 const { ManagedJavaRuntime } = require('./managed-java-runtime');
 const { createGameLog } = require('./game-log');
 const { ensureLauncherProfiles, fetchTrustedInstallerChecksum, verifyInstallerChecksum } = require('./installer-support');
+const { installerLibraryTasks } = require('./installer-dependencies');
 
 const FABRIC_META_BASES = Object.freeze({
   bmclapi: `${BMCLAPI_BASE}/fabric-meta/v2`,
@@ -551,6 +552,28 @@ class MinecraftLoaderManager {
     });
     await verifyInstallerChecksum(installerPath, checksum, signal);
     progressTracker.complete(installerTask, installerResult);
+    onProgress({ phase: 'preparing-loader', loaderType, message: '正在读取加载器依赖清单…', logPath: log.filePath });
+    const dependencyTasks = await installerLibraryTasks(
+      installerPath, this.gameDirectory, this.sourceManager, preferredSourceId, signal
+    );
+    log.append(`[launcher] Preparing ${dependencyTasks.length} installer libraries with download source fallback`);
+    const dependencyProgress = createDownloadProgressTracker({
+      tasks: dependencyTasks,
+      onProgress,
+      phase: 'downloading-loader',
+      baseProgress: { loaderType, logPath: log.filePath },
+      initialSourceId: preferredSourceId
+    });
+    dependencyProgress.start(`正在检查并下载 ${dependencyTasks.length} 个加载器依赖文件…`);
+    await runPool(dependencyTasks, this.concurrency, async (task, _index, poolSignal) => {
+      const downloaded = await downloadFile({
+        ...task,
+        signal: poolSignal,
+        segmentConcurrency: this.segmentConcurrency,
+        ...dependencyProgress.hooks(task)
+      });
+      dependencyProgress.complete(task, downloaded);
+    }, signal);
     onProgress({
       phase: 'installing-loader',
       message: '正在查找 Java 运行环境…',
@@ -574,6 +597,8 @@ class MinecraftLoaderManager {
     // Check again immediately before executing, including reused cached JARs.
     await verifyInstallerChecksum(installerPath, checksum, signal);
     log.append(`[launcher] Java: ${javaExecutable}; loader: ${loaderType} ${loaderVersion}; Minecraft: ${gameVersion}`);
+    onProgress({ phase: 'installing-loader', loaderType, message: '依赖文件已就绪，正在运行加载器安装器…',
+      completedFiles: 1, totalFiles: 2, logPath: log.filePath });
     let lastMessageAt = 0;
     await this.runInstaller({
       javaExecutable,

@@ -178,6 +178,44 @@ async function readModpackManifest(archivePath, limits = {}, { signal } = {}) {
   });
 }
 
+// Read the small manifests inside a verified installer without unpacking its
+// embedded libraries. The budget covers all requested JSON entries together.
+async function readArchiveJsonEntries(archivePath, entryNames, {
+  signal, maximumBytes = DEFAULT_LIMITS.maxManifestBytes
+} = {}) {
+  throwIfAborted(signal);
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+    throw new Error('压缩包 JSON 读取大小限制无效');
+  }
+  if (!Array.isArray(entryNames) || entryNames.some((name) => typeof name !== 'string'
+      || !name || archiveEntryPath(name) !== name)) {
+    throw new Error('压缩包 JSON 条目名称无效');
+  }
+  const requested = new Set(entryNames);
+  return withValidatedArchive(archivePath, {}, signal, async (archive) => {
+    const selected = archive.entries.filter((entry) => requested.has(entry.name));
+    let totalBytes = 0;
+    for (const entry of selected) {
+      totalBytes += entry.uncompressedSize;
+      if (entry.compressedSize > maximumBytes || entry.uncompressedSize > maximumBytes
+          || totalBytes > maximumBytes) {
+        throw new Error(`压缩包 JSON 条目过大：${entry.name}`);
+      }
+    }
+    const values = [];
+    for (const entry of selected) {
+      const content = await readEntry(archive, entry, maximumBytes, signal);
+      try {
+        values.push([entry.name, JSON.parse(content.toString('utf8'))]);
+      } catch (error) {
+        if (error instanceof SyntaxError) throw new Error(`压缩包 JSON 条目已损坏：${entry.name}`, { cause: error });
+        throw error;
+      }
+    }
+    return Object.fromEntries(values);
+  });
+}
+
 async function extractModpackArchive(archivePath, destination, { signal, limits = {}, onProgress = () => {} } = {}) {
   return withValidatedArchive(archivePath, limits, signal, async (archive) => {
     const manifest = selectManifest(archive.entries);
@@ -202,4 +240,4 @@ async function extractModpackArchive(archivePath, destination, { signal, limits 
   });
 }
 
-module.exports = { readModpackManifest, extractModpackArchive };
+module.exports = { readModpackManifest, extractModpackArchive, readArchiveJsonEntries };

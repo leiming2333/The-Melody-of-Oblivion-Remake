@@ -1268,6 +1268,7 @@ test('加载器启动配置 ID 和 Java 安装参数正确', () => {
   );
   assert.deepEqual(
     buildInstallerArguments('C:\\cache\\forge-installer.jar', 'C:\\.minecraft'),
-    ['-jar', 'C:\\cache\\forge-installer.jar', '--installClient', 'C:\\.minecraft']
+    ['-Dsun.net.client.defaultConnectTimeout=15000', '-Dsun.net.client.defaultReadTimeout=30000',
+      '-jar', 'C:\\cache\\forge-installer.jar', '--installClient', 'C:\\.minecraft']
   );
 });
