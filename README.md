@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#平台支持与使用前提)
-[![Source](https://img.shields.io/badge/Source-v1.9.7-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.9.8-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.9.7`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://melodyoblivion.xyz/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
+> 当前源码版本为 `1.9.8`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://melodyoblivion.xyz/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
 
 ## 项目简介
 
@@ -34,6 +34,7 @@
 
 ## 已实现功能
 
+- **启动准备**：先显示准备页，检查必要启动器资源，补建缺失的配置、备份与游戏目录；设置、账户和本地游戏列表读取成功后进入主页。失败时显示详情并支持重试，本地游戏目录不可写时可改用系统游戏目录。
 - **游戏版本**：浏览 Mojang 版本清单、识别本地安装、下载原版游戏、验证所需文件，并将可移除的配置移动到回收站。
 - **模组加载器**：通过统一流程查询并安装 Fabric、Forge、NeoForge 与 Quilt。新装 Fabric 时可在确认框中选择与 Minecraft 版本兼容的 Fabric API，也可跳过；所选 API 经摘要校验后安装到该版本使用的 `mods` 目录。
 - **可靠下载**：在 Mojang 官方源与 BMCLAPI 之间选择；自动模式会测速；支持任务并发、大文件 HTTP Range 分段、SHA-1 校验、取消下载及失败后切换来源重试。
@@ -65,7 +66,7 @@
 ## 平台支持与使用前提
 
 - **平台覆盖**：Windows x64 / ia32 / ARM64、Linux x64 / ARM64 / ARMv7、macOS x64 / ARM64 均提供公开构建与 SHA-256 校验。除 Linux ARMv7 外，每个目标都由对应的原生 runner 执行启动与升级验收，未通过不发布。ARMv7 目前只做构建与文件校验：GitHub 不提供 32 位 ARM runner，且 AppImage 运行时在 QEMU 用户态下无法执行，因此该产物尚未完成启动验收。
-- **更新替换**：更新下载完成后点击「重启并安装」才替换程序。Windows 保留当前 EXE 名称；macOS 使用系统 `ditto` 校验并替换 `.app`，在只读介质、目录不可写或 App Translocation 环境下提供 ZIP 手动替换入口；Linux 替换 AppImage。辅助进程握手成功后才退出旧程序，新版窗口、预加载桥接和本地界面加载完成才确认更新；未确认时保留备份并提供重试或恢复入口。
+- **更新替换**：更新下载完成后点击「重启并安装」才替换程序。Windows 保留当前 EXE 名称；macOS 使用系统 `ditto` 校验并替换 `.app`，在只读介质、目录不可写或 App Translocation 环境下提供 ZIP 手动替换入口；Linux 替换 AppImage。辅助进程握手成功后才退出旧程序，新版窗口显示、预加载桥接和本地界面加载完成，且文件准备及设置、账户、本地游戏列表读取成功后才确认更新；未确认时保留备份并提供重试或恢复入口。
 - **更新记录与清理**：每个安装路径独立记录更新状态，确认成功后保留最近一份回退版本，只清理该记录拥有的旧文件。无记录的 Windows 历史 EXE 和 `.old` 可在设置中勾选后移入回收站。游戏数据不在更新清理范围内。
 - **LittleSkin 验证服务**：Yggdrasil 仅在客户端和服务端使用相同验证服务时生效；LittleSkin 账户不能替代正版账户，也不会获得进入正版验证服务器的权限。参见 [LittleSkin 用户使用手册](https://manual.littleskin.cn/yggdrasil/)。
 - **CurseForge 元数据**：安装依赖 CurseTools 提供的文件元数据，或配置 `CURSEFORGE_API_KEY`。临时查询失败会自动重试，已解析的元数据随补齐会话保存，重启后无需重新查询；缺少可信摘要时不会用本地文件顶替校验，已下架文件仍需从整合包发布页获取。
@@ -82,7 +83,7 @@
 
 ## 从源码运行
 
-Windows 提供单文件便携 EXE，无需安装，打包文件名不带版本号（版本仍保留在程序及 Release 标签中）。首次运行将 Electron 和程序文件释放到 EXE 旁的 `Melody/runtime/` 子目录，后续复用已完成的运行目录。各构建按内容指纹独立存放，并发释放与清理由互斥锁协调；正在运行的版本不会被清理。窗口准备完成后在后台保留当前版本和最近一个旧版本，清理其余未使用的运行目录及超过一天的解压残留。若 EXE 旁无法写入，回退到 `%LOCALAPPDATA%\MelodyOfOblivion\runtime`。账号和设置仍保存在原用户数据目录；旧版的 `启动器运行文件` 不会自动迁移或删除，关闭所有旧版启动器后可手动删除。关闭所有启动器后可以删除运行目录，下次启动会重新释放。
+Windows 提供单文件便携 EXE，无需安装，打包文件名不带版本号（版本仍保留在程序及 Release 标签中）。首次运行将 Electron 和程序文件释放到 EXE 旁的 `Melody/runtime/` 子目录，后续复用已完成的运行目录。各构建按内容指纹独立存放，并发释放与清理由互斥锁协调；正在运行的版本不会被清理。启动准备成功、主页就绪后，在后台保留当前版本和最近一个旧版本，清理其余未使用的运行目录及超过一天的解压残留。若 EXE 旁无法写入，回退到 `%LOCALAPPDATA%\MelodyOfOblivion\runtime`。账号和设置仍保存在原用户数据目录；旧版的 `启动器运行文件` 不会自动迁移或删除，关闭所有旧版启动器后可手动删除。关闭所有启动器后可以删除运行目录，下次启动会重新释放。
 
 运行发布包无需安装 Node.js，Java 仅用于运行 Minecraft。
 
@@ -93,11 +94,15 @@ npm run dev
 
 系统目录模式使用操作系统默认的 Minecraft 应用数据目录（Windows 为 `%APPDATA%\.minecraft`）。本地目录模式使用启动器 EXE 旁的 `.minecraft`，不会因运行文件子目录或缓存回退而改变。整合包实例存放在所选 `.minecraft\melody-instances` 下。
 
-Java 检测结果保存在用户数据目录的 `java-cache.json`，可执行文件或运行时文件变化时重新探测，设置中的「重新检测」会绕过缓存。首页先绘制，再后台读取账户、设置、游戏版本与检测 Java；缺少 Java 时以启动按钮状态与轻提示引导，不自动弹出阻塞对话框。版本列表会沿继承链解析每个版本的 Java 需求，首页据此在下载完成前就能提示 Java 是否就绪。
+窗口打开后先显示准备页：检查必要的界面、预加载和模块资源是否存在、非空且可读，在用户数据目录补建缺失的 `settings.json`、`accounts.json` 及其 `.bak`，并建立日志目录和所选游戏目录下的版本、依赖、资源、实例、托管 Java 与缓存目录。已有配置保留；主配置缺失或损坏时尝试恢复有效备份，无有效备份的损坏配置会阻止进入主页。准备页每次启动都会重新检查，后续缺失的目录也会补建。Windows 便携 EXE 的运行文件释放发生在 Electron 启动之前，准备页在释放完成后显示。
+
+设置、账户和本地游戏列表读取成功后，启动器自动进入主页；失败时停留在准备页，可查看错误详情并点击「重新准备」。必要的启动器资源缺失时需重新下载完整启动器；本地游戏目录无法写入时可点击「改用系统游戏目录」，保存选择后重试。准备流程不下载 Minecraft 或 Java，也不执行游戏文件完整校验；游戏文件补全见下文「诊断与安装重试」。
+
+Java 检测在主页就绪后于后台进行，结果保存在用户数据目录的 `java-cache.json`，可执行文件或运行时文件变化时重新探测，设置中的「重新检测」会绕过缓存。缺少 Java 时以启动按钮状态与轻提示引导，不自动弹出阻塞对话框。版本列表会沿继承链解析每个版本的 Java 需求，首页据此在下载完成前就能提示 Java 是否就绪。
 
 下载、加载器、整合包、Java 下载和游戏启动服务按需加载，并在当前游戏目录内复用；切换目录后创建新的服务。首页读取本地版本和 Java 检测使用轻量模块，不会提前加载下载或启动核心。游戏原生库按归档内容与排除规则缓存在 `.minecraft\launcher-cache\native-archives`，每次复用会校验解压文件；归档变化或缓存损坏时重新解压。每个游戏进程使用独立副本，退出只清理该进程的副本，不删除共享缓存。缓存保留旧代，关闭游戏后可手动清理。
 
-启动耗时记录在用户数据目录的 `logs\startup-latest.json`，包含主进程入口、Electron 就绪、窗口显示、界面绘制和后台初始化阶段。记录从主进程开始执行时计时，无法测量便携 EXE 在启动 Electron 前的解压耗时；文件只保留最近一次记录，不包含账户凭据。
+启动耗时记录在用户数据目录的 `logs\startup-latest.json`，包含主进程入口、Electron 就绪、窗口显示、准备页绘制、设置 / 账户 / 本地版本读取、主页就绪（`core-ready`）和后台 Java 检测阶段。记录从主进程开始执行时计时，无法测量便携 EXE 在启动 Electron 前的解压耗时；文件只保留最近一次记录，不包含账户凭据。
 
 ## 开发命令
 
@@ -107,7 +112,7 @@ Java 检测结果保存在用户数据目录的 `java-cache.json`，可执行文
 | `npm run check` | 检查 JavaScript 语法及未使用变量、不可达分支、危险 finally 等错误 |
 | `npm run lint` | 运行完整 ESLint 检查 |
 | `npm test` | 运行 Node.js 自动化测试 |
-| `npm run smoke` | 使用临时用户数据加载 Electron 窗口并退出 |
+| `npm run smoke` | 在全新的临时用户数据与游戏目录中运行 Electron，确认准备完成、配置可读且主页可操作后退出并清理 |
 | `npm run verify:toolchain` | 验证固定 Node、npm、Electron 和 electron-builder 版本 |
 | `npm run build -- --target windows-x64` | 使用统一入口构建单一目标，默认不发布 |
 | `npm run build:win` | 构建 Windows 持久运行目录便携 EXE |
@@ -115,6 +120,16 @@ Java 检测结果保存在用户数据目录的 `java-cache.json`，可执行文
 | `npm run build:mac` | 构建 macOS zip 包 |
 
 持续检查、发布门槛与各平台启动验证范围见[持续检查与发布验证](docs/ci-release-validation.md)。
+
+## 开发与贡献
+
+欢迎通过 Issue 反馈问题、提出建议，或提交 PR 改进代码与文档。
+
+- [开发指南](docs/development.md)：环境准备、代码入口、常见修改示例与检查命令。
+- [开发与回归用例](docs/development-cases.md)：按功能列出的操作步骤、预期结果与自动化测试对应。
+- [贡献指南](CONTRIBUTING.md)：Fork、分支、PR 提交与评审流程。
+
+仓库提供 Bug／功能建议表单和 PR 模板；提交 PR 后会按改动范围运行现有自动检查与打包验证。
 
 ## 仓库结构
 

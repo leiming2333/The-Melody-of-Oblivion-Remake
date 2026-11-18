@@ -1,6 +1,6 @@
 {
   "name": "melody-of-oblivion-launcher",
-  "version": "1.9.7",
+  "version": "1.9.8",
   "description": "我的世界忘却的旋律启动器",
   "author": {
     "name": "leiming2333",
@@ -18,7 +18,7 @@
     "build:mac": "node scripts/build.cjs --mac",
     "build:targets": "node scripts/release-targets.cjs",
     "verify:toolchain": "node scripts/toolchain.cjs",
-    "smoke": "electron . --smoke-test",
+    "smoke": "node scripts/smoke.cjs",
     "check": "node scripts/check.js",
     "lint": "eslint site.js website-download-auth.mjs website-downloader.mjs cloudflare src api scripts test eslint.config.js",
     "benchmark:website": "node --dns-result-order=ipv4first scripts/benchmark-website-downloads.mjs",

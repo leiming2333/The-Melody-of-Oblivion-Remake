@@ -9,7 +9,8 @@ function fixture(importModFile = async () => {}) {
   let drop;
   const messages = [], packs = [];
   const context = {
-    document: { addEventListener: (_event, callback) => { drop = callback; } },
+    document: { addEventListener: (_event, callback) => { drop = callback; },
+      querySelector: () => ({ hidden: true }) },
     modpackDropOverlay: {}, modpackDragDepth: 1,
     filesApi: { getPath: file => file.path }, minecraft: { importModFile },
     versionSelect: { value: 'instance-selected' },
@@ -58,4 +59,14 @@ test('jar drops require a selected game, reject overlapping tasks, and preserve 
   assert.equal(f.packs.length, 1);
   await f.drop(['bad.exe']);
   assert.match(f.messages.at(-1), /请拖入 Mod/);
+});
+
+test('file drops cannot start imports before launcher preparation finishes', async () => {
+  const calls = [];
+  const f = fixture(async (...args) => calls.push(args));
+  f.context.document.querySelector = () => ({ hidden: false });
+  await f.drop(['mod.jar']);
+  await f.drop(['pack.mrpack']);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(f.packs, []);
 });

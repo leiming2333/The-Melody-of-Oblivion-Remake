@@ -1,0 +1,60 @@
+name: 错误报告 / Bug report
+description: 报告启动器或官网的问题，提供可复现的信息。
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索已有 Issue。安全漏洞请查看仓库 Security 页面，优先使用已启用的私密报告入口；不要在公开 Issue 中发布令牌或漏洞利用细节。
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / Version
+      description: 填写启动器版本；源码运行请提供提交号，官网问题请提供页面 URL。
+      placeholder: 例如 v1.9.7，或源码提交 abc1234
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境 / Environment
+      description: 系统版本、CPU 架构；官网问题请补充浏览器版本，游戏问题请补充 Minecraft、Java 和加载器版本。
+      placeholder: 例如 Windows 11 x64；Minecraft 1.21.1；Java 21；Fabric 版本
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      description: 从打开程序或页面开始，说明具体操作、设置和使用的版本；可附最小示例的公开链接。
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 点击……后出现……
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果 / Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果 / Actual behavior
+      description: 写明报错文字、出现频率，以及重试或重启后是否仍可复现。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 日志、截图或补充信息 / Evidence
+      description: 可粘贴脱敏后的错误详情或附截图。请删去令牌、设备代码、邮箱、私人路径和服务器地址；不要上传账号数据文件。
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 信息检查 / Privacy check
+      options:
+        - label: 我已检查附件和内容，没有包含账号凭据或其他敏感信息。
+          required: true

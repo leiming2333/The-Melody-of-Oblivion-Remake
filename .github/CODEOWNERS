@@ -1,0 +1,3 @@
+# Automatically request the repository maintainer on non-draft pull requests.
+# Required approvals are configured separately in GitHub branch protection/rulesets.
+* @leiming2333

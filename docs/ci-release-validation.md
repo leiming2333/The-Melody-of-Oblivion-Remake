@@ -31,13 +31,17 @@ runner 标签不是不可变镜像；每个构建另记实际 `ImageOS`、`Image
 
 ## 启动与升级验收范围
 
-启动检查调用最终包的 `--smoke-test`，必须成功退出并生成平台、架构、包内版本相符的报告；仅零退出码不算通过。检查窗口、preload、renderer 和延迟加载模块，不验证真实账户登录、远程游戏下载或 Java 游戏启动。
+启动检查调用最终包的 `--smoke-test`，必须成功退出并生成 `ok:true`、`startupReady:true` 且平台、架构、包内版本相符的报告；仅零退出码或页面加载完成不算通过。每次使用全新的隔离用户数据和游戏目录，检查窗口、preload、renderer 和四个延迟加载界面模块，并等待文件准备成功、准备页关闭、主页区域恢复交互，再读取新建的 `settings.json` 与 `accounts.json` 确认 JSON 可解析。准备失败或超时会使检查失败。该检查不验证真实账户登录、远程游戏下载或 Java 游戏启动。
+
+源码检查 `npm run smoke` 通过 `scripts/smoke.cjs` 调用同一验收程序，允许源码运行时的 `packaged:false`，仍要求 `startupReady:true`。源码与最终包检查均由验收程序在应用退出后清理临时目录，避免 Windows 下 Chromium 文件仍被占用。
 
 原生升级检查额外构建隔离的旧测试包：同一源码通过打包元数据设为 `0.0.0`，输出到 `release/upgrade-fixtures/<目标>/`，不进入发布集合。先实际启动旧测试包，再用真实更新管理器和辅助进程安装当前包，实际启动新版后确认健康；再升级一次检查唯一备份、最近一代保留与更旧受管备份清理。它验证不同包内版本和真实替换流程，不代表与任意历史公开版本兼容。
 
 ARMv7 曾尝试用 QEMU 用户态替代原生验收：`ubuntu-24.04` 上注册 binfmt 后，armhf 容器可以执行自身工具链，但 AppImage 运行时（ELF 带尾部 squashfs）在 qemu-user 下始终返回 `ENOEXEC`，因此该路线暂时不纳入发布门槛，armv7 产物只做构建与校验。`verify-packaged.cjs` 与 `verify-upgrade.cjs` 保留 `--emulated <机制>` 参数，报告写入 `native:false` 与 `emulatedBy`，汇总时记为 `passed-emulated`；重新启用时不需要改脚本。待 AppImage 运行时可在模拟环境中执行后，把 `linux-armv7l` 的 `smokeRunner` 与 `emulatedBy` 加回 `scripts/release-targets.cjs` 即可恢复门槛。
 
-测试使用隔离安装目录和用户数据目录。健康确认由测试程序在新版启动报告成功后调用，实际产品则由主进程检测新版窗口显示、主框架本地页面加载和预加载桥接就绪。Java、账户与网络后台检查不阻挡健康确认。两类 macOS runner 还实际撤销隔离应用目录的写权限，要求系统拒绝写入后保留已校验 ZIP、降级为手动替换入口，且不退出或启动辅助进程；报告必须包含 `manualPermissionFallbackPassed:true`。App Translocation 降级、Windows 文件锁与辅助进程错误、回滚错误、不同安装路径隔离等故障分支另由事务测试覆盖。
+测试使用隔离安装目录和用户数据目录。健康确认由测试程序在新版启动报告成功后调用；实际产品要求新版窗口显示、主框架本地页面加载、预加载桥接就绪、文件准备成功，且设置、账户和本地游戏列表读取成功后，才允许渲染进程报告就绪。后台 Java 检测、在线皮肤刷新和网络更新检查不阻挡健康确认。开发模式和 smoke 模式不自动确认更新健康。两类 macOS runner 还实际撤销隔离应用目录的写权限，要求系统拒绝写入后保留已校验 ZIP、降级为手动替换入口，且不退出或启动辅助进程；报告必须包含 `manualPermissionFallbackPassed:true`。App Translocation 降级、Windows 文件锁与辅助进程错误、回滚错误、不同安装路径隔离等故障分支另由事务测试覆盖。
+
+启动准备回归测试覆盖全新目录的配置与备份生成、已有配置保留、缺失配置恢复、缺失目录重建、资源缺失 / 空文件 / 目录占位、不可恢复的配置损坏、并发准备及失败重试。界面测试覆盖准备页先显示、必需读取失败时主页保持禁用，以及本地游戏目录不可写时改用系统目录后重试成功。相关测试位于 `test/startup-preparation.test.js`、`test/renderer.test.js`、`test/main-lazy-services.test.js`、`test/mod-drop.test.js` 与 `test/packaged-smoke.test.js`。
 
 ## 公开发布与对象存储
 
@@ -55,4 +59,4 @@ npm run smoke
 npm run build -- --target windows-x64
 ```
 
-在 Windows 实际运行便携包检查首次释放、再次复用、活动版本保护，再运行 `scripts/verify-upgrade.cjs` 验证隔离双版本升级。界面在实际 `760×466` 窗口检查导入确认、缺失文件列表、取消状态、错误建议及更新恢复入口。发布验收记录应附源码提交、CI 链接、八类产物、校验清单和原生报告，并清楚列出未执行或失败的项目。
+在 Windows 实际运行便携包检查首次释放、再次复用、活动版本保护，再运行 `scripts/verify-upgrade.cjs` 验证隔离双版本升级。界面在实际 `760×466` 窗口检查首次准备、准备失败详情、重试及系统游戏目录切换，再检查导入确认、缺失文件列表、取消状态、错误建议及更新恢复入口。发布验收记录应附源码提交、CI 链接、八类产物、校验清单和原生报告，并清楚列出未执行或失败的项目。

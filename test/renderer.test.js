@@ -175,18 +175,32 @@ test('clearing the game selection during a loader request clears the loading sta
   assert.equal(context.downloadVersionButton.disabled, true);
 });
 
-test('startup paints before background initialization and missing Java stays nonmodal', async () => {
+function startupFixture(overrides = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
   const frames = [];
-  const timers = [];
   const events = [];
   let showWindow;
+  const nodes = Object.fromEntries([
+    '#startupScreen', '#startupTitle', '#startupMessage', '#startupProgress', '#startupRetryButton', '#startupSystemDirectoryButton',
+    '#startupErrorDetails', '#startupError', '#launcherStage', '.launcher-app'
+  ].map((id) => [id, {
+    dataset: { state: 'preparing' }, hidden: false, inert: true,
+    setAttribute(name, value) { this[name] = value; },
+    removeAttribute(name) { delete this[name]; },
+    addEventListener(name, callback) { this[name] = callback; },
+    classList: { remove: (name) => events.push(`remove:${name}`) }
+  }]));
   const context = {
     requestAnimationFrame: (callback) => frames.push(callback),
-    setTimeout: (callback) => timers.push(callback),
-    environment: { diagnostics: {
+    document: { querySelector: (selector) => nodes[selector] },
+    environment: { startup: {
+      prepare: async () => { events.push('files-prepared'); return { ready: true }; },
+      onProgress: () => () => events.push('unsubscribe-progress')
+    }, diagnostics: {
       markStartup: (stage) => events.push(stage),
-      whenWindowShown: () => new Promise((resolve) => { showWindow = resolve; })
+      whenWindowShown: () => new Promise((resolve) => { showWindow = resolve; }),
+      rendererReady: async () => events.push('renderer-ready'),
+      reportError: (message) => events.push(message)
     } },
     loadAccountState: async () => events.push('accounts-start'),
     loadLocalProfiles: async () => events.push('profiles-start'),
@@ -198,26 +212,136 @@ test('startup paints before background initialization and missing Java stays non
     JAVA_CHECK_SKIP_KEY: 'java-skip',
     showToast: (text) => events.push(text),
     readableError: (error) => error.message,
-    updaterApi: undefined
+    updaterApi: undefined,
+    ...overrides
   };
   vm.createContext(context);
-  vm.runInContext(source.slice(source.indexOf('async function performJavaCheck()'),
-    source.indexOf('// Paint the home screen')), context);
-  vm.runInContext(source.slice(source.indexOf('requestAnimationFrame(() => requestAnimationFrame(async () =>')), context);
-  assert.deepEqual(events, []);
-  frames.shift()();
-  assert.deepEqual(events, []);
-  const painted = frames.shift()();
-  assert.deepEqual(events, ['renderer-painted']);
-  assert.equal(timers.length, 0);
-  showWindow();
-  await painted;
-  timers.shift()();
+  vm.runInContext(source.slice(source.indexOf('async function performJavaCheck()')), context);
+  return { context, events, frames, nodes, showWindow: () => showWindow() };
+}
+
+test('startup paints preparation before file access and enters home only after required reads finish', async () => {
+  let finishFiles, finishProfiles;
+  const f = startupFixture({ loadLocalProfiles: () => new Promise((resolve) => { finishProfiles = resolve; }) });
+  f.context.environment.startup.prepare = () => new Promise((resolve) => { finishFiles = resolve; });
+  assert.deepEqual(f.events, []);
+  f.frames.shift()();
+  assert.deepEqual(f.events, []);
+  const painted = f.frames.shift()();
+  assert.deepEqual(f.events, ['renderer-painted']);
+  assert.equal(finishFiles, undefined, 'preparation must wait until the window is shown');
+  f.showWindow();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.ok(events.indexOf('renderer-painted') < events.indexOf('java-start'));
-  assert.ok(events.some((event) => event.includes('未检测到 Java')));
-  assert.ok(events.includes('profiles-loaded'));
-  assert.ok(events.includes('java-detected'));
+  assert.equal(f.nodes['#launcherStage'].inert, true);
+  finishFiles({ ready: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.nodes['#startupScreen'].hidden, false);
+  assert.equal(f.events.includes('renderer-ready'), false);
+  assert.equal(f.events.includes('java-start'), false);
+  finishProfiles();
+  await painted;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.nodes['#startupScreen'].dataset.state, 'ready');
+  assert.equal(f.nodes['#startupScreen'].hidden, true);
+  assert.equal(f.nodes['#launcherStage'].inert, false);
+  assert.equal(f.nodes['#startupProgress'].value, 100);
+  assert.ok(f.events.indexOf('profiles-loaded') < f.events.indexOf('renderer-ready'));
+  assert.ok(f.events.indexOf('renderer-ready') < f.events.indexOf('core-ready'));
+  assert.ok(f.events.indexOf('core-ready') < f.events.indexOf('java-start'));
+  assert.ok(f.events.some((event) => event.includes('未检测到 Java')));
+  assert.ok(f.events.includes('java-detected'));
+  assert.ok(f.events.includes('unsubscribe-progress'));
+});
+
+test('a missing application file leaves home blocked and retry enters home after the file is repaired', async () => {
+  const f = startupFixture();
+  f.context.environment.startup.prepare = async () => { throw new Error('启动器文件缺失：modpack-ui.mjs'); };
+  await f.context.prepareLauncher();
+  assert.equal(f.nodes['#startupScreen'].dataset.state, 'error');
+  assert.equal(f.nodes['#startupScreen'].hidden, false);
+  assert.equal(f.nodes['#launcherStage'].inert, true);
+  assert.equal(f.nodes['#startupRetryButton'].hidden, false);
+  assert.match(f.nodes['#startupError'].textContent, /modpack-ui.mjs/);
+  assert.equal(f.events.includes('accounts-start'), false);
+  assert.equal(f.events.includes('core-ready'), false);
+  f.context.environment.startup.prepare = async () => ({ ready: true });
+  await f.context.prepareLauncher();
+  assert.equal(f.nodes['#startupScreen'].hidden, true);
+  assert.equal(f.nodes['#startupError'].textContent, '');
+  assert.equal(f.nodes['#startupRetryButton'].hidden, true);
+  assert.equal(f.events.filter((event) => event === 'core-ready').length, 1);
+});
+
+test('settings, account and profile read failures cannot report startup ready', async () => {
+  for (const name of ['loadLauncherSettings', 'loadAccountState', 'loadLocalProfiles']) {
+    const f = startupFixture({ [name]: async () => { throw new Error(`${name} failed`); } });
+    await f.context.prepareLauncher();
+    assert.equal(f.nodes['#startupScreen'].dataset.state, 'error', name);
+    assert.equal(f.nodes['#launcherStage'].inert, true, name);
+    assert.equal(f.events.includes('renderer-ready'), false, name);
+    assert.equal(f.events.includes('core-ready'), false, name);
+    assert.equal(f.events.includes('java-start'), false, name);
+    assert.match(f.nodes['#startupError'].textContent, /failed/);
+  }
+});
+
+test('a read-only local game directory can be changed to the system directory from the preparation page', async () => {
+  const updates = [];
+  const f = startupFixture({ settingsApi: { update: async (patch) => updates.push(patch.gameDirectoryMode) } });
+  f.context.environment.startup.prepare = async () => {
+    if (!updates.length) throw Object.assign(new Error('local directory is read only'), {
+      code: 'EACCES', phase: 'preparing-directories', details: { gameDirectoryMode: 'local' }
+    });
+    return { ready: true };
+  };
+  await f.context.prepareLauncher();
+  assert.equal(f.nodes['#startupSystemDirectoryButton'].hidden, false);
+  assert.equal(f.nodes['#launcherStage'].inert, true);
+  await f.nodes['#startupSystemDirectoryButton'].click();
+  assert.deepEqual(updates, ['system']);
+  assert.equal(f.nodes['#startupScreen'].hidden, true);
+  assert.equal(f.nodes['#launcherStage'].inert, false);
+});
+
+test('duplicate preparation requests share the active attempt and completed startup is not rerun', async () => {
+  let finish, calls = 0;
+  const f = startupFixture();
+  f.context.environment.startup.prepare = () => { calls++; return new Promise((resolve) => { finish = resolve; }); };
+  const first = f.context.prepareLauncher();
+  await f.context.prepareLauncher();
+  assert.equal(calls, 1);
+  finish({ ready: true });
+  await first;
+  await f.context.prepareLauncher();
+  assert.equal(calls, 1);
+});
+
+test('initial HTML blocks home controls while displaying an accessible preparation page', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../src/renderer/index.html'), 'utf8');
+  assert.match(html, /class="launcher-app is-preparing"/);
+  assert.match(html, /id="startupScreen"[^>]*data-state="preparing"[^>]*aria-busy="true"/);
+  assert.match(html, /id="launcherStage"[^>]*\sinert\s+aria-hidden="true"/);
+  assert.match(html, /id="startupMessage"[^>]*aria-live="polite"/);
+});
+
+test('startup reads propagate configuration errors while later manual refreshes can show a toast', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  for (const [name, api, end] of [
+    ['loadAccountState', 'accountsApi', 'function applySettingsToForm()'],
+    ['loadLauncherSettings', 'settingsApi', 'async function addOfflineAccount()']
+  ]) {
+    const notices = [];
+    const placeholder = { classList: { remove() {} }, setAttribute() {} };
+    const context = { [api]: { getState: async () => { throw new Error('配置读取失败'); } },
+      accountName: placeholder, sourceHint: placeholder,
+      readableError: (error) => error.message, showToast: (message) => notices.push(message) };
+    vm.createContext(context);
+    vm.runInContext(source.slice(source.indexOf(`async function ${name}(`), source.indexOf(end)), context);
+    await assert.rejects(context[name]({ strict: true }), /配置读取失败/);
+    assert.deepEqual(notices, []);
+    await context[name]();
+    assert.equal(notices.length, 1);
+  }
 });
 
 test('a game crash displays the saved diagnostic log while normal exit stays nonmodal', () => {

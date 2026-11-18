@@ -29,7 +29,7 @@ async function verify(binary, args = [], {
       });
     });
     const result = JSON.parse(await fs.readFile(resultFile, 'utf8'));
-    if (!result.ok || (requirePackaged && !result.packaged) || result.platform !== process.platform
+    if (!result.ok || result.startupReady !== true || (requirePackaged && !result.packaged) || result.platform !== process.platform
       || result.arch !== runtimeArch(expectedArch)
       || (expectedVersion && result.version !== expectedVersion)) {
       throw new Error('Smoke report does not match the expected packaged application');

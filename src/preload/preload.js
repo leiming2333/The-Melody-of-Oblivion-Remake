@@ -8,6 +8,14 @@ async function invokeTask(channel, ...args) {
 }
 
 contextBridge.exposeInMainWorld('launcherEnvironment', {
+  startup: Object.freeze({
+    prepare: () => invokeTask('startup:prepare'),
+    onProgress: (callback) => {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on('startup:progress', listener);
+      return () => ipcRenderer.removeListener('startup:progress', listener);
+    }
+  }),
   diagnostics: Object.freeze({
     markStartup: (stage) => ipcRenderer.send('startup:stage', stage),
     whenWindowShown: () => ipcRenderer.invoke('startup:when-window-shown'),

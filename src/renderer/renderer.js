@@ -15,7 +15,8 @@ function taskApi(api) {
 
 const bridgeEnvironment = window.launcherEnvironment;
 const environment = bridgeEnvironment ? { ...bridgeEnvironment,
-  minecraft: taskApi(bridgeEnvironment.minecraft), updater: taskApi(bridgeEnvironment.updater) } : undefined;
+  minecraft: taskApi(bridgeEnvironment.minecraft), updater: taskApi(bridgeEnvironment.updater),
+  startup: taskApi(bridgeEnvironment.startup) } : undefined;
 const localGameDirectoryHint = '游戏文件将生成在启动器所在目录的 .minecraft 文件夹中。';
 const windowControls = environment?.windowControls;
 const minecraft = environment?.minecraft;
@@ -599,7 +600,7 @@ async function renderAccountList() {
   }
 }
 
-async function loadAccountState() {
+async function loadAccountState({ strict = false } = {}) {
   try {
     if (accountsApi) {
       accountState = await accountsApi.getState();
@@ -609,6 +610,7 @@ async function loadAccountState() {
     renderAccountList();
     void refreshCurrentOnlineSkin();
   } catch (error) {
+    if (strict) throw error;
     showToast(`账户读取失败：${readableError(error)}`);
   } finally {
     accountName.classList.remove('startup-placeholder');
@@ -768,14 +770,15 @@ async function chooseJavaPath() {
   }
 }
 
-async function loadLauncherSettings() {
+async function loadLauncherSettings({ strict = false, detectJava = true } = {}) {
   try {
     if (settingsApi) launcherSettings = await settingsApi.getState();
     notifyStorageRecovery(launcherSettings);
     launcherSettingsLoaded = true;
     applySettingsToForm();
-    void refreshAutoJavaDetection();
+    if (detectJava) void refreshAutoJavaDetection();
   } catch (error) {
+    if (strict) throw error;
     showToast(`设置读取失败：${readableError(error)}`);
   } finally {
     sourceHint.classList.remove('startup-placeholder');
@@ -2449,6 +2452,7 @@ async function installDroppedModpack(filePath) {
 
 let modpackDragDepth = 0;
 document.addEventListener('dragenter', (event) => {
+  if (!document.querySelector('#startupScreen').hidden) return;
   if (!event.dataTransfer?.types.includes('Files')) return;
   event.preventDefault();
   modpackDragDepth += 1;
@@ -2470,6 +2474,7 @@ document.addEventListener('dragleave', (event) => {
 let modImportActive = false;
 document.addEventListener('drop', async (event) => {
   event.preventDefault();
+  if (!document.querySelector('#startupScreen').hidden) return;
   modpackDragDepth = 0;
   modpackDropOverlay.hidden = true;
   const files = Array.from(event.dataTransfer?.files ?? []);
@@ -2650,31 +2655,118 @@ async function performJavaCheck() {
   showToast('未检测到 Java，可启动游戏后按提示一键下载；你可以继续使用启动器');
 }
 
-// Paint the home screen before starting filesystem scans and background setup.
+const startupScreen = document.querySelector('#startupScreen');
+const startupTitle = document.querySelector('#startupTitle');
+const startupMessage = document.querySelector('#startupMessage');
+const startupProgress = document.querySelector('#startupProgress');
+const startupRetryButton = document.querySelector('#startupRetryButton');
+const startupSystemDirectoryButton = document.querySelector('#startupSystemDirectoryButton');
+const startupErrorDetails = document.querySelector('#startupErrorDetails');
+const startupError = document.querySelector('#startupError');
+const launcherStage = document.querySelector('#launcherStage');
+let startupPreparing = false;
+let startupDirectoryChanging = false;
+
+function renderStartupProgress(state) {
+  startupMessage.textContent = state.phase === 'ready' ? '正在读取账户和游戏列表…' : state.message;
+  // File preparation is followed by reading the prepared data into the home screen.
+  startupProgress.value = Math.min(70, Math.max(0, Number(state.progress) * 0.7 || 0));
+}
+
+async function prepareLauncher() {
+  if (startupPreparing || startupDirectoryChanging || startupScreen.dataset.state === 'ready') return;
+  startupPreparing = true;
+  startupScreen.dataset.state = 'preparing';
+  startupScreen.setAttribute('aria-busy', 'true');
+  startupTitle.textContent = '正在准备启动器';
+  startupMessage.textContent = '正在检查启动所需文件…';
+  startupProgress.value = 0;
+  startupRetryButton.hidden = true;
+  startupSystemDirectoryButton.hidden = true;
+  startupErrorDetails.hidden = true;
+  startupErrorDetails.open = false;
+  startupError.textContent = '';
+  let stopProgress;
+  try {
+    stopProgress = environment?.startup?.onProgress?.(renderStartupProgress);
+    if (environment) {
+      if (!environment.startup?.prepare) throw new Error('启动准备组件缺失，请重新安装完整的启动器。');
+      const result = await environment.startup.prepare();
+      if (!result?.ready) throw new Error('启动准备尚未完成，请重试。');
+    }
+    startupMessage.textContent = '正在读取启动设置…';
+    await loadLauncherSettings({ strict: true, detectJava: false });
+    environment?.diagnostics?.markStartup('settings-loaded');
+    startupProgress.value = 80;
+    startupMessage.textContent = '正在读取账户和游戏列表…';
+    const results = await Promise.allSettled([
+      loadAccountState({ strict: true }).then(() => environment?.diagnostics?.markStartup('accounts-loaded')),
+      loadLocalProfiles(true).then(() => environment?.diagnostics?.markStartup('profiles-loaded'))
+    ]);
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    await environment?.diagnostics?.rendererReady?.();
+    startupProgress.value = 100;
+    startupScreen.dataset.state = 'ready';
+    startupScreen.setAttribute('aria-busy', 'false');
+    startupScreen.hidden = true;
+    launcherStage.inert = false;
+    launcherStage.removeAttribute('aria-hidden');
+    document.querySelector('.launcher-app').classList.remove('is-preparing');
+    environment?.diagnostics?.markStartup('core-ready');
+  } catch (error) {
+    startupScreen.dataset.state = 'error';
+    startupScreen.setAttribute('aria-busy', 'false');
+    startupTitle.textContent = '启动器准备未完成';
+    const canChangeDirectory = error.phase === 'preparing-directories'
+      && error.details?.gameDirectoryMode === 'local' && Boolean(settingsApi?.update);
+    startupMessage.textContent = canChangeDirectory ? '游戏目录无法写入，可以改用系统游戏目录。'
+      : error.code === 'STARTUP_RESOURCE_MISSING' ? '请重新下载完整启动器，替换后重新准备。'
+        : error.code === 'CONFIG_CORRUPT' ? '请根据错误详情恢复配置文件后重试。'
+          : '请检查文件和目录权限，处理后重新准备。';
+    startupError.textContent = readableError(error);
+    startupErrorDetails.hidden = false;
+    startupErrorDetails.open = true;
+    startupRetryButton.hidden = false;
+    startupSystemDirectoryButton.hidden = !canChangeDirectory;
+    environment?.diagnostics?.reportError?.(`启动准备失败：${readableError(error)}`);
+    return;
+  } finally {
+    stopProgress?.();
+    startupPreparing = false;
+  }
+  updaterApi?.getState?.().then(renderLauncherUpdate).catch((error) => {
+    renderLauncherUpdate({ status: 'error', message: readableError(error), progress: 0 });
+  });
+  void withModpackUi((ui) => ui.restore());
+  void refreshAutoJavaDetection().then(async () => {
+    environment?.diagnostics?.markStartup('java-detected');
+    await performJavaCheck();
+  }).catch((error) => showToast(`Java 检测失败：${readableError(error)}`, true));
+}
+
+startupRetryButton.addEventListener('click', () => { void prepareLauncher(); });
+startupSystemDirectoryButton.addEventListener('click', async () => {
+  if (startupPreparing || startupDirectoryChanging) return;
+  startupDirectoryChanging = true;
+  startupRetryButton.disabled = true;
+  startupSystemDirectoryButton.disabled = true;
+  try {
+    await settingsApi.update({ gameDirectoryMode: 'system' });
+  } catch (error) {
+    startupError.textContent = readableError(error);
+    return;
+  } finally {
+    startupDirectoryChanging = false;
+    startupRetryButton.disabled = false;
+    startupSystemDirectoryButton.disabled = false;
+  }
+  await prepareLauncher();
+});
+
+// Paint the preparation page before touching configuration and game directories.
 requestAnimationFrame(() => requestAnimationFrame(async () => {
   environment?.diagnostics?.markStartup('renderer-painted');
   await environment?.diagnostics?.whenWindowShown?.();
-  await environment?.diagnostics?.rendererReady?.();
-  setTimeout(() => {
-    updaterApi?.getState?.().then(renderLauncherUpdate).catch((error) => {
-      renderLauncherUpdate({ status: 'error', message: readableError(error), progress: 0 });
-    });
-    void Promise.allSettled([
-      loadAccountState().then(() => environment?.diagnostics?.markStartup('accounts-loaded')),
-      loadLocalProfiles().then(() => environment?.diagnostics?.markStartup('profiles-loaded')),
-      loadLauncherSettings().then(() => {
-        environment?.diagnostics?.markStartup('settings-loaded');
-        return withModpackUi((ui) => ui.restore());
-      }),
-      refreshAutoJavaDetection().then(async () => {
-        environment?.diagnostics?.markStartup('java-detected');
-        await performJavaCheck();
-      })
-    ]).then((results) => {
-      for (const result of results) {
-        if (result.status === 'rejected') showToast(`后台初始化失败：${readableError(result.reason)}`, true);
-      }
-      environment?.diagnostics?.markStartup('core-ready');
-    });
-  }, 150);
+  await prepareLauncher();
 }));

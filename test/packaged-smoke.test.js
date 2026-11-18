@@ -16,13 +16,21 @@ async function script(t, body) {
 
 test('package verification requires a native packaged report, not just exit code zero', async t => {
   const valid = await script(t, `require('fs').writeFileSync(process.env.MELODY_SMOKE_RESULT,
-    JSON.stringify({ ok: true, packaged: true, platform: process.platform, arch: process.arch, version: 'fixture' }));`);
+    JSON.stringify({ ok: true, startupReady: true, packaged: true, platform: process.platform, arch: process.arch, version: 'fixture' }));`);
   assert.equal((await verify(process.execPath, [valid])).ok, true);
   const missing = await script(t, 'process.exit(0);');
   await assert.rejects(verify(process.execPath, [missing]), /ENOENT/);
   const unpackaged = await script(t, `require('fs').writeFileSync(process.env.MELODY_SMOKE_RESULT,
-    JSON.stringify({ ok: true, packaged: false, platform: process.platform, arch: process.arch }));`);
+    JSON.stringify({ ok: true, startupReady: true, packaged: false, platform: process.platform, arch: process.arch }));`);
   await assert.rejects(verify(process.execPath, [unpackaged]), /does not match/);
+});
+
+test('package verification rejects a report emitted before startup preparation completed', async t => {
+  for (const startupReady of [undefined, false]) {
+    const early = await script(t, `require('fs').writeFileSync(process.env.MELODY_SMOKE_RESULT,
+      JSON.stringify({ ok: true, startupReady: ${startupReady}, packaged: true, platform: process.platform, arch: process.arch }));`);
+    await assert.rejects(verify(process.execPath, [early]), /does not match/);
+  }
 });
 
 test('package verification rejects failed and stalled binaries', async t => {
@@ -35,17 +43,17 @@ test('package verification rejects failed and stalled binaries', async t => {
 test('package verification checks the requested artifact architecture when the host can run another architecture', async t => {
   const reportedArch = process.arch === 'ia32' ? 'x64' : 'ia32';
   const binary = await script(t, `require('fs').writeFileSync(process.env.MELODY_SMOKE_RESULT,
-    JSON.stringify({ ok: true, packaged: true, platform: process.platform, arch: '${reportedArch}' }));`);
+    JSON.stringify({ ok: true, startupReady: true, packaged: true, platform: process.platform, arch: '${reportedArch}' }));`);
   await assert.rejects(verify(process.execPath, [binary]), /does not match/);
   assert.equal((await verify(process.execPath, [binary], { expectedArch: reportedArch })).arch, reportedArch);
   const wrongPlatform = await script(t, `require('fs').writeFileSync(process.env.MELODY_SMOKE_RESULT,
-    JSON.stringify({ ok: true, packaged: true, platform: 'another-platform', arch: '${reportedArch}' }));`);
+    JSON.stringify({ ok: true, startupReady: true, packaged: true, platform: 'another-platform', arch: '${reportedArch}' }));`);
   await assert.rejects(verify(process.execPath, [wrongPlatform], { expectedArch: reportedArch }), /does not match/);
 });
 
 test('package verification rejects an incorrect embedded version and saves evidence bound to the final artifact', async t => {
   const binary = await script(t, `require('fs').writeFileSync(process.env.MELODY_SMOKE_RESULT,
-    JSON.stringify({ ok: true, packaged: true, platform: process.platform, arch: process.arch, version: '1.2.3' }));`);
+    JSON.stringify({ ok: true, startupReady: true, packaged: true, platform: process.platform, arch: process.arch, version: '1.2.3' }));`);
   await assert.rejects(verify(process.execPath, [binary], { expectedVersion: '1.2.4' }), /does not match/);
   const reportPath = path.join(path.dirname(binary), 'report.json');
   const report = await verify(process.execPath, [binary], { expectedVersion: '1.2.3', reportPath, artifactPath: binary });

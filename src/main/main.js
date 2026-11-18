@@ -5,6 +5,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, safeStorage, shell } = require('electron');
 const { createLazyServices } = require('./lazy-services');
+const { registerTaskHandler } = require('../shared/task-errors');
 
 const isSmokeTest = process.argv.includes('--smoke-test');
 const smokeResultArgument = isSmokeTest && process.argv.find((argument) => argument.startsWith('--smoke-result='));
@@ -16,11 +17,17 @@ const iconFile = process.platform === 'win32' ? 'app-icon.ico'
   : 'app-icon.png';
 const appIconPath = path.join(__dirname, '../renderer/assets', iconFile);
 const windowReadiness = new WeakMap();
+const preparedWindows = new WeakSet();
 let backgroundInitialized = false;
+let startupPreparation;
 if (isSmokeTest) {
   app.disableHardwareAcceleration();
-  const suffix = smokeResultPath ? require('node:crypto').createHash('sha256').update(smokeResultPath).digest('hex').slice(0, 16) : 'default';
-  app.setPath('userData', path.join(app.getPath('temp'), `melody-of-oblivion-smoke-${suffix}`));
+  const suffix = require('node:crypto').randomUUID();
+  app.setPath('userData', smokeResultPath
+    ? path.join(path.dirname(smokeResultPath), `user-data-${suffix}`)
+    : path.join(app.getPath('temp'), `melody-of-oblivion-smoke-${suffix}`));
+  // Exercise a genuine first launch without reading or creating the user's games.
+  process.env.PORTABLE_EXECUTABLE_DIR = app.getPath('userData');
 }
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.melodyofoblivion.launcher');
@@ -58,7 +65,32 @@ ipcMain.on('startup:stage', (_event, stage) => {
 ipcMain.handle('startup:when-window-shown', (event) => {
   return windowReadiness.get(BrowserWindow.fromWebContents(event.sender)) ?? Promise.resolve();
 });
-ipcMain.handle('startup:renderer-ready', (event) => windowHealth.ready(event));
+registerTaskHandler(ipcMain, 'startup:prepare', async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const shown = windowReadiness.get(window);
+  if (!shown || event.senderFrame !== event.sender.mainFrame
+      || event.sender.getURL() !== pathToFileURL(path.join(__dirname, '../renderer/index.html')).href) {
+    throw new Error('无法准备当前启动器窗口');
+  }
+  preparedWindows.delete(window);
+  await shown;
+  startupPreparation ??= require('./startup-preparation').createStartupPreparation({ app, getSettingsStore, getAccountStore });
+  const result = await startupPreparation.prepare((progress) => {
+    if (!event.sender.isDestroyed()) event.sender.send('startup:progress', progress);
+  });
+  preparedWindows.add(window);
+  return result;
+});
+ipcMain.handle('startup:renderer-ready', (event) => {
+  if (!preparedWindows.has(BrowserWindow.fromWebContents(event.sender))
+      || event.senderFrame !== event.sender.mainFrame
+      || event.sender.getURL() !== pathToFileURL(path.join(__dirname, '../renderer/index.html')).href) return false;
+  if (!isSmokeTest) {
+    require('./portable-runtime').cleanupPortableRuntime().catch(() => {});
+    void initializeBackgroundServices().catch((error) => console.error('后台初始化失败', error));
+  }
+  return windowHealth.ready(event);
+});
 ipcMain.handle('diagnostics:copy-error', (_event, message) => {
   clipboard.writeText(require('./error-log').redactError(String(message)));
   return true;
@@ -121,7 +153,8 @@ function createWindow() {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      backgroundThrottling: !isSmokeTest
     }
   });
 
@@ -145,12 +178,6 @@ function createWindow() {
       startupMetrics.mark('window-shown');
     }
     resolveShown();
-    setImmediate(() => {
-      if (!isSmokeTest) {
-        require('./portable-runtime').cleanupPortableRuntime().catch(() => {});
-        void initializeBackgroundServices().catch((error) => console.error('后台初始化失败', error));
-      }
-    });
   });
 
   if (isSmokeTest) {
@@ -164,7 +191,9 @@ function createWindow() {
           window.launcherEnvironment?.minecraft?.repairVersion &&
           window.launcherEnvironment?.diagnostics?.exportReport &&
           document.querySelector('#fabricApiDialog') &&
-          window.launcherEnvironment?.minecraft?.listFabricApiVersions
+          window.launcherEnvironment?.minecraft?.listFabricApiVersions &&
+          document.querySelector('#startupScreen') && document.querySelector('#launcherStage') &&
+          window.launcherEnvironment?.startup?.prepare
         )`);
         if (!valid) throw new Error('Smoke test: renderer or preload API missing');
         await mainWindow.webContents.executeJavaScript(`Promise.all([
@@ -173,9 +202,32 @@ function createWindow() {
           import('./modules/launcher-update-ui.mjs').then(m => typeof m.createLauncherUpdateUi === 'function'),
           import('./modules/fabric-api-ui.mjs').then(m => typeof m.createFabricApiUi === 'function')
         ]).then(values => { if (!values.every(Boolean)) throw new Error('Missing renderer module'); })`);
+        await mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+          const screen = document.querySelector('#startupScreen');
+          const stage = document.querySelector('#launcherStage');
+          const timer = setTimeout(() => { observer.disconnect(); reject(new Error('Startup preparation timed out')); }, 45000);
+          const check = () => {
+            if (screen.dataset.state === 'error') {
+              clearTimeout(timer); observer.disconnect();
+              reject(new Error(document.querySelector('#startupError')?.textContent
+                || document.querySelector('#startupMessage')?.textContent || 'Startup preparation failed'));
+            } else if (screen.dataset.state === 'ready' && screen.hidden && !stage.inert) {
+              clearTimeout(timer); observer.disconnect(); resolve();
+            }
+          };
+          const observer = new MutationObserver(check);
+          observer.observe(screen, { attributes: true, childList: true, subtree: true });
+          observer.observe(stage, { attributes: true });
+          check();
+        })`);
+        if (!preparedWindows.has(mainWindow)) throw new Error('Smoke test: startup preparation was not completed');
+        const fileSystem = require('node:fs/promises');
+        for (const name of ['settings.json', 'accounts.json']) {
+          JSON.parse(await fileSystem.readFile(path.join(app.getPath('userData'), name), 'utf8'));
+        }
         if (smokeResultPath) {
-          await require('node:fs/promises').writeFile(smokeResultPath, JSON.stringify({
-            ok: true, packaged: app.isPackaged, platform: process.platform, arch: process.arch, version: app.getVersion()
+          await fileSystem.writeFile(smokeResultPath, JSON.stringify({
+            ok: true, startupReady: true, packaged: app.isPackaged, platform: process.platform, arch: process.arch, version: app.getVersion()
           }));
         }
         console.log('SMOKE_TEST_OK');

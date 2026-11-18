@@ -12,11 +12,11 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#platform-coverage-and-prerequisites)
-[![Source](https://img.shields.io/badge/Source-v1.9.7-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v1.9.8-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> The current source version is `1.9.7`, with Microsoft, offline, and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://melodyoblivion.xyz/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
+> The current source version is `1.9.8`, with Microsoft, offline, and LittleSkin sign-in and Desert Lake as the default wallpaper. Published downloads are available through the [website](https://melodyoblivion.xyz/#download) and GitHub Releases; see the Release page for available versions. Local source changes require a new build, and website changes require deployment, to affect published content. Back up your Minecraft data before testing.
 
 ## About this project
 
@@ -34,6 +34,7 @@ The current repository starts a new implementation; its version numbers and code
 
 ## What is implemented
 
+- **Startup preparation** — show a preparation page, check required launcher resources, and create missing configuration, backups, and game directories. Home opens after settings, accounts, and local profiles load successfully. Failures show details and support retry; an unwritable local game directory can be changed to the system directory.
 - **Game versions** — browse Mojang's version manifest, detect local installations, download Vanilla versions, verify required files, and move removable profiles to the recycle bin.
 - **Mod loaders** — discover and install Fabric, Forge, NeoForge, and Quilt through a shared workflow. A new Fabric installation offers a compatible Fabric API version selector, with an option to skip. Selected API files are checksum-verified and placed in the profile's active `mods` directory.
 - **Resilient downloads** — choose between Mojang-hosted endpoints and BMCLAPI, probe sources in automatic mode, use configurable task concurrency, split large files with HTTP Range requests, verify SHA-1 metadata, cancel active work, and retry alternate sources.
@@ -65,7 +66,7 @@ The website does not embed launcher screenshots; the captures above appear in th
 ## Platform coverage and prerequisites
 
 - **Platforms**: public builds with SHA-256 checksums cover Windows x64 / ia32 / ARM64, Linux x64 / ARM64 / ARMv7, and macOS x64 / ARM64. Every target except Linux ARMv7 runs startup and upgrade acceptance on its own native runner, and a failure blocks the release. ARMv7 is built and checksum-verified only: GitHub hosts no 32-bit ARM runner, and an AppImage runtime cannot execute under QEMU user mode, so that package has no startup acceptance yet.
-- **Update replacement**: downloaded updates install only after choosing “Restart and install.” Windows preserves the current EXE name. macOS uses system `ditto` to validate and replace the `.app`, with a manual ZIP fallback for unwritable directories, read-only media, or App Translocation. Linux replaces the AppImage. The old app exits only after a helper handshake. Confirmation requires the new window, preload bridge, and local interface to load successfully; unconfirmed updates retain their backup and offer retry or recovery.
+- **Update replacement**: downloaded updates install only after choosing “Restart and install.” Windows preserves the current EXE name. macOS uses system `ditto` to validate and replace the `.app`, with a manual ZIP fallback for unwritable directories, read-only media, or App Translocation. Linux replaces the AppImage. The old app exits only after a helper handshake. Confirmation requires the new window to be shown, the preload bridge and local interface to load, file preparation to finish, and settings, accounts, and local profiles to load successfully; unconfirmed updates retain their backup and offer retry or recovery.
 - **Update records and cleanup**: records are isolated by installation path. A healthy update retains one rollback generation and cleans only older files owned by that record. Untracked Windows EXEs and `.old` files can be selected manually in settings and moved to the recycle bin. Cleanup excludes game data.
 - **LittleSkin authentication**: Yggdrasil works only when client and server use the same authentication service. A LittleSkin account does not replace a premium account and never grants access to premium-only servers. See the [LittleSkin manual](https://manual.littleskin.cn/yggdrasil/).
 - **CurseForge metadata**: installation depends on file metadata from CurseTools or, when configured, `CURSEFORGE_API_KEY`. Transient lookup failures are retried, resolved metadata is stored with the recovery session so restarts skip the requery, and a local file is never substituted when the trusted hash is missing. Removed files still have to be fetched from the pack page.
@@ -82,7 +83,7 @@ The website does not embed launcher screenshots; the captures above appear in th
 
 ## Run from source
 
-The Windows single-file portable EXE requires no installation. Artifact names omit the version; application metadata and release tags retain it. The first run extracts into a content-fingerprinted directory under `Melody/runtime/` beside the EXE and subsequent runs reuse it. A shared mutex coordinates extraction, launch leases and cleanup. After the window is ready, background cleanup keeps the current runtime, one recent previous runtime, and any active runtimes; it removes other unused builds and extraction residue older than one day. Unwritable adjacent directories fall back to `%LOCALAPPDATA%/MelodyOfOblivion/runtime`. Accounts and settings remain in the existing user data location. Legacy `启动器运行文件` directories are not migrated or deleted automatically; remove them manually after all older launchers are closed. Published builds do not require Node.js.
+The Windows single-file portable EXE requires no installation. Artifact names omit the version; application metadata and release tags retain it. The first run extracts into a content-fingerprinted directory under `Melody/runtime/` beside the EXE and subsequent runs reuse it. A shared mutex coordinates extraction, launch leases and cleanup. After startup preparation succeeds and home is ready, background cleanup keeps the current runtime, one recent previous runtime, and any active runtimes; it removes other unused builds and extraction residue older than one day. Unwritable adjacent directories fall back to `%LOCALAPPDATA%/MelodyOfOblivion/runtime`. Accounts and settings remain in the existing user data location. Legacy `启动器运行文件` directories are not migrated or deleted automatically; remove them manually after all older launchers are closed. Published builds do not require Node.js.
 
 ```powershell
 npm ci
@@ -91,7 +92,13 @@ npm run dev
 
 System directory mode uses the operating system's Minecraft application-data directory (`%APPDATA%\.minecraft` on Windows). Local mode uses `.minecraft` beside the portable EXE or source checkout; runtime cache locations do not change it. Modpack instances are created below the selected `.minecraft/melody-instances`.
 
-Java probe results are persisted in `java-cache.json` in the launcher user-data directory and invalidated when runtime files change; manual redetection bypasses the cache. Background initialization starts after the home screen paints. Missing Java produces a nonmodal hint on the launch button instead of a blocking dialog. The local version list resolves each profile's Java requirement through its inheritance chain, so the home screen can preview readiness before launching. `logs/startup-latest.json` records the most recent startup stages from main-process entry onwards; portable EXE extraction before Electron starts is not measured.
+The window first shows a preparation page. It checks that required interface, preload, and module resources exist, are nonempty, and are readable; creates missing `settings.json`, `accounts.json`, and `.bak` files in user data; and prepares logs and the selected game's version, library, asset, instance, managed Java, and cache directories. Existing configuration is preserved. Missing or damaged primary configuration is restored from a valid backup when available; damaged configuration without a valid backup blocks home. Every startup checks again and recreates missing directories. Windows portable EXE extraction happens before Electron starts, so the preparation page appears after extraction.
+
+Home opens automatically after settings, accounts, and local profiles load successfully. A failure keeps the preparation page open with error details and a retry button. Missing launcher resources require a complete launcher download. If the local game directory cannot be written, choose “改用系统游戏目录” (use the system game directory) to save that choice and retry. Preparation does not download Minecraft or Java, or verify all installed game files.
+
+Java detection runs in the background after home is ready. Probe results are persisted in `java-cache.json` in the launcher user-data directory and invalidated when runtime files change; manual redetection bypasses the cache. Missing Java produces a nonmodal hint on the launch button instead of a blocking dialog. The local version list resolves each profile's Java requirement through its inheritance chain, so the home screen can preview readiness before launching.
+
+`logs/startup-latest.json` records the most recent startup stages: main-process entry, Electron readiness, window display, preparation-page paint, settings / accounts / local-profile loading, home readiness (`core-ready`), and background Java detection. Portable EXE extraction before Electron starts is not measured.
 
 Download, loader, modpack, Java download and game-launch services initialize on first use and are reused within the current game directory. Switching directories creates fresh services. Home-screen version scans and Java detection use lightweight readers. Extracted native libraries are cached by archive content and exclusion rules under `.minecraft/launcher-cache/native-archives`, with file verification on reuse and regeneration after changes or corruption. Each game uses separate copies; exiting a game removes its copies while preserving shared cache generations, which can be manually cleared after games close.
 
@@ -102,7 +109,7 @@ Download, loader, modpack, Java download and game-launch services initialize on 
 | `npm run dev` | Start the Electron app in development mode |
 | `npm run check` | Syntax-check the main, preload, and renderer JavaScript |
 | `npm test` | Run the Node.js test suite |
-| `npm run smoke` | Load the Electron window with temporary user data and exit |
+| `npm run smoke` | Run Electron with fresh temporary user-data and game directories; confirm preparation, readable configuration, and usable home controls, then exit and clean up |
 | `npm run verify:toolchain` | Verify pinned Node, npm, Electron, and electron-builder versions |
 | `npm run build -- --target windows-x64` | Build one target through the shared entry point without publishing |
 | `npm run build:win` | Build Windows portable EXE with a persistent runtime |
@@ -110,6 +117,16 @@ Download, loader, modpack, Java download and game-launch services initialize on 
 | `npm run build:mac` | Build macOS zip packages |
 
 See [CI and release validation](docs/ci-release-validation.md) (in Chinese) for checks, release gates, and platform startup coverage.
+
+## Development and contributions
+
+Issues and pull requests for code, documentation, and translations are welcome.
+
+- [Development guide](docs/development.md) (Chinese): setup, code entry points, example tasks, and checks.
+- [Development and regression cases](docs/development-cases.md) (Chinese): steps, expected results, and related automated tests.
+- [Contributing](CONTRIBUTING.md): fork, branch, PR, and review instructions, with a short English guide.
+
+Bug and feature forms and a PR template help capture reproducible details. Existing CI runs checks and package validation according to the files changed.
 
 ## Repository layout
 

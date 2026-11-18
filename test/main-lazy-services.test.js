@@ -153,7 +153,7 @@ test('main creates a window with all IPC registered before loading business serv
         assert.ok(options.icon.endsWith(expectedIcon));
         this.setIcon = (icon) => iconUpdates.push(icon);
         this.show = () => this.emit('show');
-        for (const name of ['accounts:get-state', 'settings:get-state', 'minecraft:detect-java', 'updater:get-state'])
+        for (const name of ['startup:prepare', 'accounts:get-state', 'settings:get-state', 'minecraft:detect-java', 'updater:get-state'])
           assert.ok(handlers.has(name), name);
         for (const name of ['accounts/account-store', 'accounts/yggdrasil-auth', 'settings/settings-store',
           'updater/update-manager', 'minecraft/java-runtime', 'minecraft/java-probe-cache'])
@@ -171,6 +171,98 @@ test('main creates a window with all IPC registered before loading business serv
       assert.equal(created, true);
       assert.equal(iconUpdates.length, shouldReapplyIcon ? 2 : 0);
       for (const icon of iconUpdates) assert.ok(icon.endsWith(expectedIcon));
+      for (const name of ['accounts/account-store', 'settings/settings-store', 'updater/update-manager',
+        'minecraft/java-runtime', 'minecraft/java-probe-cache', 'startup-preparation'])
+        assert.equal(require.cache[require.resolve('./src/main/' + name)], undefined, name);
     }));
   `, directory], { cwd: path.resolve(__dirname, '..'), timeout: 10000 });
+});
+
+test('startup IPC waits for the visible preparation page, preserves failures, and allows retry', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-main-prepare-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  execFileSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const path = require('node:path');
+    const { pathToFileURL } = require('node:url');
+    const { EventEmitter } = require('node:events');
+    const Module = require('node:module');
+    const load = Module._load;
+    const handlers = new Map();
+    const app = new EventEmitter();
+    const expectedUrl = pathToFileURL(path.join(process.cwd(), 'src/renderer/index.html')).href;
+    Object.assign(app, { whenReady: () => Promise.resolve(), getPath: () => process.argv[1],
+      getAppPath: () => process.cwd(), setAppUserModelId() {}, requestSingleInstanceLock: () => true, isPackaged: false });
+    let window, loaded = 0, attempts = 0;
+    const messages = [];
+    class BrowserWindow extends EventEmitter {
+      constructor() {
+        super(); window = this; this.webContents = new EventEmitter();
+        Object.assign(this.webContents, { mainFrame: { url: expectedUrl }, getURL: () => expectedUrl,
+          isDestroyed: () => false, send: (name, value) => messages.push({ name, value }) });
+        this.setIcon = () => {}; this.show = () => this.emit('show');
+      }
+      loadFile() {}
+      static fromWebContents(sender) { return sender === window.webContents ? window : null; }
+    }
+    Module._load = function(name, ...args) {
+      if (name === 'electron') return { app, BrowserWindow,
+        ipcMain: { on() {}, handle: (name, fn) => handlers.set(name, fn) } };
+      if (name === './startup-preparation') {
+        loaded++;
+        return { createStartupPreparation: ({ getSettingsStore, getAccountStore }) => {
+          assert.equal(typeof getSettingsStore, 'function'); assert.equal(typeof getAccountStore, 'function');
+          return { prepare: async progress => {
+            attempts++; progress({ phase: 'preparing-config', message: '正在准备配置', progress: 40 });
+            if (attempts === 1) throw Object.assign(new Error('配置不可写'), { code: 'EACCES' });
+            return { ready: true, gameDirectory: '/fixture/.minecraft' };
+          } };
+        } };
+      }
+      return load.call(this, name, ...args);
+    };
+    require('./src/main/main');
+    setImmediate(async () => {
+      const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame };
+      assert.equal(await handlers.get('startup:renderer-ready')(event), false);
+      const first = handlers.get('startup:prepare')(event);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(loaded, 0); assert.equal(attempts, 0);
+      window.emit('ready-to-show');
+      const failure = await first;
+      assert.equal(failure.__launcherTaskError.code, 'EACCES');
+      assert.equal(failure.__launcherTaskError.message, '配置不可写');
+      assert.equal(failure.__launcherTaskError.retryable, true);
+      assert.equal(await handlers.get('startup:renderer-ready')(event), false);
+      const result = await handlers.get('startup:prepare')(event);
+      assert.equal(result.ready, true); assert.equal(attempts, 2); assert.equal(loaded, 1);
+      assert.equal(messages.length, 2); assert.equal(messages[0].name, 'startup:progress');
+      assert.equal(messages[0].value.phase, 'preparing-config');
+      const invalid = await handlers.get('startup:prepare')({ sender: window.webContents, senderFrame: {} });
+      assert.ok(invalid.__launcherTaskError); assert.equal(attempts, 2);
+    });
+  `, directory], { cwd: path.resolve(__dirname, '..'), timeout: 10000 });
+});
+
+test('preload exposes startup preparation and removes progress subscriptions', async () => {
+  const vm = require('node:vm');
+  const source = await fs.readFile(path.join(__dirname, '../src/preload/preload.js'), 'utf8');
+  const ipcRenderer = new EventEmitter();
+  const invocations = [];
+  ipcRenderer.invoke = async channel => { invocations.push(channel); return { ready: true }; };
+  let environment;
+  vm.runInNewContext(source, { require: name => {
+    assert.equal(name, 'electron');
+    return { ipcRenderer, webUtils: {}, contextBridge: { exposeInMainWorld: (_name, value) => { environment = value; } } };
+  } });
+  assert.equal((await environment.startup.prepare()).ready, true);
+  assert.deepEqual(invocations, ['startup:prepare']);
+  const progress = [];
+  const unsubscribe = environment.startup.onProgress(value => progress.push(value));
+  const event = { phase: 'ready', progress: 100 };
+  ipcRenderer.emit('startup:progress', {}, event);
+  unsubscribe();
+  ipcRenderer.emit('startup:progress', {}, { progress: 0 });
+  assert.deepEqual(progress, [event]);
+  assert.equal(ipcRenderer.listenerCount('startup:progress'), 0);
 });

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="launcher-app">
+    <div class="launcher-app is-preparing">
       <div class="background-gallery" aria-hidden="true">
         <img class="background-slide" src="assets/backgrounds/wp15225187.jpg" alt="" />
         <img class="background-slide" src="assets/backgrounds/wp15225191.jpg" alt="" />
@@ -31,7 +31,25 @@
         </div>
       </header>
 
-      <main class="launcher-stage">
+      <section id="startupScreen" class="startup-screen" data-state="preparing" aria-labelledby="startupTitle" aria-busy="true">
+        <div class="startup-card">
+          <p class="startup-brand">忘却的旋律 · LAUNCHER</p>
+          <h1 id="startupTitle">正在准备启动器</h1>
+          <p id="startupMessage" role="status" aria-live="polite">正在检查启动所需文件…</p>
+          <progress id="startupProgress" max="100" value="0" aria-label="启动器准备进度"></progress>
+          <p class="startup-note">首次使用会创建必要文件，完成后自动进入启动器。</p>
+          <details id="startupErrorDetails" class="startup-error" hidden>
+            <summary>查看错误详情</summary>
+            <pre id="startupError"></pre>
+          </details>
+          <div class="startup-actions">
+            <button id="startupRetryButton" class="primary-dialog-button" type="button" hidden>重新准备</button>
+            <button id="startupSystemDirectoryButton" class="secondary-dialog-button" type="button" hidden>改用系统游戏目录</button>
+          </div>
+        </div>
+      </section>
+
+      <main id="launcherStage" class="launcher-stage" inert aria-hidden="true">
         <aside class="account-panel" aria-label="当前游戏账户">
           <button id="accountButton" class="account-chip" type="button">
             <span id="playerAvatar" class="avatar" aria-hidden="true"><i></i></span>
