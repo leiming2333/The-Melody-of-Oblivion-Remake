@@ -6,6 +6,9 @@ const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, safeStorage, shell } = require('electron');
 const { createLazyServices } = require('./lazy-services');
 const { registerTaskHandler } = require('../shared/task-errors');
+// loadFile and pathToFileURL encode '~' differently, including Windows 8.3
+// paths. Navigate to the exact URL used by the trusted-document checks.
+const rendererUrl = pathToFileURL(path.join(__dirname, '../renderer/index.html')).href;
 
 const isSmokeTest = process.argv.includes('--smoke-test');
 const smokeResultArgument = isSmokeTest && process.argv.find((argument) => argument.startsWith('--smoke-result='));
@@ -36,7 +39,7 @@ const hasSingleInstanceLock = require('./single-instance').acquireSingleInstance
 if (!hasSingleInstanceLock) app.quit();
 const windowHealth = require('./window-health').createWindowHealth({
   BrowserWindow,
-  expectedUrl: pathToFileURL(path.join(__dirname, '../renderer/index.html')).href,
+  expectedUrl: rendererUrl,
   isEligible: () => app.isPackaged && !isSmokeTest && hasSingleInstanceLock,
   onHealthy: async () => {
     const manager = getUpdateManager();
@@ -69,7 +72,7 @@ registerTaskHandler(ipcMain, 'startup:prepare', async (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
   const shown = windowReadiness.get(window);
   if (!shown || event.senderFrame !== event.sender.mainFrame
-      || event.sender.getURL() !== pathToFileURL(path.join(__dirname, '../renderer/index.html')).href) {
+      || event.sender.getURL() !== rendererUrl) {
     throw new Error('无法准备当前启动器窗口');
   }
   preparedWindows.delete(window);
@@ -84,7 +87,7 @@ registerTaskHandler(ipcMain, 'startup:prepare', async (event) => {
 ipcMain.handle('startup:renderer-ready', (event) => {
   if (!preparedWindows.has(BrowserWindow.fromWebContents(event.sender))
       || event.senderFrame !== event.sender.mainFrame
-      || event.sender.getURL() !== pathToFileURL(path.join(__dirname, '../renderer/index.html')).href) return false;
+      || event.sender.getURL() !== rendererUrl) return false;
   if (!isSmokeTest) {
     require('./portable-runtime').cleanupPortableRuntime().catch(() => {});
     void initializeBackgroundServices().catch((error) => console.error('后台初始化失败', error));
@@ -165,7 +168,7 @@ function createWindow() {
     // Reapply after the native window appears so Windows refreshes its taskbar button.
     mainWindow.on('show', () => mainWindow.setIcon(appIconPath));
   }
-  mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  mainWindow.loadURL(rendererUrl);
 
   mainWindow.once('ready-to-show', () => {
     startupMetrics.mark('ready-to-show');

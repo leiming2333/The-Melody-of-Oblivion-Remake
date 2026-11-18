@@ -159,7 +159,7 @@ test('main creates a window with all IPC registered before loading business serv
           'updater/update-manager', 'minecraft/java-runtime', 'minecraft/java-probe-cache'])
           assert.equal(require.cache[require.resolve('./src/main/' + name)], undefined, name);
       }
-      loadFile() { setImmediate(() => this.emit('ready-to-show')); }
+      loadURL() { setImmediate(() => this.emit('ready-to-show')); }
     }
     Module._load = function(name, ...args) {
       if (name === 'electron') return { app, BrowserWindow,
@@ -202,7 +202,7 @@ test('startup IPC waits for the visible preparation page, preserves failures, an
           isDestroyed: () => false, send: (name, value) => messages.push({ name, value }) });
         this.setIcon = () => {}; this.show = () => this.emit('show');
       }
-      loadFile() {}
+      loadURL(url) { assert.equal(url, expectedUrl); }
       static fromWebContents(sender) { return sender === window.webContents ? window : null; }
     }
     Module._load = function(name, ...args) {
