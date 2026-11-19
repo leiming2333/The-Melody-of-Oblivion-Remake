@@ -84,6 +84,7 @@ async function fixture(t, { holdJava = false, accountType = 'offline', microsoft
   };
   const handlers = new Map();
   registerMinecraftIpc({ app,
+    createServices: require('./helpers/inline-minecraft-services').createInlineMinecraftServices,
     ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
     BrowserWindow: { fromWebContents: (contents) => {
       if (contents.isDestroyed()) throw new Error('Object has been destroyed');

@@ -33,10 +33,30 @@ function redactGameOutput(value, secrets = []) {
 async function pruneLogs(directory, maximumFiles) {
   const names = (await fs.readdir(directory))
     .filter((name) => /^game-.*\.log$/.test(name)).sort().reverse();
-  let retained = [...activeLogs].filter((filePath) => path.dirname(filePath) === directory).length;
+  const protectedLogs = new Set([...activeLogs].filter((filePath) => path.dirname(filePath) === directory));
+  const processStates = new Map();
+  for (const name of names) {
+    const match = name.match(/-(\d+)-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.log$/i);
+    const pid = Number(match?.[1]);
+    if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) continue;
+    if (!processStates.has(pid)) {
+      let alive = false;
+      try {
+        process.kill(pid, 0);
+        alive = true;
+      } catch (error) {
+        alive = error.code === 'EPERM';
+      }
+      processStates.set(pid, alive);
+    }
+    // The main process and isolated installers keep separate activeLogs sets.
+    // A live foreign owner may still be writing, including an older log.
+    if (processStates.get(pid)) protectedLogs.add(path.join(directory, name));
+  }
+  let retained = protectedLogs.size;
   for (const name of names) {
     const filePath = path.join(directory, name);
-    if (activeLogs.has(filePath)) continue;
+    if (protectedLogs.has(filePath)) continue;
     if (retained < maximumFiles) retained += 1;
     else await fs.rm(filePath, { force: true }).catch(() => {});
   }
@@ -50,7 +70,10 @@ class GameLog {
     this.maxLineBytes = Math.min(64 * 1024, Math.floor(this.maxBytes / 2));
     this.maxFiles = Math.max(1, options.maxFiles ?? DEFAULT_MAX_FILES);
     this.flushIntervalMs = options.flushIntervalMs ?? 1000;
-    this.content = Buffer.alloc(0);
+    this.chunks = [];
+    this.chunkHead = 0;
+    this.contentBytes = 0;
+    this.cachedContent = Buffer.alloc(0);
     this.streams = new Map();
     this.truncated = false;
     this.dirty = false;
@@ -60,16 +83,30 @@ class GameLog {
 
   append(line) {
     const entry = Buffer.from(`${redactGameOutput(line, this.secrets)}\n`);
-    this.content = Buffer.concat([this.content, entry]);
-    if (this.content.length > this.maxBytes - (this.truncated ? TRUNCATED_MESSAGE.length : 0)) {
+    this.chunks.push(entry);
+    this.contentBytes += entry.length;
+    this.cachedContent = undefined;
+    if (this.contentBytes > this.maxBytes - (this.truncated ? TRUNCATED_MESSAGE.length : 0)) {
       this.truncated = true;
-      const overflow = this.content.length - (this.maxBytes - TRUNCATED_MESSAGE.length);
-      // Drop entire old lines so both UTF-8 and the last error remain readable.
-      const boundary = this.content.indexOf(10, overflow - 1);
-      this.content = this.content.subarray(boundary + 1);
+      const budget = this.maxBytes - TRUNCATED_MESSAGE.length;
+      while (this.contentBytes > budget && this.chunkHead < this.chunks.length) {
+        this.contentBytes -= this.chunks[this.chunkHead].length;
+        this.chunks[this.chunkHead++] = undefined;
+      }
+    }
+    // Keep complete redacted lines in a bounded ring. Concatenate only when
+    // flushing, rather than copying up to 2 MiB for every installer/game line.
+    if (this.chunkHead > 1024 && this.chunkHead >= this.chunks.length / 2) {
+      this.chunks = this.chunks.slice(this.chunkHead);
+      this.chunkHead = 0;
     }
     this.dirty = true;
     this.scheduleFlush();
+  }
+
+  get content() {
+    this.cachedContent ??= Buffer.concat(this.chunks.slice(this.chunkHead), this.contentBytes);
+    return this.cachedContent;
   }
 
   scheduleFlush() {

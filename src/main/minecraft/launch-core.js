@@ -561,12 +561,15 @@ async function prepareLaunch({
 
 class MinecraftLauncher {
   constructor({ gameDirectory, spawnProcess = spawn, findJava, javaRuntime,
-    inspectJava = findJava ? undefined : javaRuntimeDetails, verifyFiles, activeGames = new Map() } = {}) {
+    inspectJava = findJava ? undefined : javaRuntimeDetails, verifyFiles, activeGames = new Map(),
+    prepareLaunchImpl = prepareLaunch, createLog = createGameLog } = {}) {
     this.gameDirectory = gameDirectory;
     this.spawnProcess = spawnProcess;
     this.findJava = findJava;
     this.inspectJava = inspectJava;
     this.verifyFiles = verifyFiles;
+    this.prepareLaunch = prepareLaunchImpl;
+    this.createLog = createLog;
     this.javaRuntime = javaRuntime ?? new ManagedJavaRuntime({
       gameDirectory,
       extractArchive
@@ -612,7 +615,7 @@ class MinecraftLauncher {
         });
       })
     ));
-    const prepared = await prepareLaunch({
+    const prepared = await this.prepareLaunch({
       gameDirectory: this.gameDirectory,
       profileId: validatedId,
       account,
@@ -637,7 +640,7 @@ class MinecraftLauncher {
     // Keep startup failures and the tail of a crash log without persisting the
     // command line, which contains the Minecraft access token.
     let logError;
-    const gameLog = await createGameLog(this.gameDirectory, validatedId, account).catch((error) => {
+    const gameLog = await this.createLog(this.gameDirectory, validatedId, account).catch((error) => {
       logError = error.code ?? 'LOG_CREATE_FAILED';
       return undefined;
     });

@@ -30,7 +30,7 @@ npm test
 | 内容 | 入口与职责 |
 | --- | --- |
 | Electron 生命周期、窗口、服务装配 | `src/main/main.js`、`src/main/lazy-services.js` |
-| 账户和凭据 | `src/main/accounts/`，主进程负责认证、持久化与公开字段过滤 |
+| 账户和凭据 | `src/main/accounts/`，独立进程负责认证、持久化与公开字段过滤，主进程提供系统凭据加解密 |
 | 下载、Java、加载器、启动、整合包 | `src/main/minecraft/`，`ipc.js` 连接界面与目录内的服务 |
 | 设置 | `src/main/settings/` |
 | 启动器更新 | `src/main/updater/` |
@@ -42,6 +42,8 @@ npm test
 | 测试与构建 | `test/`、`scripts/` 与 `.github/` |
 
 主进程大多使用 CommonJS；官网模块与部分界面模块使用 `.mjs`。遵循附近文件的写法和 [.editorconfig](../.editorconfig)，不在功能修改中批量重排无关代码。官网和启动器界面是两套入口，修改其中一处后要检查实际目标是否正确。
+
+后台进程、界面边界及共享文件互斥见 [启动器模块隔离](module-isolation.md)。新增业务模块应沿用独立后台入口和明确的 RPC 依赖。
 
 ## 常见开发任务
 

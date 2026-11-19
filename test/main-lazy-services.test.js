@@ -210,12 +210,13 @@ test('startup IPC waits for the visible preparation page, preserves failures, an
         ipcMain: { on() {}, handle: (name, fn) => handlers.set(name, fn) } };
       if (name === './startup-preparation') {
         loaded++;
-        return { createStartupPreparation: ({ getSettingsStore, getAccountStore }) => {
-          assert.equal(typeof getSettingsStore, 'function'); assert.equal(typeof getAccountStore, 'function');
+        return { createStartupPreparation: (options) => {
+          assert.equal(options.app, app);
+          assert.equal(options.getSettingsStore, undefined); assert.equal(options.getAccountStore, undefined);
           return { prepare: async progress => {
-            attempts++; progress({ phase: 'preparing-config', message: '正在准备配置', progress: 40 });
-            if (attempts === 1) throw Object.assign(new Error('配置不可写'), { code: 'EACCES' });
-            return { ready: true, gameDirectory: '/fixture/.minecraft' };
+            attempts++; progress({ phase: 'checking-resources', message: '正在检查启动器文件', progress: 10 });
+            if (attempts === 1) throw Object.assign(new Error('资源不可读'), { code: 'EACCES' });
+            return { ready: true };
           } };
         } };
       }
@@ -231,13 +232,13 @@ test('startup IPC waits for the visible preparation page, preserves failures, an
       window.emit('ready-to-show');
       const failure = await first;
       assert.equal(failure.__launcherTaskError.code, 'EACCES');
-      assert.equal(failure.__launcherTaskError.message, '配置不可写');
+      assert.equal(failure.__launcherTaskError.message, '资源不可读');
       assert.equal(failure.__launcherTaskError.retryable, true);
       assert.equal(await handlers.get('startup:renderer-ready')(event), false);
       const result = await handlers.get('startup:prepare')(event);
       assert.equal(result.ready, true); assert.equal(attempts, 2); assert.equal(loaded, 1);
       assert.equal(messages.length, 2); assert.equal(messages[0].name, 'startup:progress');
-      assert.equal(messages[0].value.phase, 'preparing-config');
+      assert.equal(messages[0].value.phase, 'checking-resources');
       const invalid = await handlers.get('startup:prepare')({ sender: window.webContents, senderFrame: {} });
       assert.ok(invalid.__launcherTaskError); assert.equal(attempts, 2);
     });

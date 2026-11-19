@@ -35,6 +35,7 @@ async function fixture(t, extras = {}) {
   const settingsStore = { getState: async () => ({ ...settings }) };
   const handlers = new Map();
   registerMinecraftIpc({ app, settingsStore, shell: { trashItem: async () => {} },
+    createServices: require('./helpers/inline-minecraft-services').createInlineMinecraftServices,
     ipcMain: { handle: (name, handler) => handlers.set(name, handler) }, ...extras });
   return { settings, settingsStore, app,
     invoke: async (name, owner, ...args) => {
@@ -58,7 +59,7 @@ test('game tasks register before settings resolve, reject duplicates and accept 
   });
   const pending = f.invoke('minecraft:inspect-modpack', owner, 'pack.zip', { taskId: 'preview' });
   const cancelled = assert.rejects(pending, error => error.code === 'TASK_CANCELLED');
-  await assert.rejects(f.invoke('minecraft:install-modpack', other, 'other.zip'), error => error.code === 'TASK_BUSY');
+  await assert.rejects(f.invoke('minecraft:inspect-modpack', other, 'other.zip'), error => error.code === 'TASK_BUSY');
   assert.deepEqual(await f.invoke('minecraft:cancel-download', other, { taskId: 'preview' }), { cancelled: 0 });
   assert.deepEqual(await f.invoke('minecraft:cancel-download', owner, { taskId: 'stale-task' }), { cancelled: 0 });
   assert.deepEqual(await f.invoke('minecraft:cancel-download', owner, { taskId: 'preview' }), { cancelled: 1 });
@@ -167,6 +168,33 @@ test('a reported commit boundary stays noncancellable even if later progress omi
   assert.equal(owner.messages.at(-1).value.cancellable, false);
   done.resolve({ status: 'complete', targetId: 'instance-pack' });
   assert.deepEqual(await task, { status: 'complete', targetId: 'instance-pack' });
+});
+
+test('modpack inspection and Java downloads do not block the independent game installation module', async t => {
+  const f = await fixture(t), owner = sender(60), entered = deferred(), done = deferred();
+  t.after(() => done.resolve({ name: 'Preview' }));
+  t.mock.method(ModpackManager.prototype, 'inspect', async () => { entered.resolve(); return done.promise; });
+  t.mock.method(MinecraftDownloader.prototype, 'installVersion', async () => ({ versionId: 'base' }));
+  const preview = f.invoke('minecraft:inspect-modpack', owner, 'pack.zip', { taskId: 'inspection' });
+  await entered.promise;
+  assert.deepEqual(await f.invoke('minecraft:download-version', owner, 'base', { taskId: 'install' }), { versionId: 'base' });
+  assert.equal((await f.invoke('minecraft:cancel-download', owner, { taskId: 'install' })).cancelled, 0);
+  done.resolve({ name: 'Preview' });
+  await preview;
+});
+
+test('a Java runtime download leaves game verification and version deletion available', async t => {
+  const f = await fixture(t), owner = sender(61), entered = deferred(), done = deferred();
+  t.after(() => done.resolve('java-path'));
+  t.mock.method(ManagedJavaRuntime.prototype, 'ensureInstalled', async () => { entered.resolve(); return done.promise; });
+  t.mock.method(MinecraftDownloader.prototype, 'verifyVersion', async () => ({ verified: true }));
+  t.mock.method(MinecraftVersionManager.prototype, 'deleteProfile', async (profileId) => ({ profileId }));
+  const java = f.invoke('minecraft:download-java', owner, 21, { taskId: 'java' });
+  await entered.promise;
+  assert.deepEqual(await f.invoke('minecraft:verify-version', owner, 'existing'), { verified: true });
+  assert.deepEqual(await f.invoke('minecraft:delete-version', owner, 'existing'), { profileId: 'existing' });
+  done.resolve('java-path');
+  await java;
 });
 
 test('a new renderer can claim a persisted modpack recovery session', async t => {

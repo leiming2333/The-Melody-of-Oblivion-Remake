@@ -589,7 +589,8 @@ class MinecraftLoaderManager {
     const javaExecutable = await this.javaRuntime.resolve(
       javaPath,
       requiredJavaVersion,
-      undefined,
+      (progress) => onProgress({ ...progress, phase: 'installing-loader', loaderType, logPath: log.filePath,
+        completedFiles: 1, totalFiles: 2 }),
       signal
     );
     throwIfAborted(signal);
@@ -600,24 +601,41 @@ class MinecraftLoaderManager {
     onProgress({ phase: 'installing-loader', loaderType, message: '依赖文件已就绪，正在运行加载器安装器…',
       completedFiles: 1, totalFiles: 2, logPath: log.filePath });
     let lastMessageAt = 0;
-    await this.runInstaller({
-      javaExecutable,
-      installerPath,
-      gameDirectory: this.gameDirectory,
-      signal,
-      onLog: (channel, chunk) => log.write(channel, chunk),
-      onOutput: (line) => {
-        if (Date.now() - lastMessageAt < 250) return;
-        lastMessageAt = Date.now();
-        onProgress({
-          phase: 'installing-loader',
-          message: line,
-          loaderType,
-          completedFiles: 1,
-          totalFiles: 2
-        });
-      }
-    });
+    const installerStartedAt = Date.now();
+    let latestInstallerMessage = '加载器安装器正在处理文件';
+    const heartbeat = setInterval(() => {
+      if (signal?.aborted || Date.now() - lastMessageAt < 5000) return;
+      try {
+        onProgress({ phase: 'installing-loader', loaderType, completedFiles: 1, totalFiles: 2,
+          logPath: log.filePath, elapsedSeconds: Math.floor((Date.now() - installerStartedAt) / 1000),
+          message: `${latestInstallerMessage}（已运行 ${Math.floor((Date.now() - installerStartedAt) / 1000)} 秒）` });
+      } catch { /* An unavailable progress listener must not orphan the Java process. */ }
+    }, 5000);
+    heartbeat.unref?.();
+    try {
+      await this.runInstaller({
+        javaExecutable,
+        installerPath,
+        gameDirectory: this.gameDirectory,
+        signal,
+        onLog: (channel, chunk) => log.write(channel, chunk),
+        onOutput: (line) => {
+          latestInstallerMessage = line;
+          if (Date.now() - lastMessageAt < 250) return;
+          lastMessageAt = Date.now();
+          onProgress({
+            phase: 'installing-loader',
+            message: line,
+            loaderType,
+            logPath: log.filePath,
+            completedFiles: 1,
+            totalFiles: 2
+          });
+        }
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
 
     const installedIds = await this.installedProfileIds({ requireMarker: false });
     const profileId = this.findProfileId(installedIds, loaderType, gameVersion, loaderVersion);

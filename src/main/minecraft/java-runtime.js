@@ -19,6 +19,25 @@ const WINDOWS_REGISTRY_KEYS = Object.freeze([
 
 const REGISTRY_TIMEOUT_MS = 5000;
 
+function javaAbortError() {
+  return Object.assign(new Error('Java 检测已取消'), { name: 'AbortError' });
+}
+
+function awaitJavaOperation(operation, signal) {
+  if (!signal) return Promise.resolve(operation);
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener('abort', abort);
+      reject(javaAbortError());
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    Promise.resolve(operation).then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', abort);
+    });
+    if (signal.aborted) abort();
+  });
+}
+
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
@@ -214,18 +233,20 @@ function javaDetailsFromVersionOutput(output) {
     fileEncoding: property('file.encoding') };
 }
 
-async function javaRuntimeDetails(executable, timeoutMs = 8000) {
+async function javaRuntimeDetails(executable, timeoutMs = 8000, { signal, spawnProcess = spawn } = {}) {
+  if (signal?.aborted) throw javaAbortError();
   if (path.isAbsolute(executable)) {
     try {
-      await fs.access(executable);
-    } catch {
+      await awaitJavaOperation(fs.access(executable), signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
       return undefined;
     }
   }
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let settled = false;
-    const child = spawn(executable, ['-XshowSettings:properties', '-version'], {
+    const child = spawnProcess(executable, ['-XshowSettings:properties', '-version'], {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -239,7 +260,16 @@ async function javaRuntimeDetails(executable, timeoutMs = 8000) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
       resolve(details);
+    };
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      try { child.kill(); } catch { /* Cancellation still releases the caller. */ }
+      reject(javaAbortError());
     };
     const timer = setTimeout(() => {
       child.kill();
@@ -248,32 +278,72 @@ async function javaRuntimeDetails(executable, timeoutMs = 8000) {
 
     child.once('error', () => finish(undefined));
     child.once('close', (code) => finish(code === 0 ? javaDetailsFromVersionOutput(output) : undefined));
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
   });
 }
 
-async function javaMajorVersion(executable, timeoutMs = 8000) {
-  return (await javaRuntimeDetails(executable, timeoutMs))?.majorVersion;
+async function javaMajorVersion(executable, timeoutMs = 8000, options) {
+  return (await javaRuntimeDetails(executable, timeoutMs, options))?.majorVersion;
 }
 
 async function findJavaExecutable(
   explicitPath,
   requiredMajorVersion,
   probe = javaMajorVersion,
-  discover = discoverJavaCandidates
+  discover = discoverJavaCandidates,
+  { signal, onProgress = () => {}, concurrency = 4 } = {}
 ) {
-  const detectedVersions = [];
-  for (const candidate of await discover(explicitPath)) {
-    const majorVersion = await probe(candidate);
-    if (!Number.isInteger(majorVersion)) continue;
-    detectedVersions.push(majorVersion);
-    if (!Number.isInteger(requiredMajorVersion) || majorVersion === requiredMajorVersion) {
-      return candidate;
+  if (signal?.aborted) throw javaAbortError();
+  onProgress({ message: '正在扫描 Java 安装位置…' });
+  const candidates = unique(await awaitJavaOperation(discover(explicitPath), signal));
+  const controller = new AbortController();
+  const probeSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  const detectedVersions = new Map();
+  let cursor = 0;
+  const check = async (index) => {
+    const candidate = candidates[index];
+    onProgress({ message: `正在检测 Java（${index + 1}/${candidates.length}）：${candidate}`, javaPath: candidate });
+    let majorVersion;
+    try {
+      majorVersion = await awaitJavaOperation(probe(candidate, undefined, { signal: probeSignal }), probeSignal);
+    } catch (error) {
+      if (probeSignal.aborted) throw error;
+      return undefined;
     }
+    if (!Number.isInteger(majorVersion)) return undefined;
+    detectedVersions.set(index, majorVersion);
+    return !Number.isInteger(requiredMajorVersion) || majorVersion === requiredMajorVersion ? candidate : undefined;
+  };
+  try {
+    // A manually chosen executable keeps priority. Other candidates can be
+    // checked concurrently so broken PATH entries do not add eight seconds each.
+    if (explicitPath && candidates[0] === explicitPath) {
+      cursor = 1;
+      const selected = await check(0);
+      if (selected) return selected;
+    }
+    const workers = Array.from({ length: Math.min(4, Math.max(1, concurrency), candidates.length - cursor) }, async () => {
+      while (cursor < candidates.length && !probeSignal.aborted) {
+        const selected = await check(cursor++);
+        if (selected) return selected;
+      }
+      throw new Error('No compatible Java in this probe group');
+    });
+    try {
+      return await awaitJavaOperation(Promise.any(workers), signal);
+    } catch (error) {
+      if (signal?.aborted) throw javaAbortError();
+      if (!(error instanceof AggregateError)) throw error;
+    }
+  } finally {
+    controller.abort();
   }
 
   if (Number.isInteger(requiredMajorVersion)) {
-    const detectedHint = detectedVersions.length > 0
-      ? `；当前检测到 Java ${[...new Set(detectedVersions)].join('、')}`
+    const versions = [...detectedVersions].sort(([left], [right]) => left - right).map(([, major]) => major);
+    const detectedHint = versions.length > 0
+      ? `；当前检测到 Java ${[...new Set(versions)].join('、')}`
       : '';
     throw new Error(`该游戏版本需要 Java ${requiredMajorVersion}${detectedHint}`);
   }
@@ -282,13 +352,25 @@ async function findJavaExecutable(
 
 // 设置页自动检测：探测所有候选并返回版本最高的（参考 PCL 自动选择最新 Java）
 async function detectJava(explicitPath, probe = javaMajorVersion, discover = discoverJavaCandidates, options) {
-  const candidates = await discover(explicitPath, options);
-  const results = await Promise.allSettled(candidates.map(async (candidate) => ({
-    path: candidate,
-    majorVersion: await probe(candidate)
-  })));
-  const available = results.filter((result) => result.status === 'fulfilled')
-    .map((result) => result.value).filter((result) => Number.isInteger(result.majorVersion));
+  const signal = options?.signal;
+  if (signal?.aborted) throw javaAbortError();
+  const candidates = await awaitJavaOperation(discover(explicitPath, options), signal);
+  const results = Array(candidates.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
+    while (cursor < candidates.length) {
+      if (signal?.aborted) throw javaAbortError();
+      const index = cursor++;
+      const candidate = candidates[index];
+      try {
+        const majorVersion = await awaitJavaOperation(probe(candidate, undefined, { signal }), signal);
+        results[index] = { path: candidate, majorVersion };
+      } catch {
+        if (signal?.aborted) throw javaAbortError();
+      }
+    }
+  }));
+  const available = results.filter((result) => Number.isInteger(result?.majorVersion));
   if (available.length === 0) {
     return { available: false, majorVersion: undefined, path: undefined };
   }
@@ -307,8 +389,9 @@ function buildInstallerArguments(installerPath, gameDirectory) {
 }
 
 async function installedJavaExecutable(gameDirectory, majorVersion, probe = javaMajorVersion,
-  { architecture = process.arch } = {}) {
+  { architecture = process.arch, signal } = {}) {
   for (const name of [`java-${majorVersion}-${architecture}`, `java-${majorVersion}`]) {
+    if (signal?.aborted) throw javaAbortError();
     try {
       const root = path.join(gameDirectory, 'runtime', 'melody', name);
       const marker = JSON.parse(await fs.readFile(path.join(root, '.melody-runtime.json'), 'utf8'));
@@ -318,11 +401,14 @@ async function installedJavaExecutable(gameDirectory, majorVersion, probe = java
       if (!executable.startsWith(`${path.resolve(root)}${path.sep}`)) continue;
       if (marker.architecture && marker.architecture !== architecture) continue;
       if (probe === javaMajorVersion) {
-        const details = await javaRuntimeDetails(executable);
+        const details = await javaRuntimeDetails(executable, undefined, { signal });
         if (details?.architecture !== architecture) continue;
         if (details.majorVersion === majorVersion) return executable;
-      } else if (await probe(executable) === majorVersion) return executable;
-    } catch { /* Try a legacy installation after an unavailable current one. */ }
+      } else if (await awaitJavaOperation(probe(executable, undefined, { signal }), signal) === majorVersion) return executable;
+    } catch {
+      if (signal?.aborted) throw javaAbortError();
+      // Try a legacy installation after an unavailable current one.
+    }
   }
   return undefined;
 }
@@ -447,6 +533,7 @@ async function runJavaInstaller({
 
 module.exports = {
   SUPPORTED_JAVA_MAJORS,
+  awaitJavaOperation,
   installedJavaExecutable,
   buildInstallerArguments,
   detectJava,

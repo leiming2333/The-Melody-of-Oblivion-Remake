@@ -1,7 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { createLazyServices } = require('../lazy-services');
 const { createTaskError, registerTaskHandler } = require('../../shared/task-errors');
 
 function systemGameDirectory(app, platform = process.platform) {
@@ -46,7 +45,9 @@ function registerMinecraftIpc({
   getAccountStore = () => accountStore,
   getMicrosoftAuth = () => microsoftAuth,
   getYggdrasilAuth = () => yggdrasilAuth,
-  getJavaProbeCache = () => javaProbeCache
+  getJavaProbeCache = () => javaProbeCache,
+  createServices = (options) => require('./background-services').createBackgroundMinecraftServices(options),
+  createFabricApiCatalog = () => require('./background-services').createFabricApiCatalog()
 }) {
   const activeDownloads = new Map();
   const gameProcesses = new (require('./game-process-registry').GameProcessRegistry)();
@@ -84,59 +85,15 @@ function registerMinecraftIpc({
     serviceSettings = { ...currentSettings };
     const config = serviceSettings;
     const directory = requestedDirectory;
-    const transferOptions = () => ({ gameDirectory: directory,
-      concurrency: config.downloadConcurrency ?? 32,
-      segmentConcurrency: Math.min(12, Math.max(4, Math.floor((config.downloadConcurrency ?? 32) / 2))) });
-    services = createLazyServices({
-      sourceManager: () => {
-        const { MinecraftSourceManager } = require('./source-manager');
-        const manager = new MinecraftSourceManager();
-        manager.setDownloadPreference(config.downloadSource ?? 'auto');
-        return manager;
-      },
-      downloader: (registry) => {
-        const { MinecraftDownloader } = require('./downloader');
-        return new MinecraftDownloader({ ...transferOptions(), sourceManager: registry.sourceManager });
-      },
-      loaderManager: (registry) => {
-        const { MinecraftLoaderManager } = require('./loader-manager');
-        const manager = new MinecraftLoaderManager({ ...transferOptions(),
-          sourceManager: registry.sourceManager, downloader: registry.downloader });
-        manager.javaPath = config.javaPath;
-        return manager;
-      },
-      fabricApiManager: () => {
-        const { FabricApiManager } = require('./fabric-api-manager');
-        return new FabricApiManager(transferOptions());
-      },
-      versionManager: () => {
-        const { MinecraftVersionManager } = require('./version-manager');
-        return new MinecraftVersionManager({ gameDirectory: directory, trashItem: (target) => shell.trashItem(target) });
-      },
-      modpackManager: (registry) => {
-        const { ModpackManager } = require('./modpack-manager');
-        const manager = new ModpackManager(transferOptions());
-        Object.defineProperty(manager, 'loaderManager', { get: () => registry.loaderManager });
-        return manager;
-      },
-      javaRuntime: () => {
-        const { ManagedJavaRuntime } = require('./managed-java-runtime');
-        const { javaMajorVersion } = require('./java-runtime');
-        const javaProbeCache = getJavaProbeCache();
-        return new ManagedJavaRuntime({ gameDirectory: directory,
-          extractArchive: (...args) => require('./launch-core').extractArchive(...args),
-          probeJava: javaProbeCache ? (candidate) => javaProbeCache.probe(candidate) : javaMajorVersion });
-      },
-      launcher: (registry) => {
+    services = createServices({ app, directory, config, shell, getJavaProbeCache, launcherRoot: launcherDirectory(app),
+      createLauncher: (registry, launchOptions = {}) => {
         const { MinecraftLauncher } = require('./launch-core');
         const launcher = new MinecraftLauncher({ gameDirectory: directory, javaRuntime: registry.javaRuntime,
           activeGames: gameProcesses.forDirectory(directory),
-          verifyFiles: (profileId, onProgress) => registry.downloader.verifyVersion(profileId, onProgress) });
+          verifyFiles: (profileId, onProgress) => registry.downloader.verifyVersion(profileId, onProgress),
+          ...(registry.javaRuntime.inspect ? { inspectJava: (executable) => registry.javaRuntime.inspect(executable) } : {}),
+          ...launchOptions });
         return launcher;
-      },
-      authlibInjector: () => {
-        const { AuthlibInjectorManager } = require('./authlib-injector');
-        return new AuthlibInjectorManager({ gameDirectory: directory });
       }
     });
     if (preparingTask) Object.assign(preparingTask, { directory: gameDirectory, preparing: false });
@@ -160,12 +117,14 @@ function registerMinecraftIpc({
     sourceManager?.setDownloadPreference(settings.downloadSource);
     const concurrency = settings.downloadConcurrency;
     const segmentConcurrency = Math.min(12, Math.max(4, Math.floor(concurrency / 2)));
-    for (const name of ['downloader', 'loaderManager', 'modpackManager', 'fabricApiManager']) {
+    for (const name of ['downloader', 'loaderManager', 'loaderInstaller', 'modpackManager', 'fabricApiManager']) {
       const manager = services.peek(name);
       if (manager) Object.assign(manager, { concurrency, segmentConcurrency });
     }
     const loaderManager = services.peek('loaderManager');
     if (loaderManager) loaderManager.javaPath = settings.javaPath;
+    const loaderInstaller = services.peek('loaderInstaller');
+    if (loaderInstaller) Object.assign(loaderInstaller, { javaPath: settings.javaPath, downloadSource: settings.downloadSource });
     return settings;
   }
 
@@ -191,8 +150,8 @@ function registerMinecraftIpc({
       ? options.taskId : randomUUID();
     const registryId = `${event.sender.id}:${kind}:${taskId}`;
     const javaTask = kind === 'java-runtime';
-    if ([...activeDownloads.values()].some((task) => javaTask
-      ? task.kind === 'java-runtime' : task.kind !== 'java-runtime')) {
+    const group = taskGroup(kind);
+    if ([...activeDownloads.values()].some((task) => taskGroup(task.kind) === group)) {
       throw createTaskError('TASK_BUSY', javaTask ? 'Java 运行环境正在下载中' : '请先等待当前安装完成或取消');
     }
     const controller = new AbortController();
@@ -227,6 +186,18 @@ function registerMinecraftIpc({
     }
   }
 
+  function taskGroup(kind) {
+    if (kind === 'java-runtime') return 'java';
+    if (kind === 'inspect-modpack') return 'inspection';
+    // Game writers still share libraries and profile files, so retain their
+    // exclusion while independent read-only and Java modules continue working.
+    return 'installation';
+  }
+
+  function installationActive() {
+    return [...activeDownloads.values()].some((task) => taskGroup(task.kind) === 'installation');
+  }
+
   ipcMain.handle('minecraft:list-versions', async (_event, options = {}) => {
     await applyDownloadSettings();
     return services.downloader.listVersions({ force: options.force === true });
@@ -238,37 +209,13 @@ function registerMinecraftIpc({
   });
 
   ipcMain.handle('minecraft:get-java-requirement', async (_event, targetId) => {
-    const { resolveLaunchTarget } = require('./launch-target');
-    const { readVersionMetadata } = require('./version-metadata');
     await ensureMinecraftServices();
-    const instance = await resolveLaunchTarget(gameDirectory, String(targetId ?? ''));
-    const metadata = await readVersionMetadata(gameDirectory, instance?.profileId ?? targetId);
-    return { majorVersion: metadata.javaVersion?.majorVersion ?? 8 };
+    return services.versionManager.getJavaRequirement(targetId);
   });
 
-  ipcMain.handle('minecraft:detect-java', async (_event, options = {}) => {
-    const { detectJava, javaMajorVersion, installedJavaExecutable, SUPPORTED_JAVA_MAJORS } = require('./java-runtime');
-    const javaProbeCache = getJavaProbeCache();
-    const settings = await ensureMinecraftServices();
-    const probe = javaProbeCache
-      ? (candidate) => javaProbeCache.probe(candidate, { force: options.force === true })
-      : javaMajorVersion;
-    const results = await Promise.allSettled([
-      detectJava(settings.javaPath, probe, undefined, { launcherDirectory: launcherDirectory(app) }),
-      ...SUPPORTED_JAVA_MAJORS.map(async (majorVersion) => {
-      const javaPath = await installedJavaExecutable(gameDirectory, majorVersion, javaProbeCache
-        ? (candidate) => javaProbeCache.probe(candidate, { force: options.force === true })
-        : javaMajorVersion);
-      if (!javaPath) return null;
-      return { available: true, path: javaPath, majorVersion };
-      })
-    ]);
-    const candidates = results.filter((result) => result.status === 'fulfilled' && result.value?.available)
-      .map((result) => result.value);
-    candidates.sort((left, right) => right.majorVersion - left.majorVersion);
-    return candidates[0]
-      ? { ...candidates[0], runtimes: candidates.flatMap((entry) => entry.runtimes ?? [{ path: entry.path, majorVersion: entry.majorVersion }]) }
-      : { available: false };
+  registerTaskHandler(ipcMain, 'minecraft:detect-java', async (_event, options = {}) => {
+    await applyDownloadSettings();
+    return services.javaRuntime.detect(options);
   });
 
   registerTaskHandler(ipcMain, 'minecraft:download-java', (event, majorVersion, options = {}) => (
@@ -366,8 +313,7 @@ function registerMinecraftIpc({
 
   let fabricApiCatalog;
   registerTaskHandler(ipcMain, 'minecraft:list-fabric-api-versions', (_event, gameVersion, options = {}) => {
-    const { FabricApiManager } = require('./fabric-api-manager');
-    fabricApiCatalog ??= new FabricApiManager({});
+    fabricApiCatalog ??= createFabricApiCatalog();
     return fabricApiCatalog.listVersions(gameVersion, { force: options.force === true });
   });
 
@@ -394,7 +340,7 @@ function registerMinecraftIpc({
         await selectedServices.fabricApiManager.resolveVersion(request.gameVersion, request.fabricApiVersionId, { signal });
         if (signal.aborted) throw createTaskError('TASK_CANCELLED', '下载已取消');
       }
-      const result = await selectedServices.loaderManager.installLoader(request, (progress) => report({
+      const result = await selectedServices.loaderInstaller.installLoader(request, (progress) => report({
         ...progress, phase: withFabricApi && progress.phase === 'complete' ? 'loader-ready' : progress.phase
       }), { signal });
       if (!withFabricApi) return result;
@@ -427,7 +373,7 @@ function registerMinecraftIpc({
   });
 
   ipcMain.handle('minecraft:verify-version', async (event, versionId) => {
-    if (activeDownloads.size > 0) {
+    if (installationActive()) {
       throw new Error('请先等待下载完成或取消下载，再检测游戏文件');
     }
     await applyDownloadSettings();
@@ -451,7 +397,7 @@ function registerMinecraftIpc({
   ));
 
   ipcMain.handle('minecraft:delete-version', async (_event, profileId) => {
-    if (activeDownloads.size > 0) {
+    if (installationActive()) {
       throw new Error('请先等待下载完成或取消下载，再删除游戏版本');
     }
     await ensureMinecraftServices();
@@ -460,7 +406,7 @@ function registerMinecraftIpc({
   });
 
   registerTaskHandler(ipcMain, 'minecraft:launch-version', async (event, profileId) => {
-    if (activeDownloads.size > 0) {
+    if (installationActive()) {
       throw new Error('请先等待下载完成或取消下载，再启动游戏');
     }
     const settingsStore = getSettingsStore();
@@ -519,7 +465,7 @@ function registerMinecraftIpc({
         const yggdrasilAuth = getYggdrasilAuth();
         if (yggdrasilAuth) currentAccount = await yggdrasilAuth.ensureAccount(currentAccount);
       }
-      if (activeDownloads.size > 0) throw new Error('请先等待下载完成或取消下载，再启动游戏');
+      if (installationActive()) throw new Error('请先等待下载完成或取消下载，再启动游戏');
       const { resolveLaunchTarget, profileGameDirectory } = require('./launch-target');
       const instance = await resolveLaunchTarget(launchDirectory, requestedTargetId);
       const authlibInjectorPath = currentAccount?.type === 'yggdrasil'
@@ -556,38 +502,28 @@ function registerMinecraftIpc({
     }
   });
 
-  let modManager;
-  const getModManager = () => modManager ??= new (require('./mod-manager').ModManager)();
+  const getModManager = () => services.modManager;
   async function targetDirectory(targetId, mutate = false) {
     const settings = await ensureMinecraftServices();
-    if (mutate && (activeDownloads.size || gameProcesses.isBusy(gameDirectory))) {
+    if (mutate && (installationActive() || gameProcesses.isBusy(gameDirectory))) {
       throw new Error('请先关闭游戏并等待安装完成，再修改 Mod');
     }
-    const root = gameDirectory;
-    const { resolveLaunchTarget, profileGameDirectory } = require('./launch-target');
-    const instance = await resolveLaunchTarget(root, targetId);
-    await require('./version-metadata').readVersionMetadata(root, instance?.profileId ?? targetId);
-    const directory = instance?.instanceDirectory ?? (settings.isolateProfiles !== false
-      ? profileGameDirectory(root, targetId) : root);
-    // Reject redirected parents beneath the game root.
-    const relative = path.relative(root, directory);
-    let parent = root;
-    for (const segment of relative.split(path.sep).filter(Boolean)) {
-      parent = path.join(parent, segment);
-      try { if ((await fs.lstat(parent)).isSymbolicLink()) throw new Error('实例目录不能是链接'); }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
-    }
-    return directory;
+    return services.versionManager.resolveModDirectory(targetId, settings.isolateProfiles);
   }
-  ipcMain.handle('minecraft:list-mods', async (_event, targetId) => getModManager().list(await targetDirectory(targetId)));
-  ipcMain.handle('minecraft:set-mod-enabled', async (_event, targetId, name, enabled) => (
-    getModManager().setEnabled(await targetDirectory(targetId, true), name, enabled)
-  ));
+  ipcMain.handle('minecraft:list-mods', async (_event, targetId) => {
+    const directory = await targetDirectory(targetId);
+    return getModManager().list(directory);
+  });
+  ipcMain.handle('minecraft:set-mod-enabled', async (_event, targetId, name, enabled) => {
+    const directory = await targetDirectory(targetId, true);
+    return getModManager().setEnabled(directory, name, enabled);
+  });
   ipcMain.handle('minecraft:import-mod-file', async (_event, targetId, filePath) => {
     if (typeof filePath !== 'string' || !path.isAbsolute(filePath) || !/\.jar$/i.test(filePath)) {
       throw new Error('请拖入有效的 .jar Mod 文件');
     }
-    return getModManager().importFile(await targetDirectory(targetId, true), filePath);
+    const directory = await targetDirectory(targetId, true);
+    return getModManager().importFile(directory, filePath);
   });
   ipcMain.handle('minecraft:import-mod', async (event, targetId) => {
     if (!dialog) throw new Error('文件选择服务不可用');
@@ -595,7 +531,8 @@ function registerMinecraftIpc({
       title: '导入当前实例的 Mod', properties: ['openFile'], filters: [{ name: 'Java Mod', extensions: ['jar'] }]
     });
     if (selection.canceled || !selection.filePaths.length) return { canceled: true };
-    const mods = await getModManager().importFile(await targetDirectory(targetId, true), selection.filePaths[0]);
+    const directory = await targetDirectory(targetId, true);
+    const mods = await getModManager().importFile(directory, selection.filePaths[0]);
     return { canceled: false, mods };
   });
 

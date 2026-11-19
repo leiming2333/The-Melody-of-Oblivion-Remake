@@ -68,6 +68,7 @@ test('Mod IPC imports into the selected profile and opens the same isolated dire
   const handlers = new Map();
   let opened;
   registerMinecraftIpc({ app: { getAppPath: () => root }, ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
+    createServices: require('./helpers/inline-minecraft-services').createInlineMinecraftServices,
     shell: { openPath: async directory => { opened = directory; return ''; } },
     settingsStore: { getState: async () => ({ gameDirectoryMode: 'local', isolateProfiles: true }) },
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [source] }) } });

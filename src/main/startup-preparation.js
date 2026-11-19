@@ -1,7 +1,7 @@
 const fs = require('node:fs/promises');
 const { constants } = require('node:fs');
 const path = require('node:path');
-const { resolveGameDirectory } = require('./minecraft/ipc');
+const { serializeTaskError } = require('../shared/task-errors');
 
 const REQUIRED_STARTUP_RESOURCES = Object.freeze([
   'package.json',
@@ -9,46 +9,32 @@ const REQUIRED_STARTUP_RESOURCES = Object.freeze([
   'src/renderer/index.html',
   'src/renderer/styles.css',
   'src/renderer/renderer.js',
-  'src/renderer/modules/account-ui.mjs',
-  'src/renderer/modules/modpack-ui.mjs',
-  'src/renderer/modules/launcher-update-ui.mjs',
-  'src/renderer/modules/fabric-api-ui.mjs',
-  'src/renderer/assets/app-icon.ico',
-  'src/renderer/assets/app-icon.png',
-  'src/renderer/assets/app-icon.icns',
-  'src/renderer/assets/backgrounds/wp15225187.jpg',
-  'src/renderer/assets/backgrounds/wp15225191.jpg',
-  'src/renderer/assets/backgrounds/NjGW245.jpg',
-  'src/renderer/assets/backgrounds/640c286f00c515f0fe1c0bc0415bae64~tplv-a9rns2rl98-pc_smart_face_crop-v1_512_384.jpg',
-  'src/main/accounts/microsoft-client-id.json',
+  'src/renderer/modules/module-controller.js',
   'src/shared/task-errors.js',
-  'src/shared/build-info.js',
-  'src/shared/release-metadata.js',
-  'src/shared/website-cdn-config.json'
+  'src/shared/build-info.js'
 ]);
 
-const GAME_DIRECTORIES = Object.freeze([
-  'versions', 'libraries', 'assets/indexes', 'assets/objects',
-  'melody-instances', 'runtime/melody', 'launcher-cache'
-]);
+// A broken optional feature must be reported without disabling the launcher.
+const MODULE_STARTUP_RESOURCES = Object.freeze({
+  account: Object.freeze(['src/renderer/modules/account-ui.mjs', 'src/main/accounts/microsoft-client-id.json']),
+  modpack: Object.freeze(['src/renderer/modules/modpack-ui.mjs']),
+  updater: Object.freeze(['src/renderer/modules/launcher-update-ui.mjs',
+    'src/shared/release-metadata.js', 'src/shared/website-cdn-config.json']),
+  'fabric-api': Object.freeze(['src/renderer/modules/fabric-api-ui.mjs']),
+  download: Object.freeze(['src/renderer/modules/download-ui.js']),
+  catalog: Object.freeze(['src/renderer/modules/version-catalog-ui.js']),
+  appearance: Object.freeze([
+    'src/renderer/assets/app-icon.ico',
+    'src/renderer/assets/app-icon.png',
+    'src/renderer/assets/app-icon.icns',
+    'src/renderer/assets/backgrounds/wp15225187.jpg',
+    'src/renderer/assets/backgrounds/wp15225191.jpg',
+    'src/renderer/assets/backgrounds/NjGW245.jpg',
+    'src/renderer/assets/backgrounds/640c286f00c515f0fe1c0bc0415bae64~tplv-a9rns2rl98-pc_smart_face_crop-v1_512_384.jpg'
+  ])
+});
 
-async function ensureStoredDefaults(store) {
-  // Use the store's recovery and write queue so a missing primary restores its
-  // backup, and concurrent account/settings changes cannot be overwritten.
-  return store.storage.runExclusive(async () => {
-    const state = await store.read();
-    const primary = await store.storage.snapshot(store.filePath);
-    if (primary.missing) await store.write(state);
-    else if ((await store.storage.snapshot(store.storage.backupPath)).missing) {
-      // Preserve serialized account secrets and original formatting verbatim.
-      await store.storage.atomicWrite(store.storage.backupPath, primary.bytes, primary.mode);
-    }
-    return state;
-  });
-}
-
-function createStartupPreparation({ app, getSettingsStore, getAccountStore,
-  onProgress, fileSystem = fs, gameDirectoryOptions } = {}) {
+function createStartupPreparation({ app, onProgress, fileSystem = fs } = {}) {
   let pending;
   let latestProgress;
   const listeners = new Set();
@@ -66,7 +52,8 @@ function createStartupPreparation({ app, getSettingsStore, getAccountStore,
   async function run() {
     report('checking-resources', '正在检查启动器文件…', 10);
     const root = app.getAppPath();
-    for (const resource of REQUIRED_STARTUP_RESOURCES) {
+    const moduleErrors = [];
+    async function checkResource(resource) {
       const filename = path.join(root, resource);
       try {
         const stat = await fileSystem.stat(filename);
@@ -80,28 +67,16 @@ function createStartupPreparation({ app, getSettingsStore, getAccountStore,
         });
       }
     }
-
-    report('preparing-config', '正在准备账户与启动器设置…', 40);
-    const settings = await ensureStoredDefaults(getSettingsStore());
-    await ensureStoredDefaults(getAccountStore());
-
-    report('preparing-directories', '正在准备游戏与日志目录…', 70);
-    const gameDirectory = resolveGameDirectory(app, settings.gameDirectoryMode, gameDirectoryOptions);
-    const logsDirectory = path.join(app.getPath('userData'), 'logs');
-    await fileSystem.mkdir(logsDirectory, { recursive: true });
-    await fileSystem.access(logsDirectory, constants.W_OK);
-    try {
-      for (const name of GAME_DIRECTORIES) {
-        const directory = path.join(gameDirectory, name);
-        await fileSystem.mkdir(directory, { recursive: true });
-        await fileSystem.access(directory, constants.W_OK);
+    for (const resource of REQUIRED_STARTUP_RESOURCES) await checkResource(resource);
+    for (const [module, resources] of Object.entries(MODULE_STARTUP_RESOURCES)) {
+      for (const resource of resources) {
+        try { await checkResource(resource); }
+        catch (error) { moduleErrors.push({ module, ...serializeTaskError(error), resource }); }
       }
-    } catch (error) {
-      throw Object.assign(error, { phase: 'preparing-directories',
-        details: { gameDirectoryMode: settings.gameDirectoryMode, gameDirectory } });
     }
+
     report('ready', '启动器准备完成', 100);
-    return { ready: true, gameDirectory };
+    return { ready: true, ...(moduleErrors.length ? { moduleErrors } : {}) };
   }
 
   function prepare(listener) {
@@ -123,4 +98,4 @@ function createStartupPreparation({ app, getSettingsStore, getAccountStore,
   return { prepare };
 }
 
-module.exports = { createStartupPreparation, REQUIRED_STARTUP_RESOURCES, GAME_DIRECTORIES };
+module.exports = { createStartupPreparation, REQUIRED_STARTUP_RESOURCES, MODULE_STARTUP_RESOURCES };

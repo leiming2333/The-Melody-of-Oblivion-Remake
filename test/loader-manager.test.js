@@ -198,6 +198,46 @@ test('Missing compatible Java stops the installer without downloading a runtime'
   assert.deepEqual(fixture.runtimeDownloads, []);
 });
 
+test('loader installation forwards Java detection progress without losing task context', async (t) => {
+  const fixture = await installerFixture(t);
+  fixture.manager.javaRuntime.resolve = async (_path, requiredMajor, onProgress) => {
+    assert.equal(requiredMajor, 21);
+    onProgress({ message: '正在检测 Java fixture', javaPath: 'fixture-java' });
+    return 'fixture-java';
+  };
+  const progress = [];
+  await fixture.manager.installLoader(fixture.request, (value) => progress.push(value));
+  const detection = progress.find((value) => value.javaPath === 'fixture-java');
+  assert.equal(detection.phase, 'installing-loader');
+  assert.equal(detection.loaderType, 'forge');
+  assert.ok(detection.logPath);
+});
+
+test('silent installer progress has a heartbeat that is removed after completion', async (t) => {
+  const fixture = await installerFixture(t, { systemVersions: new Map([['java-21', 21]]) });
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'] });
+  let entered;
+  let release;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const waiting = new Promise((resolve) => { release = resolve; });
+  const originalInstaller = fixture.manager.runInstaller;
+  fixture.manager.runInstaller = async (options) => {
+    entered();
+    await waiting;
+    return originalInstaller(options);
+  };
+  const progress = [];
+  const pending = fixture.manager.installLoader(fixture.request, (value) => progress.push(value));
+  await started;
+  t.mock.timers.tick(10000);
+  assert.ok(progress.some((value) => value.phase === 'installing-loader' && value.elapsedSeconds === 10));
+  release();
+  await pending;
+  const count = progress.length;
+  t.mock.timers.tick(10000);
+  assert.equal(progress.length, count, 'completed installs do not retain a heartbeat');
+});
+
 test('installer checksums come from official Maven and only a missing SHA-256 permits SHA-1 fallback', async (t) => {
   const officialUrl = loaderArtifact('forge', '1.21.1', '52.1.16').officialUrl;
   const requested = [];

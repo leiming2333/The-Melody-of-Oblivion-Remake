@@ -82,6 +82,7 @@ async function ipcFixture(t, patch = {}) {
   const handlers = new Map();
   const settingsStore = { getState: async () => settings };
   registerMinecraftIpc({
+    createServices: require('./helpers/inline-minecraft-services').createInlineMinecraftServices,
     app,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     shell: { trashItem: async () => {}, openPath: async () => '' },
@@ -190,6 +191,7 @@ test('system and managed Java detection overlap and keep managed results after s
     };
     const handlers = new Map();
     require('./src/main/minecraft/ipc').registerMinecraftIpc({
+      createServices: require('./test/helpers/inline-minecraft-services').createInlineMinecraftServices,
       app: { isPackaged: false, getAppPath: () => process.cwd() },
       ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
       settingsStore: { getState: async () => ({ gameDirectoryMode: 'local' }) }

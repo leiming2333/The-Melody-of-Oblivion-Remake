@@ -45,6 +45,33 @@ function transformAccountSecrets(value, transform, { recoverErrors = false } = {
 
 const transformMicrosoftSecrets = transformAccountSecrets;
 
+// The desktop credential vault lives in Electron's main process. Awaiting its
+// codec lets this store own its files in an isolated process without ever
+// writing decrypted tokens or weakening the unreadable-credential recovery.
+async function transformStoredSecrets(value, transform, { recoverErrors = false } = {}) {
+  if (!Array.isArray(value?.accounts)) return value;
+  const accounts = [];
+  for (const account of value.accounts) {
+    if (!ONLINE_ACCOUNT_TYPES.includes(account?.type)) { accounts.push(account); continue; }
+    const copy = { ...account };
+    const fields = account.type === 'microsoft' ? MICROSOFT_SECRET_FIELDS : YGGDRASIL_SECRET_FIELDS;
+    if (copy[UNREADABLE_SECRETS]) Object.assign(copy, copy[UNREADABLE_SECRETS]);
+    else {
+      try {
+        for (const field of fields) {
+          if (typeof copy[field] === 'string' && copy[field]) copy[field] = await transform(copy[field]);
+        }
+      } catch (error) {
+        if (!recoverErrors) throw error;
+        copy[UNREADABLE_SECRETS] = Object.fromEntries(fields.map((field) => [field, account[field]]));
+        for (const field of fields) copy[field] = undefined;
+      }
+    }
+    accounts.push(copy);
+  }
+  return { ...value, accounts };
+}
+
 function normalizeSkinUrl(value, allowedDomains = ['textures.minecraft.net']) {
   try {
     const parsed = new URL(String(value ?? ''));
@@ -173,14 +200,14 @@ class AccountStore {
 
   async read() {
     const persisted = await this.storage.read();
-    const decoded = transformAccountSecrets(persisted, (value) => (
+    const decoded = await transformStoredSecrets(persisted, (value) => (
       this.secretCodec.decode(value)
     ), { recoverErrors: true });
     return normalizeState(decoded);
   }
 
   async write(state) {
-    const encoded = transformAccountSecrets(normalizeState(state), (value) => (
+    const encoded = await transformStoredSecrets(normalizeState(state), (value) => (
       this.secretCodec.encode(value)
     ));
     await this.storage.write(encoded);
@@ -453,6 +480,19 @@ class AccountStore {
     if (account?.type === 'microsoft') return this.refreshMicrosoftSkin(accountId, fetchImpl);
     if (account?.type === 'yggdrasil') return this.refreshYggdrasilSkin(accountId, fetchImpl);
     throw new Error('当前账户不支持在线皮肤同步');
+  }
+
+  async updateSkin(accountId, skinUrl, expectedToken) {
+    return this.runExclusive(async () => {
+      const state = await this.read();
+      const account = state.accounts.find((entry) => entry.id === accountId);
+      if (!account || account.accessToken !== expectedToken) return this.publicState(state);
+      const normalized = normalizeSkinUrl(skinUrl, account.type === 'microsoft' ? ['textures.minecraft.net'] : ['littleskin.cn']);
+      if (!normalized) throw new Error('玩家档案没有可用皮肤');
+      account.skinUrl = normalized;
+      await this.write(state);
+      return this.publicState(state);
+    });
   }
 
   async remove(accountId) {

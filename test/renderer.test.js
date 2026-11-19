@@ -3,6 +3,31 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { createModuleController } = require('../src/renderer/modules/module-controller');
+const { createVersionCatalogUi } = require('../src/renderer/modules/version-catalog-ui');
+const { createDownloadUi } = require('../src/renderer/modules/download-ui');
+
+function installUiBoundaries(context) {
+  const selected = context.selectedRemoteVersion;
+  context.launcherSettingsLoaded ??= false;
+  context.launcherSettingsLoadingPromise ??= undefined;
+  context.localProfiles ??= [];
+  context.remoteVersions ??= [];
+  context.loaderVersions ??= [];
+  context.localProfilesLoadToken ??= 0;
+  context.loaderLoadToken ??= 0;
+  context.versionCatalogLoadToken ??= 0;
+  let catalog, download;
+  context.getVersionCatalogUi = () => catalog ??= createModuleController({ create: () => createVersionCatalogUi({
+    ...context, state: context,
+    beginRequest: (key) => catalog.beginRequest(key),
+    cancelRequest: (key) => catalog.cancel(key),
+    selectRemoteVersion: Object.hasOwn(context, 'gameVersion') ? () => context.gameVersion : selected,
+    renderProfiles: () => context.renderLocalProfileOptions(),
+    refreshLocalProfiles: (force) => context.loadLocalProfiles(force)
+  }) });
+  context.getDownloadUi = () => download ??= createModuleController({ create: () => createDownloadUi({ ...context, state: context }) });
+}
 
 function loadGameProcessKey(source, context) {
   context.currentGameDirectory ??= '';
@@ -19,6 +44,7 @@ test('问题提示提供重新登录入口、保留错误信息并重置上次�
     '#problemError': {}, '#problemDetails': {}, '#problemAccountButton': {}
   };
   const context = { document: { querySelector: (selector) => nodes[selector] } };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('function readableError('), source.indexOf('function setAccountHint(')), context);
   const expired = "Error invoking remote method 'minecraft:launch-version': Error: AADSTS70000: The grant is expired. The user must sign in again.";
@@ -65,6 +91,7 @@ function loaderFixture() {
     downloadVersionButton: {}, deleteVersionButton: {}, clearVersionSelectionButton: {},
     readableError: (error) => error.message, showToast() {}
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(
     source.indexOf('function selectedLoaderVersion()'),
@@ -76,6 +103,7 @@ function loaderFixture() {
 test('offline avatar follows the selected Steve or Alex skin', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
   const context = { URL };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(
     source.indexOf('const defaultSkinUrls ='),
@@ -135,6 +163,7 @@ test('canceling Microsoft login before a device code arrives discards that sessi
     },
     showToast: () => {}
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext('let microsoftLoginSessionId; let microsoftLoginActive = false; let microsoftLoginRequestId = 0;', context);
   vm.runInContext(source.slice(
@@ -211,16 +240,18 @@ function startupFixture(overrides = {}) {
     window: { localStorage: { getItem: () => null } },
     JAVA_CHECK_SKIP_KEY: 'java-skip',
     showToast: (text) => events.push(text),
+    accountName: {},
     readableError: (error) => error.message,
     updaterApi: undefined,
     ...overrides
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('async function performJavaCheck()')), context);
   return { context, events, frames, nodes, showWindow: () => showWindow() };
 }
 
-test('startup paints preparation before file access and enters home only after required reads finish', async () => {
+test('startup paints preparation before file access and opens home while game profiles load independently', async () => {
   let finishFiles, finishProfiles;
   const f = startupFixture({ loadLocalProfiles: () => new Promise((resolve) => { finishProfiles = resolve; }) });
   f.context.environment.startup.prepare = () => new Promise((resolve) => { finishFiles = resolve; });
@@ -235,9 +266,10 @@ test('startup paints preparation before file access and enters home only after r
   assert.equal(f.nodes['#launcherStage'].inert, true);
   finishFiles({ ready: true });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(f.nodes['#startupScreen'].hidden, false);
-  assert.equal(f.events.includes('renderer-ready'), false);
-  assert.equal(f.events.includes('java-start'), false);
+  assert.equal(f.nodes['#startupScreen'].hidden, true);
+  assert.equal(f.nodes['#launcherStage'].inert, false);
+  assert.equal(f.events.includes('renderer-ready'), true);
+  assert.equal(f.events.includes('java-start'), true);
   finishProfiles();
   await painted;
   await new Promise((resolve) => setImmediate(resolve));
@@ -245,8 +277,8 @@ test('startup paints preparation before file access and enters home only after r
   assert.equal(f.nodes['#startupScreen'].hidden, true);
   assert.equal(f.nodes['#launcherStage'].inert, false);
   assert.equal(f.nodes['#startupProgress'].value, 100);
-  assert.ok(f.events.indexOf('profiles-loaded') < f.events.indexOf('renderer-ready'));
-  assert.ok(f.events.indexOf('renderer-ready') < f.events.indexOf('core-ready'));
+  assert.ok(f.events.indexOf('renderer-ready') < f.events.indexOf('profiles-loaded'));
+  assert.ok(f.events.indexOf('core-ready') < f.events.indexOf('renderer-ready'));
   assert.ok(f.events.indexOf('core-ready') < f.events.indexOf('java-start'));
   assert.ok(f.events.some((event) => event.includes('未检测到 Java')));
   assert.ok(f.events.includes('java-detected'));
@@ -272,17 +304,76 @@ test('a missing application file leaves home blocked and retry enters home after
   assert.equal(f.events.filter((event) => event === 'core-ready').length, 1);
 });
 
-test('settings, account and profile read failures cannot report startup ready', async () => {
-  for (const name of ['loadLauncherSettings', 'loadAccountState', 'loadLocalProfiles']) {
+test('settings, account and profile failures stay within their modules while home remains usable', async () => {
+  for (const name of ['loadLauncherSettings']) {
     const f = startupFixture({ [name]: async () => { throw new Error(`${name} failed`); } });
     await f.context.prepareLauncher();
-    assert.equal(f.nodes['#startupScreen'].dataset.state, 'error', name);
-    assert.equal(f.nodes['#launcherStage'].inert, true, name);
-    assert.equal(f.events.includes('renderer-ready'), false, name);
-    assert.equal(f.events.includes('core-ready'), false, name);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(f.nodes['#startupScreen'].dataset.state, 'ready', name);
+    assert.equal(f.nodes['#launcherStage'].inert, false, name);
+    assert.equal(f.events.includes('renderer-ready'), true, name);
+    assert.equal(f.events.includes('core-ready'), true, name);
     assert.equal(f.events.includes('java-start'), false, name);
-    assert.match(f.nodes['#startupError'].textContent, /failed/);
+    assert.ok(f.events.some((event) => /设置读取失败.*failed/.test(event)), name);
   }
+  for (const name of ['loadAccountState', 'loadLocalProfiles']) {
+    const f = startupFixture({ [name]: async () => { throw new Error(`${name} failed`); } });
+    await f.context.prepareLauncher();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(f.nodes['#startupScreen'].dataset.state, 'ready', name);
+    assert.equal(f.nodes['#launcherStage'].inert, false, name);
+    assert.equal(f.events.includes('core-ready'), true, name);
+    assert.equal(f.events.includes('java-start'), true, name);
+    assert.ok(f.events.some((event) => /可重试.*failed|重试.*failed/.test(event)), name);
+  }
+});
+
+test('a stalled settings module leaves home and the other modules usable, then applies settings before Java starts', async () => {
+  let finishSettings;
+  const f = startupFixture({
+    loadLauncherSettings: () => new Promise((resolve) => { finishSettings = resolve; }),
+    updaterApi: { getState: async () => ({ status: 'idle' }) },
+    renderLauncherUpdate: () => f.events.push('updater-rendered')
+  });
+  await f.context.prepareLauncher();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.nodes['#startupScreen'].hidden, true);
+  assert.equal(f.nodes['#launcherStage'].inert, false);
+  for (const event of ['renderer-ready', 'accounts-loaded', 'profiles-loaded', 'modpack-recovery-start', 'updater-rendered']) {
+    assert.equal(f.events.includes(event), true, event);
+  }
+  assert.equal(f.events.includes('java-start'), false);
+  finishSettings();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(f.events.indexOf('settings-loaded') < f.events.indexOf('java-start'));
+  assert.equal(f.events.includes('java-detected'), true);
+});
+
+test('a stalled or failed window-health confirmation never blocks home or other modules', async () => {
+  for (const rendererReady of [() => new Promise(() => {}), async () => { throw new Error('updater unavailable'); }]) {
+    const f = startupFixture();
+    f.context.environment.diagnostics.rendererReady = rendererReady;
+    await f.context.prepareLauncher();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(f.nodes['#launcherStage'].inert, false);
+    assert.equal(f.events.includes('accounts-loaded'), true);
+    assert.equal(f.events.includes('profiles-loaded'), true);
+    assert.equal(f.events.includes('java-detected'), true);
+    assert.equal(f.nodes['#startupErrorDetails'].hidden, true);
+  }
+});
+
+test('a stalled account module and optional resource failure leave the other modules usable', async () => {
+  const f = startupFixture({ loadAccountState: () => new Promise(() => {}) });
+  f.context.environment.startup.prepare = async () => ({ ready: true,
+    moduleErrors: [{ module: 'modpack', message: '整合包界面缺失' }] });
+  await f.context.prepareLauncher();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.nodes['#launcherStage'].inert, false);
+  assert.equal(f.events.includes('profiles-loaded'), true);
+  assert.equal(f.events.includes('java-start'), true);
+  assert.equal(f.events.includes('accounts-loaded'), false);
+  assert.ok(f.events.some((event) => event.includes('整合包界面缺失')));
 });
 
 test('a read-only local game directory can be changed to the system directory from the preparation page', async () => {
@@ -335,13 +426,77 @@ test('startup reads propagate configuration errors while later manual refreshes 
     const context = { [api]: { getState: async () => { throw new Error('配置读取失败'); } },
       accountName: placeholder, sourceHint: placeholder,
       readableError: (error) => error.message, showToast: (message) => notices.push(message) };
-    vm.createContext(context);
+    installUiBoundaries(context);
+  vm.createContext(context);
     vm.runInContext(source.slice(source.indexOf(`async function ${name}(`), source.indexOf(end)), context);
     await assert.rejects(context[name]({ strict: true }), /配置读取失败/);
     assert.deepEqual(notices, []);
     await context[name]();
     assert.equal(notices.length, 1);
   }
+});
+
+function settingsReadFixture(getState) {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const notices = [], applied = [];
+  const dialog = { open: false, showModal() { this.open = true; } };
+  const context = {
+    settingsApi: { getState }, settingsDialog: dialog,
+    launcherSettings: { memoryMb: 4096 }, memoryRange: { value: '4096' },
+    sourceHint: { classList: { remove() {} }, setAttribute() {} },
+    applySettingsToForm() {
+      applied.push(context.launcherSettings.memoryMb);
+      context.memoryRange.value = String(context.launcherSettings.memoryMb);
+    },
+    notifyStorageRecovery() {}, refreshAutoJavaDetection() {},
+    readableError: (error) => error.message, showToast: (message) => notices.push(message)
+  };
+  installUiBoundaries(context);
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('async function loadLauncherSettings('),
+    source.indexOf('async function addOfflineAccount()')), context);
+  vm.runInContext(source.slice(source.indexOf('async function ensureSettingsOpen()'),
+    source.indexOf('async function openJavaSettings(')), context);
+  return { context, dialog, notices, applied };
+}
+
+test('opening settings shares its pending authoritative read and never replaces an editable draft', async () => {
+  let finish, reads = 0;
+  const f = settingsReadFixture(() => { reads++; return new Promise((resolve) => { finish = resolve; }); });
+  const startupRead = f.context.loadLauncherSettings({ strict: true, detectJava: false });
+  const opening = f.context.ensureSettingsOpen();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reads, 1);
+  assert.equal(f.dialog.open, false);
+  assert.deepEqual(f.applied, []);
+  finish({ memoryMb: 8192, javaPath: 'C:\\Java\\bin\\java.exe' });
+  await startupRead;
+  assert.equal(await opening, true);
+  assert.equal(f.dialog.open, true);
+  assert.equal(f.context.memoryRange.value, '8192');
+  assert.ok(f.applied.every((value) => value === 8192));
+  f.context.memoryRange.value = '6144';
+  await f.context.loadLauncherSettings({ strict: true, detectJava: false });
+  await f.context.ensureSettingsOpen();
+  assert.equal(reads, 1);
+  assert.equal(f.context.memoryRange.value, '6144');
+});
+
+test('a failed settings read keeps editing closed and opening again retries the read', async () => {
+  let reads = 0;
+  const f = settingsReadFixture(async () => {
+    if (++reads === 1) throw new Error('settings unavailable');
+    return { memoryMb: 8192 };
+  });
+  assert.equal(await f.context.ensureSettingsOpen(), false);
+  assert.equal(f.dialog.open, false);
+  assert.equal(f.context.launcherSettingsLoaded, false);
+  assert.deepEqual(f.applied, []);
+  assert.match(f.notices[0], /设置读取失败.*settings unavailable/);
+  assert.equal(await f.context.ensureSettingsOpen(), true);
+  assert.equal(f.dialog.open, true);
+  assert.equal(f.context.memoryRange.value, '8192');
+  assert.equal(reads, 2);
 });
 
 test('a game crash displays the saved diagnostic log while normal exit stays nonmodal', () => {
@@ -358,6 +513,7 @@ test('a game crash displays the saved diagnostic log while normal exit stays non
     showProblem: (error, title) => problems.push({ message: error.message, title }),
     showToast: (message) => toasts.push(message)
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   loadGameProcessKey(source, context);
   vm.runInContext(source.slice(source.indexOf('function updateLaunchButtonState()'),
@@ -394,6 +550,7 @@ test('recovered storage is reported once with backup locations and a visible not
   const toasts = [];
   const context = { window: { launcherEnvironment: { diagnostics: { reportError: (text) => errors.push(text) } } },
     showToast: (text) => toasts.push(text) };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('const reportedRecoveryFiles ='), source.indexOf('let accountState =')), context);
   const state = { recovery: { filePath: 'settings.json', backupPath: 'settings.json.bak', quarantinePath: 'settings.json.corrupt' } };
@@ -422,6 +579,7 @@ test('diagnostic export restores the button on success, cancellation and failure
     } } },
     showToast: (text) => messages.push(text), readableError: (error) => error.message
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf("document.querySelector('#problemExportReportButton')"),
     source.indexOf('function openActiveTask()')), context);
@@ -463,6 +621,7 @@ test('saving once then reopening settings and pressing Esc never saves the new d
     cancelFabricApiConfirmation() {},
     showToast() {}, readableError: (error) => error.message
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('async function ensureSettingsOpen()'),
     source.indexOf('async function openJavaSettings(')), context);
@@ -484,6 +643,62 @@ test('saving once then reopening settings and pressing Esc never saves the new d
   await dialog.close(); // Native Esc closes without replacing returnValue.
   assert.equal(updates.length, 1);
   assert.equal(context.memoryRange.value, '8192');
+});
+
+test('saving a directory change completes while its game-list refresh is still pending', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  let close, refreshStarted = false;
+  const notices = [];
+  const context = {
+    settingsDialog: { returnValue: 'save', addEventListener(_name, callback) { close = callback; } },
+    launcherSettings: { gameDirectoryMode: 'local', isolateProfiles: true },
+    settingsApi: { update: async (patch) => patch },
+    wallpaperSelect: { value: '3' }, gameDirectoryModeSelect: { value: 'system' },
+    isolateProfilesCheck: { checked: true }, downloadSourceSelect: { value: 'auto' },
+    downloadConcurrencySelect: { value: '16' }, memoryRange: { value: '4096' },
+    autoUpdateCheck: { checked: true }, launcherUpdatePolicySelect: { value: 'off' },
+    selectedJavaPath: '', savedJavaRuntimes: [], modpackUiModule: undefined,
+    applySettingsToForm() {}, renderJavaPathSetting() {}, refreshAutoJavaDetection() {},
+    invalidateVersionCatalogForDirectoryChange() {}, cancelFabricApiConfirmation() {},
+    reloadLocalProfilesForDirectoryChange: () => { refreshStarted = true; return new Promise(() => {}); },
+    showToast: (message) => notices.push(message), readableError: (error) => error.message
+  };
+  installUiBoundaries(context);
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf("settingsDialog.addEventListener('close'"),
+    source.indexOf("gameDirectoryModeSelect.addEventListener('change'")), context);
+  await close();
+  assert.equal(refreshStarted, true);
+  assert.equal(context.launcherSettings.gameDirectoryMode, 'system');
+  assert.ok(notices.some((message) => message.includes('设置已保存')));
+  assert.equal(notices.some((message) => message.includes('保存失败')), false);
+});
+
+test('switching directories starts a fresh scan immediately and ignores a later old-directory result', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
+  const scans = [];
+  const context = {
+    localProfiles: [], localProfilesLoaded: false, localProfilesLoadingPromise: undefined,
+    localProfilesLoadToken: 0, currentGameDirectory: 'old',
+    minecraft: { listLocalVersions: () => new Promise((resolve) => scans.push(resolve)) },
+    versionSelect: { classList: { remove() {} }, setAttribute() {} },
+    renderLocalProfileOptions() {}
+  };
+  installUiBoundaries(context);
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('async function loadLocalProfiles('),
+    source.indexOf('function selectedLoaderVersion()')), context);
+  vm.runInContext(source.slice(source.indexOf('async function reloadLocalProfilesForDirectoryChange('),
+    source.indexOf('async function loadVersionCatalog(')), context);
+  const old = context.loadLocalProfiles();
+  const current = context.reloadLocalProfilesForDirectoryChange();
+  assert.equal(scans.length, 2, 'the new scan must not wait for the previous directory');
+  scans[1]({ gameDirectory: 'new', profiles: [{ profileId: 'new-profile' }] });
+  await current;
+  scans[0]({ gameDirectory: 'old', profiles: [{ profileId: 'old-profile' }] });
+  await old;
+  assert.equal(context.currentGameDirectory, 'new');
+  assert.equal(context.localProfiles[0].profileId, 'new-profile');
 });
 
 function catalogFixture() {
@@ -512,6 +727,7 @@ function catalogFixture() {
   const context = {
     document: { createElement: () => ({ children: [], append(child) { this.children.push(child); } }) },
     localProfiles: [{ profileId: '1.21.1', type: 'release', valid: true, complete: true, loaderType: 'vanilla' }],
+    localProfilesLoadToken: 0, localProfilesLoadingPromise: undefined,
     remoteVersions: [], filteredVersions: [], versionCatalogLoaded: false,
     versionCatalogLoading: false, versionCatalogLoadToken: 0,
     versionCatalog: select(), loaderVersionSelect: select(), versionSelect: gameSelect,
@@ -534,10 +750,11 @@ function catalogFixture() {
       deleteVersion: async (profileId) => { context.deleted.push(profileId); }
     }
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   for (const [start, end] of [
     ['function selectedRemoteVersion()', 'function renderLocalProfileOptions()'],
-    ['function localBaseProfiles()', 'function renderVersionCatalog('],
+    ['function selectedLoaderVersion()', 'function renderVersionCatalog('],
     ['function renderVersionCatalog(', 'function invalidateVersionCatalogForDirectoryChange()'],
     ['async function loadVersionCatalog(', 'function clearVersionSelection()'],
     ['async function installSelectedVersion()', "wallpaperSelect.addEventListener('change'"]
@@ -600,6 +817,104 @@ test('local loader actions survive a failed loader request and merge without dup
   assert.equal(context.downloadVersionButton.textContent, '安装 Fabric');
 });
 
+test('a pending local scan cannot delay the online catalog and a pending catalog cannot disable local versions', async () => {
+  const { context: online } = catalogFixture();
+  online.loadLocalProfiles = () => new Promise(() => {});
+  online.minecraft.listVersions = async () => ({ versions: [{ id: '1.21.8', type: 'release' }] });
+  await online.loadVersionCatalog();
+  assert.equal(online.versionCatalogLoaded, true);
+  assert.ok(online.remoteVersions.some((version) => version.id === '1.21.8'));
+
+  const { context: local } = catalogFixture();
+  let finish;
+  local.minecraft.listVersions = () => new Promise((resolve) => { finish = resolve; });
+  const pending = local.loadVersionCatalog();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(local.versionCatalogLoading, true);
+  assert.equal(local.versionCatalog.disabled, false);
+  assert.equal(local.downloadVersionButton.disabled, false);
+  assert.equal(local.downloadVersionButton.textContent, '使用此版本');
+  finish({ versions: [] });
+  await pending;
+});
+
+test('switching directories starts a new online catalog while the old request is still pending', async () => {
+  const { context, source } = catalogFixture();
+  const requests = [];
+  context.cancelFabricApiConfirmation = () => {};
+  context.minecraft.listVersions = () => new Promise((resolve) => requests.push(resolve));
+  vm.runInContext(source.slice(source.indexOf('function invalidateVersionCatalogForDirectoryChange()'),
+    source.indexOf('async function reloadLocalProfilesForDirectoryChange()')), context);
+
+  const old = context.loadVersionCatalog();
+  assert.equal(requests.length, 1);
+  assert.equal(context.versionCatalogLoading, true);
+  context.invalidateVersionCatalogForDirectoryChange();
+  assert.equal(context.versionCatalogLoading, false);
+  assert.equal(context.refreshVersionsButton.disabled, false);
+
+  const current = context.loadVersionCatalog();
+  assert.equal(requests.length, 2, 'the new directory must not wait for the old online request');
+  assert.equal(context.versionCatalogLoading, true);
+  requests[0]({ versions: [{ id: 'old-online-version', type: 'release' }] });
+  await old;
+  assert.equal(context.versionCatalogLoading, true, 'the old request must not unlock the current request');
+  assert.equal(context.refreshVersionsButton.disabled, true);
+  assert.equal(context.remoteVersions.some((version) => version.id === 'old-online-version'), false);
+
+  requests[1]({ versions: [{ id: 'new-online-version', type: 'release' }] });
+  await current;
+  assert.equal(context.versionCatalogLoading, false);
+  assert.equal(context.refreshVersionsButton.disabled, false);
+  assert.equal(context.remoteVersions.some((version) => version.id === 'new-online-version'), true);
+});
+
+test('a new directory never reuses the old installed profiles or selection while its scan is pending', async () => {
+  const { context, source } = catalogFixture();
+  let launches = 0;
+  Object.assign(context, {
+    currentGameDirectory: 'C:\\old-game-directory',
+    cancelFabricApiConfirmation() {}, launchHint: {},
+    accountState: { current: { type: 'offline', name: 'Steve' } }
+  });
+  context.loadLocalProfiles = () => new Promise(() => {});
+  context.minecraft.listVersions = async () => ({ versions: [{ id: '1.21.1', type: 'release', installed: false }] });
+  context.minecraft.launchVersion = async () => { launches++; };
+  vm.runInContext(source.slice(source.indexOf('function invalidateVersionCatalogForDirectoryChange()'),
+    source.indexOf('async function reloadLocalProfilesForDirectoryChange()')), context);
+  vm.runInContext(source.slice(source.indexOf('async function launchSelectedVersion()'),
+    source.indexOf("versionSelect.addEventListener('change'")), context);
+
+  context.invalidateVersionCatalogForDirectoryChange();
+  assert.equal(context.currentGameDirectory, '');
+  assert.equal(context.localProfiles.length, 0);
+  assert.equal(context.versionSelect.value, '');
+  await context.loadVersionCatalog();
+  assert.equal(context.selectedRemoteVersion().installed, false);
+  assert.equal(context.selectedLoaderVersion().installed, false);
+  assert.equal(context.versionSelect.value, '');
+  await context.launchSelectedVersion();
+  assert.equal(launches, 0);
+  assert.match(context.gameStatus.textContent, /请先安装并选择/);
+});
+
+test('an installed loader remains usable while its online catalog is stalled', async () => {
+  const { context } = catalogFixture();
+  context.localProfiles.push({ profileId: 'fabric-existing', inheritsFrom: '1.21.1',
+    valid: true, complete: true, loaderType: 'fabric' });
+  await context.loadVersionCatalog();
+  context.loaderTypeSelect.value = 'fabric';
+  let finish;
+  context.minecraft.listLoaders = () => new Promise((resolve) => { finish = resolve; });
+  const pending = context.loadLoaderCatalog();
+  assert.equal(context.loaderCatalogLoading, true);
+  assert.equal(context.loaderVersionSelect.disabled, false);
+  assert.equal(context.downloadVersionButton.disabled, false);
+  assert.equal(context.selectedLoaderVersion().profileId, 'fabric-existing');
+  finish({ versions: [] });
+  await pending;
+});
+
 async function installationFixture(loaderType = 'fabric') {
   const { context } = catalogFixture();
   await context.loadVersionCatalog();
@@ -639,6 +954,26 @@ test('new Fabric installation sends the chosen API or an explicit skip in the sa
     assert.equal(context.fabricApiConfirmationActive, false);
     assert.equal(context.versionDownloadActive, false);
   }
+});
+
+test('a background loader installation keeps home task controls visible and its progress survives reopening', async () => {
+  const { context, source } = { ...await installationFixture('forge'), source: fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8') };
+  let finish, shown = 0;
+  context.minecraft.installLoader = () => new Promise((resolve) => { finish = resolve; });
+  context.versionDialog = { open: false, showModal() { this.open = true; shown++; } };
+  context.downloadStatus.scrollIntoView = () => {};
+  context.taskButton.addEventListener = () => {};
+  vm.runInContext(source.slice(source.indexOf('function openActiveTask()'),
+    source.indexOf("homeCancelDownloadButton.addEventListener('click'")), context);
+  const pending = context.installSelectedVersion();
+  assert.equal(context.versionDownloadActive, true);
+  assert.equal(context.homeStatus.hidden, false, 'the parent of home task controls must remain visible');
+  context.openActiveTask();
+  assert.equal(shown, 1);
+  assert.equal(context.activeTaskId, 'test-install-task');
+  finish({ profileId: 'forge-profile' });
+  await pending;
+  assert.equal(context.versionDownloadActive, false);
 });
 
 test('cancelling Fabric confirmation starts no download and duplicate clicks share the pending choice', async () => {
@@ -713,13 +1048,14 @@ function profileOptionsFixture({ profiles = [], remembered = '' } = {}) {
     localProfiles: profiles,
     versionSelect,
     gameStatus: {}, statusBadge: {},
-    activeGameProfiles: new Set(),
+    activeGameProfiles: new Set(), versionDownloadActive: false, launchRequestActive: false, javaFixActive: false,
     loaderNames: { vanilla: '原版', fabric: 'Fabric' },
     rememberedSelectedGame: () => remembered,
     rememberSelectedGame: (value) => rememberedLog.push(value),
     updateLaunchButtonState() {}, updateVersionAction() {},
     refreshJavaReadiness() {}
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   loadGameProcessKey(source, context);
   vm.runInContext(source.slice(
@@ -769,6 +1105,16 @@ test('valid imported profiles stay selectable so launch can diagnose and repair 
   assert.equal(context.versionSelect.options.some((option) => option.value === 'broken-json' && !option.disabled), false);
 });
 
+test('a background profile scan preserves an active installation status', () => {
+  const { context } = profileOptionsFixture();
+  context.versionDownloadActive = true;
+  context.gameStatus.textContent = '正在安装 Forge';
+  context.statusBadge.textContent = 'DOWNLOAD';
+  context.renderLocalProfileOptions();
+  assert.equal(context.gameStatus.textContent, '正在安装 Forge');
+  assert.equal(context.statusBadge.textContent, 'DOWNLOAD');
+});
+
 test('missing files offer repair and relaunch while a stale directory retry cannot repair another directory', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8');
   const calls = [];
@@ -794,6 +1140,7 @@ test('missing files offer repair and relaunch while a stale directory retry cann
     showProblem: (_error, _title, options) => problems.push(options),
     showToast: (text) => calls.push(['toast', text])
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   loadGameProcessKey(source, context);
   vm.runInContext(source.slice(source.indexOf('async function repairSelectedVersion('),
@@ -825,6 +1172,7 @@ test('launching without a version or account keeps a visible status instead of a
     showToast: (message, isError) => toasts.push({ message, isError }),
     updateVersionAction() {}, updateLaunchButtonState() {}
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(
     source.indexOf("launchButton.addEventListener('click'"),
@@ -851,6 +1199,7 @@ test('launch hint previews Java readiness for the selected version', () => {
     launchButton: { classList: { remove() {} } }, launchLabel: {}, launchHint: {},
     minecraft: undefined
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   loadGameProcessKey(source, context);
   vm.runInContext(source.slice(source.indexOf('function updateLaunchButtonState()'),
@@ -891,6 +1240,7 @@ test('java readiness stays quiet until the environment detection has settled', (
     savedJavaRuntimes: [], autoJavaDetection: null, javaEnvironmentKnown: false,
     updateLaunchButtonState() {}
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(
     source.indexOf('function selectedProfileJavaRequirement()'),
@@ -934,6 +1284,7 @@ test('problem dialog offers a one-click Java fix wired to the download flow', ()
     document: { querySelector: (selector) => nodes[selector] },
     downloadJavaAndLaunch: (majorVersion) => fixCalls.push(majorVersion)
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('function readableError('),
     source.indexOf('function setAccountHint(')), context);
@@ -977,6 +1328,7 @@ test('a launch failure caused by a missing Java offers the one-click fix dialog'
     openJavaSettings: (majorVersion) => settingsOpened.push(majorVersion),
     updateVersionAction() {}, updateLaunchButtonState() {}
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   loadGameProcessKey(source, context);
   vm.runInContext(source.slice(
@@ -1031,6 +1383,7 @@ test('one-click Java fix downloads the runtime and relaunches automatically', as
     readableError: (error) => error.message,
     showProblem: () => { throw new Error('problem dialog must not appear on success'); }
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(
     source.indexOf('async function downloadJavaAndLaunch('),
@@ -1088,6 +1441,7 @@ test('a cancelled one-click Java fix keeps the launcher usable without a problem
     readableError: (error) => error.message,
     showProblem: (error, title) => problems.push({ error, title })
   };
+  installUiBoundaries(context);
   vm.createContext(context);
   vm.runInContext(source.slice(
     source.indexOf('async function downloadJavaAndLaunch('),

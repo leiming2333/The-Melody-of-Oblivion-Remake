@@ -7,16 +7,18 @@
 
 [English](README.en.md) · 简体中文
 
+[下载启动器](https://melodyoblivion.xyz/#download) · [GitHub Releases](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/releases)
+
 [![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Node.js](https://img.shields.io/badge/Node.js-26.10.0-green.svg)](https://nodejs.org/)
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#平台支持与使用前提)
-[![Source](https://img.shields.io/badge/Source-v1.9.8-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v2.0.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
-> 当前源码版本为 `1.9.8`，支持 Microsoft、离线和 LittleSkin 登录，默认壁纸为「沙漠湖泊」。安装包可从[网站](https://melodyoblivion.xyz/#download)或 GitHub Releases 下载，版本以 Release 页面为准。本地修改不会自动更新已发布内容：启动器源码需重新构建，官网需重新部署。测试前请先备份 Minecraft 数据。
+> 本项目是非官方独立重制作品，与 Mojang Studios（麻将）、Microsoft 及原版启动器作者无关，也未获得其认可。代码与文档由 AI 编写，可能存在错误、遗漏或兼容性问题；使用前请备份存档、模组和配置。反馈问题时请提供版本号、复现步骤及脱敏日志，勿提交账户文件、密码或令牌。
 
 ## 项目简介
 
@@ -34,7 +36,8 @@
 
 ## 已实现功能
 
-- **启动准备**：先显示准备页，检查必要启动器资源，补建缺失的配置、备份与游戏目录；设置、账户和本地游戏列表读取成功后进入主页。失败时显示详情并支持重试，本地游戏目录不可写时可改用系统游戏目录。
+- **启动准备**：先检查核心静态资源，通过后进入主页；设置、账户、本地游戏列表和 Java 各自后台加载，单个模块失败或无响应不会阻止主页开放。核心资源错误可查看详情并重试，其他错误由对应模块提示。
+- **模块隔离**：下载、加载器、Java、账户、设置、更新、日志等业务分别运行于独立后台进程。Forge 安装使用专用进程，取消或退出时等待 Java 子进程清理；共享游戏文件仍保留必要的写入互斥，详见[模块隔离说明](docs/module-isolation.md)。
 - **游戏版本**：浏览 Mojang 版本清单、识别本地安装、下载原版游戏、验证所需文件，并将可移除的配置移动到回收站。
 - **模组加载器**：通过统一流程查询并安装 Fabric、Forge、NeoForge 与 Quilt。新装 Fabric 时可在确认框中选择与 Minecraft 版本兼容的 Fabric API，也可跳过；所选 API 经摘要校验后安装到该版本使用的 `mods` 目录。
 - **可靠下载**：在 Mojang 官方源与 BMCLAPI 之间选择；自动模式会测速；支持任务并发、大文件 HTTP Range 分段、SHA-1 校验、取消下载及失败后切换来源重试。
@@ -66,7 +69,7 @@
 ## 平台支持与使用前提
 
 - **平台覆盖**：Windows x64 / ia32 / ARM64、Linux x64 / ARM64 / ARMv7、macOS x64 / ARM64 均提供公开构建与 SHA-256 校验。除 Linux ARMv7 外，每个目标都由对应的原生 runner 执行启动与升级验收，未通过不发布。ARMv7 目前只做构建与文件校验：GitHub 不提供 32 位 ARM runner，且 AppImage 运行时在 QEMU 用户态下无法执行，因此该产物尚未完成启动验收。
-- **更新替换**：更新下载完成后点击「重启并安装」才替换程序。Windows 保留当前 EXE 名称；macOS 使用系统 `ditto` 校验并替换 `.app`，在只读介质、目录不可写或 App Translocation 环境下提供 ZIP 手动替换入口；Linux 替换 AppImage。辅助进程握手成功后才退出旧程序，新版窗口显示、预加载桥接和本地界面加载完成，且文件准备及设置、账户、本地游戏列表读取成功后才确认更新；未确认时保留备份并提供重试或恢复入口。
+- **更新替换**：更新下载完成后点击「重启并安装」才替换程序。Windows 保留当前 EXE 名称；macOS 使用系统 `ditto` 校验并替换 `.app`，在只读介质、目录不可写或 App Translocation 环境下提供 ZIP 手动替换入口；Linux 替换 AppImage。辅助进程握手成功后才退出旧程序。新版窗口实际显示、预加载桥接与本地界面加载完成、核心资源检查通过且主页就绪后，在后台确认更新；设置、账户和版本扫描独立加载。未确认时保留备份并提供重试或恢复入口。
 - **更新记录与清理**：每个安装路径独立记录更新状态，确认成功后保留最近一份回退版本，只清理该记录拥有的旧文件。无记录的 Windows 历史 EXE 和 `.old` 可在设置中勾选后移入回收站。游戏数据不在更新清理范围内。
 - **LittleSkin 验证服务**：Yggdrasil 仅在客户端和服务端使用相同验证服务时生效；LittleSkin 账户不能替代正版账户，也不会获得进入正版验证服务器的权限。参见 [LittleSkin 用户使用手册](https://manual.littleskin.cn/yggdrasil/)。
 - **CurseForge 元数据**：安装依赖 CurseTools 提供的文件元数据，或配置 `CURSEFORGE_API_KEY`。临时查询失败会自动重试，已解析的元数据随补齐会话保存，重启后无需重新查询；缺少可信摘要时不会用本地文件顶替校验，已下架文件仍需从整合包发布页获取。
@@ -94,13 +97,13 @@ npm run dev
 
 系统目录模式使用操作系统默认的 Minecraft 应用数据目录（Windows 为 `%APPDATA%\.minecraft`）。本地目录模式使用启动器 EXE 旁的 `.minecraft`，不会因运行文件子目录或缓存回退而改变。整合包实例存放在所选 `.minecraft\melody-instances` 下。
 
-窗口打开后先显示准备页：检查必要的界面、预加载和模块资源是否存在、非空且可读，在用户数据目录补建缺失的 `settings.json`、`accounts.json` 及其 `.bak`，并建立日志目录和所选游戏目录下的版本、依赖、资源、实例、托管 Java 与缓存目录。已有配置保留；主配置缺失或损坏时尝试恢复有效备份，无有效备份的损坏配置会阻止进入主页。准备页每次启动都会重新检查，后续缺失的目录也会补建。Windows 便携 EXE 的运行文件释放发生在 Electron 启动之前，准备页在释放完成后显示。
+窗口打开后先显示准备页，检查必要的界面、预加载和核心模块资源是否存在、非空且可读。核心检查通过后立即进入主页；可选资源、设置、账户或版本扫描异常由各自模块提示。Windows 便携 EXE 的运行文件释放发生在 Electron 启动之前，准备页在释放完成后显示。
 
-设置、账户和本地游戏列表读取成功后，启动器自动进入主页；失败时停留在准备页，可查看错误详情并点击「重新准备」。必要的启动器资源缺失时需重新下载完整启动器；本地游戏目录无法写入时可点击「改用系统游戏目录」，保存选择后重试。准备流程不下载 Minecraft 或 Java，也不执行游戏文件完整校验；游戏文件补全见下文「诊断与安装重试」。
+设置与账户模块首次使用时准备各自的配置和备份；日志、游戏及缓存目录由所属模块按需创建。已有配置保留，主文件缺失或损坏时尝试恢复有效备份；无法恢复时保留损坏内容并提示对应模块错误。设置读取失败时不会用默认值覆盖原配置。核心资源缺失时需重新下载完整启动器；游戏目录不可写时可在设置中选择其他目录。准备流程不下载 Minecraft 或 Java，也不执行游戏文件完整校验；游戏文件补全见下文「诊断与安装重试」。
 
-Java 检测在主页就绪后于后台进行，结果保存在用户数据目录的 `java-cache.json`，可执行文件或运行时文件变化时重新探测，设置中的「重新检测」会绕过缓存。缺少 Java 时以启动按钮状态与轻提示引导，不自动弹出阻塞对话框。版本列表会沿继承链解析每个版本的 Java 需求，首页据此在下载完成前就能提示 Java 是否就绪。
+Java 检测在主页就绪后于后台进行，使用已保存的设置。设置页与游戏模块分别保存探测缓存，游戏模块按目录使用独立缓存文件，避免并发写入冲突。可执行文件或运行时文件变化时重新探测，设置中的「重新检测」会绕过缓存。缺少 Java 时以启动按钮状态与轻提示引导，不自动弹出阻塞对话框。版本列表会沿继承链解析每个版本的 Java 需求，首页据此在下载完成前就能提示 Java 是否就绪。
 
-下载、加载器、整合包、Java 下载和游戏启动服务按需加载，并在当前游戏目录内复用；切换目录后创建新的服务。首页读取本地版本和 Java 检测使用轻量模块，不会提前加载下载或启动核心。游戏原生库按归档内容与排除规则缓存在 `.minecraft\launcher-cache\native-archives`，每次复用会校验解压文件；归档变化或缓存损坏时重新解压。每个游戏进程使用独立副本，退出只清理该进程的副本，不删除共享缓存。缓存保留旧代，关闭游戏后可手动清理。
+各业务模块的后台进程按需启动，并在当前游戏目录内复用；切换目录后创建新的服务。主页的版本扫描、Java 检测与加载器安装分开执行，模块进程异常退出后可重新调用以启动新进程；登录会话等临时状态需重新建立。活动下载期间保留切换游戏目录的保护。游戏原生库按归档内容与排除规则缓存在 `.minecraft\launcher-cache\native-archives`，每次复用会校验解压文件；归档变化或缓存损坏时重新解压。每个游戏进程使用独立副本，退出只清理该进程的副本，不删除共享缓存。缓存保留旧代，关闭游戏后可手动清理。
 
 启动耗时记录在用户数据目录的 `logs\startup-latest.json`，包含主进程入口、Electron 就绪、窗口显示、准备页绘制、设置 / 账户 / 本地版本读取、主页就绪（`core-ready`）和后台 Java 检测阶段。记录从主进程开始执行时计时，无法测量便携 EXE 在启动 Electron 前的解压耗时；文件只保留最近一次记录，不包含账户凭据。
 
@@ -127,6 +130,7 @@ Java 检测在主页就绪后于后台进行，结果保存在用户数据目录
 
 - [开发指南](docs/development.md)：环境准备、代码入口、常见修改示例与检查命令。
 - [开发与回归用例](docs/development-cases.md)：按功能列出的操作步骤、预期结果与自动化测试对应。
+- [模块隔离说明](docs/module-isolation.md)：后台进程、界面边界、故障恢复、取消与共享文件约束。
 - [贡献指南](CONTRIBUTING.md)：Fork、分支、PR 提交与评审流程。
 
 仓库提供 Bug／功能建议表单和 PR 模板；提交 PR 后会按改动范围运行现有自动检查与打包验证。
@@ -135,10 +139,14 @@ Java 检测在主页就绪后于后台进行，结果保存在用户数据目录
 
 ```text
 src/
-├── main/                 Electron 主进程
+├── main/                 主进程装配与后台模块实现
 │   ├── accounts/         Microsoft、离线与 LittleSkin 账户
 │   ├── minecraft/        下载、Java、加载器、启动与整合包
-│   └── settings/         持久化设置
+│   ├── settings/         持久化设置
+│   ├── updater/          启动器更新
+│   ├── worker-modules/   各业务的独立后台入口
+│   ├── module-process.js 后台进程管理与 RPC
+│   └── module-worker.js  后台调用、进度与取消协议
 ├── preload/              沙箱化的渲染进程桥接层
 └── renderer/             启动器界面
 test/                     自动化测试

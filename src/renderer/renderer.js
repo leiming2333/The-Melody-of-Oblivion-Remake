@@ -148,6 +148,7 @@ let toastTimer;
 let localProfiles = [];
 let localProfilesLoaded = false;
 let localProfilesLoadingPromise;
+let localProfilesLoadToken = 0;
 let remoteVersions = [];
 let filteredVersions = [];
 let versionCatalogLoaded = false;
@@ -201,6 +202,7 @@ let launcherSettings = {
   launcherUpdatePolicy: 'auto'
 };
 let launcherSettingsLoaded = false;
+let launcherSettingsLoadingPromise;
 let selectedJavaPath = '';
 let selectedJavaMajorVersion;
 let savedJavaRuntimes = [];
@@ -611,6 +613,7 @@ async function loadAccountState({ strict = false } = {}) {
     void refreshCurrentOnlineSkin();
   } catch (error) {
     if (strict) throw error;
+    accountName.textContent = '账户读取失败，点击管理重试';
     showToast(`账户读取失败：${readableError(error)}`);
   } finally {
     accountName.classList.remove('startup-placeholder');
@@ -772,14 +775,21 @@ async function chooseJavaPath() {
 
 async function loadLauncherSettings({ strict = false, detectJava = true } = {}) {
   try {
-    if (settingsApi) launcherSettings = await settingsApi.getState();
-    notifyStorageRecovery(launcherSettings);
-    launcherSettingsLoaded = true;
-    applySettingsToForm();
+    if (!launcherSettingsLoaded) {
+      launcherSettingsLoadingPromise ??= Promise.resolve().then(async () => {
+        if (settingsApi) launcherSettings = await settingsApi.getState();
+        notifyStorageRecovery(launcherSettings);
+        applySettingsToForm();
+        launcherSettingsLoaded = true;
+      }).finally(() => { launcherSettingsLoadingPromise = undefined; });
+      await launcherSettingsLoadingPromise;
+    }
     if (detectJava) void refreshAutoJavaDetection();
+    return true;
   } catch (error) {
     if (strict) throw error;
     showToast(`设置读取失败：${readableError(error)}`);
+    return false;
   } finally {
     sourceHint.classList.remove('startup-placeholder');
     sourceHint.setAttribute('aria-busy', 'false');
@@ -856,17 +866,19 @@ async function prepareJavaDownloadSelection(requiredMajorVersion) {
 }
 
 async function ensureSettingsOpen() {
-  if (settingsDialog.open) return;
-  if (!launcherSettingsLoaded) await loadLauncherSettings();
+  if (settingsDialog.open) return true;
+  // Share the initial read so a late response cannot replace an editable draft.
+  if (!launcherSettingsLoaded && !await loadLauncherSettings()) return false;
   if (!settingsDialog.open) {
     applySettingsToForm();
     settingsDialog.returnValue = '';
     settingsDialog.showModal();
   }
+  return true;
 }
 
 async function openJavaSettings(requiredMajorVersion) {
-  await ensureSettingsOpen();
+  if (!await ensureSettingsOpen()) return;
   setJavaDownloadPanelOpen(true);
   await prepareJavaDownloadSelection(requiredMajorVersion);
   javaDownloadPanel.scrollIntoView({ block: 'nearest' });
@@ -1246,526 +1258,113 @@ function fallbackLoaderResult(gameVersion, loaderType) {
   };
 }
 
+let downloadUiController;
+function getDownloadUi() {
+  downloadUiController ??= window.launcherUiModules.createModuleController({
+    create: () => {
+      const create = window.launcherUiModules.createDownloadUi;
+      if (!create) throw new Error('任务进度界面组件缺失，请重新下载完整启动器');
+      return create({ state: {
+      get activeTaskId() { return activeTaskId; }, set activeTaskId(value) { activeTaskId = value; },
+      get lastDownloadProgress() { return lastDownloadProgress; }, set lastDownloadProgress(value) { lastDownloadProgress = value; },
+      get versionDownloadActive() { return versionDownloadActive; }, set versionDownloadActive(value) { versionDownloadActive = value; },
+      get downloadCancellable() { return downloadCancellable; }, set downloadCancellable(value) { downloadCancellable = value; },
+      get downloadCancelRequested() { return downloadCancelRequested; }, set downloadCancelRequested(value) { downloadCancelRequested = value; },
+      get activeDownloadLabel() { return activeDownloadLabel; }, set activeDownloadLabel(value) { activeDownloadLabel = value; },
+      get launcherSettings() { return launcherSettings; }, set launcherSettings(value) { launcherSettings = value; }
+    }, sourceHint, cancelDownloadButton, homeCancelDownloadButton, taskButton, downloadStatus, downloadMessage, downloadStage, downloadProgress, downloadPercent, gameStatus, statusBadge, downloadSpeed, downloadEta, renderProgressBar });
+    },
+    onError: (error) => showToast('任务进度：' + readableError(error), true)
+  });
+  return downloadUiController;
+}
+
 function updateDownloadProgress(progress) {
-  if (progress.taskId && progress.taskId !== activeTaskId) return;
-  if (progress.sourceLabel) {
-    const measured = Number(progress.sourceThroughput);
-    const speed = Number.isFinite(measured) && measured > 0
-      ? ` · 测速 ${(measured / 1024 / 1024).toFixed(1)} MB/s` : '';
-    sourceHint.textContent = `${progress.sourceLabel}${speed} · ${launcherSettings.downloadConcurrency} 路并发`;
-  }
-  lastDownloadProgress = progress;
-  if (!versionDownloadActive) return;
-  if (progress.cancellable === false) downloadCancellable = false;
-  cancelDownloadButton.disabled = downloadCancelRequested || !downloadCancellable;
-  homeCancelDownloadButton.hidden = !downloadCancellable;
-  homeCancelDownloadButton.disabled = downloadCancelRequested;
-  taskButton.hidden = false;
-  if (downloadCancelRequested && !['complete', 'cancelled', 'failed'].includes(progress.phase)) return;
-  downloadStatus.hidden = false;
-  downloadMessage.textContent = progress.message ?? '正在准备下载…';
-  downloadStage.textContent = {
-    preparing: '准备下载',
-    'preparing-base': '准备基础游戏',
-    benchmarking: '测速',
-    'downloading-base': '基础游戏下载',
-    'base-ready': '基础游戏就绪',
-    'verifying-installer': '校验安装器',
-    'preparing-loader': '读取加载器依赖',
-    'downloading-loader': '加载器下载',
-    'installing-loader': '安装加载器',
-    'installing-base': '安装基础游戏',
-    'resolving-files': '解析整合包',
-    'downloading-files': '整合包下载',
-    'copying-overrides': '整理整合包',
-    'committing-instance': '保存整合包',
-    'extracting': '解压整合包',
-    'waiting-for-files': '等待补齐',
-    cancelled: '已取消',
-    failed: '未完成',
-    complete: '完成'
-  }[progress.phase] ?? '下载';
+  return getDownloadUi().invoke('updateDownloadProgress', [progress]);
+}
 
-  const totalFiles = progress.totalFiles ?? 0;
-  const completedFiles = progress.completedFiles ?? 0;
-  const totalBytes = progress.totalBytes ?? 0;
-  const completedBytes = progress.completedBytes ?? 0;
-  const useByteProgress = progress.totalBytesKnown !== false && totalBytes > 0;
-  const progressTotal = useByteProgress ? totalBytes : totalFiles;
-  const progressValue = useByteProgress ? completedBytes : completedFiles;
-  const percent = renderProgressBar(downloadProgress, progressValue, progressTotal, progress.phase === 'complete');
-  downloadPercent.textContent = percent === null ? '—' : `${percent}%`;
-
-  // 主页状态条同步显示实时下载进度，避免下载进行中误显"下载失败"
-  if (activeDownloadLabel && !['waiting-for-files', 'cancelled', 'failed'].includes(progress.phase)) {
-    if (progress.phase === 'complete') {
-      gameStatus.textContent = `${activeDownloadLabel} 下载完成`;
-    } else if (['preparing', 'preparing-base', 'installing-base'].includes(progress.phase)) {
-      gameStatus.textContent = `正在准备 ${activeDownloadLabel}`;
-    } else if (progress.phase === 'installing-loader' || progress.phase === 'base-ready') {
-      gameStatus.textContent = `正在安装 ${activeDownloadLabel}`;
-    } else if (progress.phase === 'copying-overrides' || progress.phase === 'committing-instance') {
-      gameStatus.textContent = `正在整理 ${activeDownloadLabel}`;
-    } else if (progress.phase === 'resolving-files') {
-      gameStatus.textContent = `正在解析 ${activeDownloadLabel} 文件`;
-    } else {
-      gameStatus.textContent = percent === null
-        ? `正在处理 ${activeDownloadLabel}`
-        : `正在下载 ${activeDownloadLabel} · ${percent}%`;
-    }
-    statusBadge.textContent = 'DOWNLOAD';
-  }
-
-  const bytesPerSecond = Number(progress.bytesPerSecond);
-  if (progress.phase === 'complete') {
-    downloadSpeed.textContent = '速度 —';
-    downloadEta.textContent = '已完成';
-  } else if (Number.isFinite(bytesPerSecond) && bytesPerSecond > 0) {
-    const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-    let value = bytesPerSecond;
-    let unitIndex = 0;
-    while (value >= 1024 && unitIndex < units.length - 1) {
-      value /= 1024;
-      unitIndex += 1;
-    }
-    downloadSpeed.textContent = `${value >= 100 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
-
-    const etaSeconds = Number(progress.etaSeconds);
-    if (Number.isFinite(etaSeconds) && etaSeconds >= 0) {
-      const minutes = Math.floor(etaSeconds / 60);
-      const seconds = Math.ceil(etaSeconds % 60);
-      downloadEta.textContent = minutes > 0
-        ? `剩余 ${minutes} 分 ${seconds} 秒`
-        : `剩余 ${seconds} 秒`;
-    } else {
-      downloadEta.textContent = '剩余时间计算中';
-    }
-  } else if (progress.phase === 'benchmarking') {
-    downloadSpeed.textContent = '正在测速';
-    downloadEta.textContent = '剩余时间 —';
-  } else {
-    downloadSpeed.textContent = '速度计算中';
-    downloadEta.textContent = '剩余时间 —';
-  }
-
+let versionCatalogUiController;
+function getVersionCatalogUi() {
+  versionCatalogUiController ??= window.launcherUiModules.createModuleController({
+    create: () => {
+      const create = window.launcherUiModules.createVersionCatalogUi;
+      if (!create) throw new Error('版本管理界面组件缺失，请重新下载完整启动器');
+      return create({ state: {
+      get localProfiles() { return localProfiles; }, set localProfiles(value) { localProfiles = value; },
+      get localProfilesLoaded() { return localProfilesLoaded; }, set localProfilesLoaded(value) { localProfilesLoaded = value; },
+      get localProfilesLoadingPromise() { return localProfilesLoadingPromise; }, set localProfilesLoadingPromise(value) { localProfilesLoadingPromise = value; },
+      get localProfilesLoadToken() { return localProfilesLoadToken; }, set localProfilesLoadToken(value) { localProfilesLoadToken = value; },
+      get remoteVersions() { return remoteVersions; }, set remoteVersions(value) { remoteVersions = value; },
+      get filteredVersions() { return filteredVersions; }, set filteredVersions(value) { filteredVersions = value; },
+      get versionCatalogLoaded() { return versionCatalogLoaded; }, set versionCatalogLoaded(value) { versionCatalogLoaded = value; },
+      get versionCatalogLoading() { return versionCatalogLoading; }, set versionCatalogLoading(value) { versionCatalogLoading = value; },
+      get versionCatalogLoadToken() { return versionCatalogLoadToken; }, set versionCatalogLoadToken(value) { versionCatalogLoadToken = value; },
+      get loaderVersions() { return loaderVersions; }, set loaderVersions(value) { loaderVersions = value; },
+      get loaderCatalogLoading() { return loaderCatalogLoading; }, set loaderCatalogLoading(value) { loaderCatalogLoading = value; },
+      get loaderLoadToken() { return loaderLoadToken; }, set loaderLoadToken(value) { loaderLoadToken = value; },
+      get currentGameDirectory() { return currentGameDirectory; }, set currentGameDirectory(value) { currentGameDirectory = value; },
+      get versionDownloadActive() { return versionDownloadActive; }, set versionDownloadActive(value) { versionDownloadActive = value; },
+      get launchRequestActive() { return launchRequestActive; }, set launchRequestActive(value) { launchRequestActive = value; },
+      get javaFixActive() { return javaFixActive; }, set javaFixActive(value) { javaFixActive = value; },
+      get fabricApiConfirmationActive() { return fabricApiConfirmationActive; }, set fabricApiConfirmationActive(value) { fabricApiConfirmationActive = value; },
+      get versionDeleteActive() { return versionDeleteActive; }, set versionDeleteActive(value) { versionDeleteActive = value; },
+      get versionVerifyActive() { return versionVerifyActive; }, set versionVerifyActive(value) { versionVerifyActive = value; },
+      get lastDownloadFailed() { return lastDownloadFailed; }, set lastDownloadFailed(value) { lastDownloadFailed = value; }
+    },
+        document, minecraft, delay, fallbackLocalVersionResult, fallbackLoaderResult, fallbackVersionResult, loaderNames, versionSelect, versionCatalog, loaderTypeSelect, loaderVersionSelect, versionSearch, versionTypeFilter, versionEmpty, refreshVersionsButton, downloadVersionButton, deleteVersionButton, clearVersionSelectionButton, gameStatus, statusBadge, activeGameProfiles, rememberedSelectedGame, rememberSelectedGame, gameProcessKey, updateLaunchButtonState, refreshJavaReadiness, versionTypeName, readableError, showToast, cancelFabricApiConfirmation,
+        beginRequest: (key) => getVersionCatalogUi().beginRequest(key),
+        cancelRequest: (key) => getVersionCatalogUi().cancel(key),
+        renderProfiles: () => renderLocalProfileOptions(),
+        refreshLocalProfiles: (force) => loadLocalProfiles(force)
+      });
+    },
+    onError: (error) => showToast('版本管理：' + readableError(error), true)
+  });
+  return versionCatalogUiController;
 }
 
 function selectedRemoteVersion() {
-  if (!versionCatalog.selectedOptions[0] || versionCatalog.selectedOptions[0].disabled) {
-    return undefined;
-  }
-  return remoteVersions.find((version) => version.id === versionCatalog.value);
+  return getVersionCatalogUi().invoke('selectedRemoteVersion');
 }
 
 function renderLocalProfileOptions() {
-  const previousProfileId = versionSelect.value;
-  const installedProfiles = localProfiles.filter((profile) => profile.valid);
-  versionSelect.replaceChildren();
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = installedProfiles.length > 0 ? '请选择已安装游戏' : '未发现已安装游戏';
-  placeholder.disabled = installedProfiles.length > 0;
-  placeholder.hidden = installedProfiles.length > 0;
-  versionSelect.append(placeholder);
-
-  for (const profile of installedProfiles) {
-    const option = document.createElement('option');
-    option.value = profile.targetId ?? profile.profileId;
-    const loaderLabel = loaderNames[profile.loaderType] ?? '自定义';
-    const displayName = profile.displayName ?? profile.profileId;
-    option.textContent = profile.loaderType === 'vanilla'
-      ? displayName
-      : `${displayName} · ${loaderLabel}`;
-    if (!profile.complete) option.textContent += ' · 待验证或修复';
-    versionSelect.append(option);
-  }
-
-  const preferredProfileId = previousProfileId || rememberedSelectedGame();
-  const preferredOption = preferredProfileId
-    ? [...versionSelect.options].find((option) => option.value === preferredProfileId && !option.disabled)
-    : undefined;
-  const selectedOption = preferredOption
-    ?? [...versionSelect.options].find((option) => option.value && !option.disabled);
-  versionSelect.value = selectedOption?.value ?? '';
-  rememberSelectedGame(versionSelect.value);
-  if (selectedOption) {
-    const selectedProfile = installedProfiles.find((profile) => (
-      (profile.targetId ?? profile.profileId) === selectedOption.value
-    ));
-    gameStatus.textContent = `已选择 ${selectedProfile?.displayName ?? selectedProfile?.profileId ?? selectedOption.value}`;
-    statusBadge.textContent = activeGameProfiles.has(gameProcessKey(selectedOption.value)) ? 'RUNNING' : 'SELECTED';
-  } else {
-    gameStatus.textContent = installedProfiles.length > 0 ? '请选择游戏版本' : '尚无已安装游戏，可在「切换版本」中下载';
-    statusBadge.textContent = 'READY';
-  }
-  updateLaunchButtonState();
-  updateVersionAction();
-  refreshJavaReadiness();
+  return getVersionCatalogUi().invoke('renderLocalProfileOptions');
 }
 
 async function loadLocalProfiles(force = false) {
-  if (localProfilesLoadingPromise) return localProfilesLoadingPromise;
-  if (localProfilesLoaded && !force) return localProfiles;
-
-  localProfilesLoadingPromise = (async () => {
-    const result = minecraft?.listLocalVersions
-      ? await minecraft.listLocalVersions()
-      : await delay(80).then(fallbackLocalVersionResult);
-    localProfiles = result.profiles ?? [];
-    currentGameDirectory = result.gameDirectory ?? currentGameDirectory;
-    localProfilesLoaded = true;
-    renderLocalProfileOptions();
-    return localProfiles;
-  })();
-  try {
-    return await localProfilesLoadingPromise;
-  } finally {
-    localProfilesLoadingPromise = undefined;
-    versionSelect.classList.remove('startup-placeholder');
-    versionSelect.setAttribute('aria-busy', 'false');
-  }
-}
-
-function localBaseProfiles() {
-  return localProfiles.filter((profile) => profile.valid && !profile.inheritsFrom && !profile.isInstance);
-}
-
-function seedCatalogWithLocalProfiles() {
-  remoteVersions = localBaseProfiles().map((profile) => ({
-    id: profile.profileId,
-    type: profile.type,
-    releaseTime: profile.releaseTime,
-    installed: profile.complete,
-    complete: profile.complete,
-    localFilesPresent: true,
-    localOnly: true,
-    profileId: profile.profileId
-  }));
-}
-
-function mergeRemoteAndLocalVersions(onlineVersions) {
-  const localById = new Map(localBaseProfiles().map((profile) => [profile.profileId, profile]));
-  const onlineIds = new Set(onlineVersions.map((version) => version.id));
-  const merged = onlineVersions.map((version) => {
-    const local = localById.get(version.id);
-    return local ? {
-      ...version,
-      installed: version.installed || local.complete,
-      complete: local.complete,
-      localFilesPresent: true,
-      profileId: local.profileId
-    } : version;
-  });
-  for (const local of localBaseProfiles()) {
-    if (onlineIds.has(local.profileId)) continue;
-    merged.push({
-      id: local.profileId,
-      type: local.type,
-      releaseTime: local.releaseTime,
-      installed: local.complete,
-      complete: local.complete,
-      localFilesPresent: true,
-      localOnly: true,
-      profileId: local.profileId
-    });
-  }
-  return merged;
+  return getVersionCatalogUi().invokeAsync('loadLocalProfiles', [force]);
 }
 
 function selectedLoaderVersion() {
-  return loaderVersions.find((loader) => loader.version === loaderVersionSelect.value);
-}
-
-function localLoaderVersions(gameVersion, loaderType) {
-  if (!gameVersion) return [];
-  if (loaderType === 'vanilla') return [{
-    version: gameVersion.id,
-    stable: true,
-    installed: gameVersion.installed,
-    profileId: gameVersion.installed ? gameVersion.id : undefined
-  }];
-
-  const byId = new Map(localProfiles.filter((profile) => !profile.isInstance)
-    .map((profile) => [profile.profileId, profile]));
-  function inheritsGame(profile) {
-    const visited = new Set();
-    while (profile?.inheritsFrom && !visited.has(profile.profileId)) {
-      if (profile.inheritsFrom === gameVersion.id) return true;
-      visited.add(profile.profileId);
-      profile = byId.get(profile.inheritsFrom);
-    }
-    return false;
-  }
-  return [...byId.values()]
-    .filter((profile) => profile.valid && profile.complete
-      && profile.loaderType === loaderType && inheritsGame(profile))
-    .map((profile) => ({ version: profile.profileId, installed: true, profileId: profile.profileId, localOnly: true }));
-}
-
-function seedLoaderCatalogWithLocalProfiles() {
-  loaderLoadToken += 1;
-  loaderCatalogLoading = false;
-  loaderVersions = localLoaderVersions(selectedRemoteVersion(), loaderTypeSelect.value);
-  renderLoaderCatalog();
+  return getVersionCatalogUi().invoke('selectedLoaderVersion');
 }
 
 function renderLoaderCatalog(preferredVersion) {
-  const previousVersion = preferredVersion ?? loaderVersionSelect.value;
-  loaderVersionSelect.replaceChildren();
-
-  const groups = [
-    { label: '已安装', loaders: loaderVersions.filter((loader) => loader.installed) },
-    { label: '可安装', loaders: loaderVersions.filter((loader) => !loader.installed) }
-  ];
-  for (const group of groups) {
-    if (group.loaders.length === 0) continue;
-    const optionGroup = document.createElement('optgroup');
-    optionGroup.label = `${group.label}（${group.loaders.length}）`;
-    for (const loader of group.loaders) {
-      const option = document.createElement('option');
-      option.value = loader.version;
-      option.textContent = loader.version;
-      optionGroup.append(option);
-    }
-    loaderVersionSelect.append(optionGroup);
-  }
-
-  const previousOption = [...loaderVersionSelect.options]
-    .find((option) => option.value === previousVersion);
-  if (previousOption) {
-    previousOption.selected = true;
-  } else if (loaderVersionSelect.options.length > 0) {
-    loaderVersionSelect.selectedIndex = 0;
-  } else {
-    const emptyOption = document.createElement('option');
-    emptyOption.value = '';
-    emptyOption.textContent = '该版本暂无可用加载器';
-    loaderVersionSelect.append(emptyOption);
-  }
-
-  loaderVersionSelect.disabled = loaderTypeSelect.value === 'vanilla' || loaderCatalogLoading;
-  updateVersionAction();
+  return getVersionCatalogUi().invoke('renderLoaderCatalog', [preferredVersion]);
 }
 
 async function loadLoaderCatalog(force = false) {
-  const gameVersion = selectedRemoteVersion();
-  const loaderType = loaderTypeSelect.value;
-  const requestToken = ++loaderLoadToken;
-  const localLoaders = localLoaderVersions(gameVersion, loaderType);
-  loaderVersions = localLoaders;
-  loaderCatalogLoading = false;
-
-  if (!gameVersion) {
-    renderLoaderCatalog();
-    return;
-  }
-
-  if (loaderType === 'vanilla') {
-    renderLoaderCatalog(gameVersion.id);
-    return;
-  }
-
-  loaderCatalogLoading = true;
-  loaderVersionSelect.disabled = true;
-  loaderVersionSelect.replaceChildren();
-  const loadingOption = document.createElement('option');
-  loadingOption.textContent = `正在获取 ${loaderNames[loaderType]} 版本…`;
-  loaderVersionSelect.append(loadingOption);
-  updateVersionAction();
-
-  try {
-    const result = minecraft?.listLoaders
-      ? await minecraft.listLoaders(gameVersion.id, loaderType, { force })
-      : await delay(180).then(() => fallbackLoaderResult(gameVersion.id, loaderType));
-    if (requestToken !== loaderLoadToken) return;
-    const onlineProfileIds = new Set(result.versions.map((loader) => loader.profileId));
-    loaderVersions = [...result.versions,
-      ...localLoaders.filter((loader) => !onlineProfileIds.has(loader.profileId))];
-    renderLoaderCatalog();
-    if (loaderVersions.length === 0) {
-      versionEmpty.textContent = `${loaderNames[loaderType]} 暂不支持 Minecraft ${gameVersion.id}`;
-    }
-  } catch (error) {
-    if (requestToken !== loaderLoadToken) return;
-    const message = readableError(error);
-    loaderVersions = localLoaders;
-    renderLoaderCatalog();
-    versionEmpty.textContent = `${loaderNames[loaderType]} 获取失败：${message}`;
-    showToast(message);
-  } finally {
-    if (requestToken === loaderLoadToken) {
-      loaderCatalogLoading = false;
-      loaderVersionSelect.disabled = loaderType === 'vanilla';
-      updateVersionAction();
-    }
-  }
+  return getVersionCatalogUi().invokeAsync('loadLoaderCatalog', [force]);
 }
 
 function updateVersionAction() {
-  const version = selectedRemoteVersion();
-  const loaderType = loaderTypeSelect.value;
-  const loader = selectedLoaderVersion();
-  const busy = versionDownloadActive || fabricApiConfirmationActive || versionDeleteActive || versionVerifyActive || versionCatalogLoading;
-  downloadVersionButton.disabled = !version || !loader || busy || loaderCatalogLoading;
-  deleteVersionButton.disabled = !loader?.installed || busy;
-  clearVersionSelectionButton.disabled = !versionSelect.value || busy || launchRequestActive;
-  if (!version) {
-    downloadVersionButton.textContent = '选择版本';
-    return;
-  }
-  if (!loader) {
-    downloadVersionButton.textContent = loaderCatalogLoading ? '正在获取加载器' : '暂无可用版本';
-    return;
-  }
-  if (fabricApiConfirmationActive) {
-    downloadVersionButton.textContent = '等待安装确认';
-    return;
-  }
-  if (loader.installed) {
-    downloadVersionButton.textContent = '使用此版本';
-    return;
-  }
-  if (lastDownloadFailed) {
-    downloadVersionButton.textContent = '重试';
-    return;
-  }
-  downloadVersionButton.textContent = loaderType === 'vanilla'
-    ? '下载原版'
-    : `安装 ${loaderNames[loaderType]}`;
+  return getVersionCatalogUi().invoke('updateVersionAction');
 }
 
 function renderVersionCatalog(preferredId) {
-  const query = versionSearch.value.trim().toLowerCase();
-  const type = versionTypeFilter.value;
-  const previousId = preferredId ?? versionCatalog.value;
-
-  filteredVersions = remoteVersions.filter((version) => {
-    const typeMatches = type === 'all' || version.type === type;
-    const queryMatches = !query || version.id.toLowerCase().includes(query);
-    return typeMatches && queryMatches;
-  });
-
-  const installedVersions = filteredVersions.filter((version) => version.installed);
-  const availableVersions = filteredVersions.filter((version) => !version.installed);
-
-  versionCatalog.replaceChildren();
-
-  if (installedVersions.length > 0) {
-    const installedGroup = document.createElement('optgroup');
-    installedGroup.label = `已安装（${installedVersions.length}）`;
-    for (const version of installedVersions) {
-      const option = document.createElement('option');
-      option.value = version.id;
-      option.textContent = `${version.id}  ·  ${versionTypeName(version.type)}`;
-      installedGroup.append(option);
-    }
-    versionCatalog.append(installedGroup);
-  }
-
-  if (availableVersions.length > 0) {
-    const availableGroup = document.createElement('optgroup');
-    availableGroup.label = `可下载（${availableVersions.length}）`;
-    for (const version of availableVersions) {
-      const option = document.createElement('option');
-      option.value = version.id;
-      option.textContent = `${version.id}  ·  ${versionTypeName(version.type)}`;
-      option.disabled = version.localOnly === true;
-      availableGroup.append(option);
-    }
-    versionCatalog.append(availableGroup);
-  }
-
-  const preferredOption = [...versionCatalog.options]
-    .find((option) => option.value === previousId && !option.disabled);
-  if (preferredOption) {
-    preferredOption.selected = true;
-  } else {
-    const firstEnabledOption = [...versionCatalog.options].find((option) => !option.disabled);
-    versionCatalog.selectedIndex = firstEnabledOption ? firstEnabledOption.index : -1;
-  }
-
-  versionEmpty.textContent = filteredVersions.length
-    ? `共 ${filteredVersions.length} 个版本，发现 ${localProfiles.length} 个启动配置`
-    : '没有符合条件的版本';
-  updateVersionAction();
+  return getVersionCatalogUi().invoke('renderVersionCatalog', [preferredId]);
 }
 
 function invalidateVersionCatalogForDirectoryChange() {
-  cancelFabricApiConfirmation();
-  // 安装状态只对当前游戏目录有效。切换目录后不能继续复用上一个目录的
-  // 版本和加载器状态，否则旧目录中的版本会被错误显示为“已安装”。
-  loaderLoadToken += 1;
-  loaderCatalogLoading = false;
-  versionCatalogLoadToken += 1;
-  localProfilesLoaded = false;
-  remoteVersions = [];
-  filteredVersions = [];
-  loaderVersions = [];
-  versionCatalogLoaded = false;
-  versionCatalog.replaceChildren();
-  loaderVersionSelect.replaceChildren();
-  versionEmpty.textContent = '游戏目录已切换，打开版本列表时将重新检查已安装版本';
-  updateVersionAction();
+  return getVersionCatalogUi().invoke('invalidateVersionCatalogForDirectoryChange');
 }
 
 async function reloadLocalProfilesForDirectoryChange() {
-  // 如果旧目录的扫描尚未返回，先让它结束，再强制扫描新目录，避免复用
-  // loadLocalProfiles 的并发请求结果。
-  if (localProfilesLoadingPromise) {
-    try {
-      await localProfilesLoadingPromise;
-    } catch {
-      // 新目录的强制扫描会提供最终状态和错误信息。
-    }
-  }
-  localProfilesLoaded = false;
-  return loadLocalProfiles(true);
+  return getVersionCatalogUi().invokeAsync('reloadLocalProfilesForDirectoryChange');
 }
 
 async function loadVersionCatalog(force = false) {
-  if (versionCatalogLoading) {
-    return;
-  }
-
-  versionCatalogLoading = true;
-  const requestToken = ++versionCatalogLoadToken;
-  versionCatalog.disabled = true;
-  versionSearch.disabled = true;
-  versionTypeFilter.disabled = true;
-  refreshVersionsButton.disabled = true;
-  downloadVersionButton.disabled = true;
-  versionEmpty.textContent = '正在检查已安装版本…';
-
-  try {
-    await loadLocalProfiles(force);
-    if (requestToken !== versionCatalogLoadToken) return;
-    seedCatalogWithLocalProfiles();
-    renderVersionCatalog(versionSelect.value);
-    seedLoaderCatalogWithLocalProfiles();
-    versionEmpty.textContent = `已检查 ${localProfiles.length} 个启动配置，正在加载全部版本…`;
-    const result = minecraft
-      ? await minecraft.listVersions({ force })
-      : await delay(250).then(fallbackVersionResult);
-    if (requestToken !== versionCatalogLoadToken) return;
-    remoteVersions = mergeRemoteAndLocalVersions(result.versions);
-    versionCatalogLoaded = true;
-    renderVersionCatalog(versionSelect.value);
-    await loadLoaderCatalog(force);
-  } catch (error) {
-    if (requestToken !== versionCatalogLoadToken) return;
-    const message = readableError(error);
-    versionEmpty.textContent = localProfiles.length > 0
-      ? `已加载 ${localProfiles.length} 个启动配置；在线版本加载失败：${message}`
-      : `版本加载失败：${message}`;
-    showToast(message);
-  } finally {
-    versionCatalogLoading = false;
-    versionCatalog.disabled = false;
-    versionSearch.disabled = false;
-    versionTypeFilter.disabled = false;
-    refreshVersionsButton.disabled = false;
-    updateVersionAction();
-  }
+  return getVersionCatalogUi().invokeAsync('loadVersionCatalog', [force]);
 }
 
 function useVersion(profileId, displayName = profileId) {
@@ -1877,7 +1476,7 @@ async function installSelectedVersion() {
   downloadCancelRequested = false;
   lastDownloadFailed = false;
   activeDownloadLabel = loaderLabel;
-  homeStatus.hidden = true;
+  homeStatus.hidden = false;
   versionCatalog.disabled = true;
   versionSearch.disabled = true;
   versionTypeFilter.disabled = true;
@@ -2036,6 +1635,7 @@ document.querySelector('#closeButton').addEventListener('click', () => {
 function openAccountManagement() {
   if (!accountDialog.open) accountDialog.showModal();
   void renderAccountList();
+  void loadAccountState();
   microsoftLoginButton.focus();
 }
 
@@ -2101,7 +1701,7 @@ accountsApi?.onMicrosoftProgress?.((progress) => {
   if (progress.message) microsoftLoginHint.textContent = progress.message;
 });
 document.querySelector('#settingsButton').addEventListener('click', async () => {
-  await ensureSettingsOpen();
+  if (!await ensureSettingsOpen()) return;
   void prepareJavaDownloadSelection();
 });
 
@@ -2161,8 +1761,10 @@ settingsDialog.addEventListener('close', async () => {
         renderJavaPathSetting();
         void refreshAutoJavaDetection();
         invalidateVersionCatalogForDirectoryChange();
-        if (modpackUiModule) await (await modpackUiModule).directoryChanged();
-        await reloadLocalProfilesForDirectoryChange();
+        if (modpackUiModule) void withModpackUi((ui) => ui.directoryChanged());
+        void reloadLocalProfilesForDirectoryChange().catch((error) => {
+          showToast(`游戏列表读取失败，可在「切换版本」中重试：${readableError(error)}`, true);
+        });
       }
       const sourceLabel = {
         auto: '自动选择',
@@ -2668,9 +2270,8 @@ let startupPreparing = false;
 let startupDirectoryChanging = false;
 
 function renderStartupProgress(state) {
-  startupMessage.textContent = state.phase === 'ready' ? '正在读取账户和游戏列表…' : state.message;
-  // File preparation is followed by reading the prepared data into the home screen.
-  startupProgress.value = Math.min(70, Math.max(0, Number(state.progress) * 0.7 || 0));
+  startupMessage.textContent = state.phase === 'ready' ? '正在打开启动器…' : state.message;
+  startupProgress.value = Math.min(95, Math.max(0, Number(state.progress) * 0.95 || 0));
 }
 
 async function prepareLauncher() {
@@ -2693,19 +2294,11 @@ async function prepareLauncher() {
       if (!environment.startup?.prepare) throw new Error('启动准备组件缺失，请重新安装完整的启动器。');
       const result = await environment.startup.prepare();
       if (!result?.ready) throw new Error('启动准备尚未完成，请重试。');
+      for (const error of result.moduleErrors ?? []) {
+        showToast(`部分功能暂不可用：${error.message}`, true);
+      }
     }
-    startupMessage.textContent = '正在读取启动设置…';
-    await loadLauncherSettings({ strict: true, detectJava: false });
-    environment?.diagnostics?.markStartup('settings-loaded');
-    startupProgress.value = 80;
-    startupMessage.textContent = '正在读取账户和游戏列表…';
-    const results = await Promise.allSettled([
-      loadAccountState({ strict: true }).then(() => environment?.diagnostics?.markStartup('accounts-loaded')),
-      loadLocalProfiles(true).then(() => environment?.diagnostics?.markStartup('profiles-loaded'))
-    ]);
-    const failed = results.find((result) => result.status === 'rejected');
-    if (failed) throw failed.reason;
-    await environment?.diagnostics?.rendererReady?.();
+    startupMessage.textContent = '正在打开启动器…';
     startupProgress.value = 100;
     startupScreen.dataset.state = 'ready';
     startupScreen.setAttribute('aria-busy', 'false');
@@ -2735,14 +2328,46 @@ async function prepareLauncher() {
     stopProgress?.();
     startupPreparing = false;
   }
-  updaterApi?.getState?.().then(renderLauncherUpdate).catch((error) => {
-    renderLauncherUpdate({ status: 'error', message: readableError(error), progress: 0 });
+  // Each module owns its loading and failure state. Home remains usable even
+  // when settings, account storage or game-directory scanning is unavailable.
+  void Promise.resolve().then(() => environment?.diagnostics?.rendererReady?.()).catch((error) => {
+    environment?.diagnostics?.reportError?.(`窗口健康确认失败：${readableError(error)}`);
   });
+  const settingsReady = Promise.resolve().then(() => loadLauncherSettings({ strict: true, detectJava: false })).then(() => {
+    environment?.diagnostics?.markStartup('settings-loaded');
+  });
+  void settingsReady.catch((error) => {
+    showToast(`启动设置读取失败，可在设置中重试：${readableError(error)}`, true);
+    environment?.diagnostics?.reportError?.(`设置模块读取失败：${readableError(error)}`);
+  });
+  void Promise.resolve().then(() => loadAccountState({ strict: true })).then(() => {
+    environment?.diagnostics?.markStartup('accounts-loaded');
+  }).catch((error) => {
+    accountName.textContent = '账户读取失败，点击管理重试';
+    showToast(`账户读取失败，点击管理可重试：${readableError(error)}`, true);
+  });
+  void Promise.resolve().then(() => loadLocalProfiles(true)).then(() => {
+    environment?.diagnostics?.markStartup('profiles-loaded');
+  }).catch((error) => {
+    showToast(`游戏列表读取失败，可在「切换版本」中重试：${readableError(error)}`, true);
+  });
+  if (updaterApi?.getState) {
+    void Promise.resolve().then(() => updaterApi.getState()).then(renderLauncherUpdate).catch((error) => {
+      renderLauncherUpdate({ status: 'error', message: readableError(error), progress: 0 });
+    });
+  }
   void withModpackUi((ui) => ui.restore());
-  void refreshAutoJavaDetection().then(async () => {
-    environment?.diagnostics?.markStartup('java-detected');
-    await performJavaCheck();
-  }).catch((error) => showToast(`Java 检测失败：${readableError(error)}`, true));
+  // Java uses the saved path and runtimes; only its own initial check waits
+  // for settings, while the other modules have already started.
+  void settingsReady.then(async () => {
+    try {
+      await refreshAutoJavaDetection();
+      environment?.diagnostics?.markStartup('java-detected');
+      await performJavaCheck();
+    } catch (error) {
+      showToast(`Java 检测失败：${readableError(error)}`, true);
+    }
+  }, () => {});
 }
 
 startupRetryButton.addEventListener('click', () => { void prepareLauncher(); });

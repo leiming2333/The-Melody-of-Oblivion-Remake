@@ -77,7 +77,7 @@ registerTaskHandler(ipcMain, 'startup:prepare', async (event) => {
   }
   preparedWindows.delete(window);
   await shown;
-  startupPreparation ??= require('./startup-preparation').createStartupPreparation({ app, getSettingsStore, getAccountStore });
+  startupPreparation ??= require('./startup-preparation').createStartupPreparation({ app });
   const result = await startupPreparation.prepare((progress) => {
     if (!event.sender.isDestroyed()) event.sender.send('startup:progress', progress);
   });
@@ -99,10 +99,7 @@ ipcMain.handle('diagnostics:copy-error', (_event, message) => {
   return true;
 });
 ipcMain.handle('diagnostics:export-report', (event, message) => (
-  require('./diagnostics-report').exportDiagnosticsReport({
-    app, dialog, ownerWindow: BrowserWindow.fromWebContents(event.sender),
-    getSettings: () => getSettingsStore().getState(), message: String(message ?? '')
-  })
+  services.errorLog.exportReport(event.sender, String(message ?? ''))
 ));
 
 ipcMain.handle('shell:open-external', async (_event, url) => {
@@ -224,7 +221,17 @@ function createWindow() {
           check();
         })`);
         if (!preparedWindows.has(mainWindow)) throw new Error('Smoke test: startup preparation was not completed');
+        // Exercise the real child runtime and its app.asar path in packaged builds.
+        const { LoaderInstallProcess } = require('./minecraft/loader-install-process');
+        try {
+          await new LoaderInstallProcess().installLoader({ gameVersion: '../invalid', loaderType: 'forge' });
+          throw new Error('Smoke test: installer validation was bypassed');
+        } catch (error) {
+          if (!error.message.includes('Minecraft 版本号格式无效')) throw error;
+        }
         const fileSystem = require('node:fs/promises');
+        // Store readiness is checked separately; it never gates the home UI.
+        await Promise.all([getSettingsStore().prepare(), getAccountStore().getState()]);
         for (const name of ['settings.json', 'accounts.json']) {
           JSON.parse(await fileSystem.readFile(path.join(app.getPath('userData'), name), 'utf8'));
         }
@@ -245,34 +252,39 @@ function createWindow() {
 
 const services = createLazyServices({
   errorLog: () => {
-    const { ErrorLog } = require('./error-log');
-    return new ErrorLog(app.getPath('userData'));
+    const { BackgroundDiagnostics } = require('./background-diagnostics');
+    return new BackgroundDiagnostics({ app, dialog, BrowserWindow, getSettingsStore });
   },
   accountStore: () => {
-    const { AccountStore } = require('./accounts/account-store');
+    const { BackgroundAccounts } = require('./accounts/background-accounts');
     const { createSecretCodec } = require('./accounts/secret-codec');
-    return new AccountStore(path.join(app.getPath('userData'), 'accounts.json'), { secretCodec: createSecretCodec(safeStorage) });
+    return new BackgroundAccounts(path.join(app.getPath('userData'), 'accounts.json'), { secretCodec: createSecretCodec(safeStorage) });
   },
   settingsStore: () => {
-    const { SettingsStore } = require('./settings/settings-store');
-    return new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
+    const { BackgroundSettings } = require('./settings/background-settings');
+    return new BackgroundSettings(path.join(app.getPath('userData'), 'settings.json'));
   },
   microsoftAuth: () => {
-    const { MicrosoftAuthManager } = require('./accounts/microsoft-auth');
+    const { BackgroundAccountAuth } = require('./accounts/background-accounts');
     const { clientId } = require('./accounts/microsoft-client-id.json');
-    return new MicrosoftAuthManager({ accountStore: getAccountStore(), clientId: process.env.MELODY_MICROSOFT_CLIENT_ID || clientId });
+    return new BackgroundAccountAuth({ provider: 'microsoft', getAccountStore, clientId: process.env.MELODY_MICROSOFT_CLIENT_ID || clientId });
   },
   yggdrasilAuth: () => {
-    const { YggdrasilAuthManager } = require('./accounts/yggdrasil-auth');
-    return new YggdrasilAuthManager({ accountStore: getAccountStore() });
+    const { BackgroundAccountAuth } = require('./accounts/background-accounts');
+    return new BackgroundAccountAuth({ provider: 'littleskin', getAccountStore });
   },
   javaProbeCache: () => {
     const { JavaProbeCache } = require('./minecraft/java-probe-cache');
     return new JavaProbeCache(path.join(app.getPath('userData'), 'java-cache.json'));
   },
+  javaDetection: () => {
+    const { createJavaBackgroundService } = require('./minecraft/background-services');
+    return createJavaBackgroundService({ cachePath: path.join(app.getPath('userData'), 'java-settings-cache.json'),
+      launcherDirectory: require('./minecraft/ipc').launcherDirectory(app) });
+  },
   updateManager: () => {
-    const { UpdateManager } = require('./updater/update-manager');
-    return new UpdateManager({
+    const { BackgroundUpdater } = require('./updater/background-updater');
+    return new BackgroundUpdater({
       app,
       BrowserWindow,
       ipcMain,
@@ -347,6 +359,7 @@ function getSettingsStore() { return services.settingsStore; }
 function getMicrosoftAuth() { return services.microsoftAuth; }
 function getYggdrasilAuth() { return services.yggdrasilAuth; }
 function getJavaProbeCache() { return services.javaProbeCache; }
+function getJavaService() { return services.javaDetection; }
 function getUpdateManager() { return services.updateManager; }
 
 async function initializeBackgroundServices() {
@@ -355,7 +368,8 @@ async function initializeBackgroundServices() {
   const settings = await getSettingsStore().getState();
   if (settings.launcherUpdatePolicy !== 'off') {
     setTimeout(() => {
-      void getUpdateManager().check({ autoDownload: settings.launcherUpdatePolicy === 'auto' });
+      void Promise.resolve().then(() => getUpdateManager().check({ autoDownload: settings.launcherUpdatePolicy === 'auto' }))
+        .catch((error) => services.errorLog.record(`后台更新检查失败：${error.message}`));
     }, 5000);
   }
 }
@@ -364,7 +378,7 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
   startupMetrics.attach(app.getPath('userData'));
   startupMetrics.mark('electron-ready');
   require('./accounts/ipc').registerAccountIpc({ app, ipcMain, shell, clipboard, getAccountStore, getMicrosoftAuth, getYggdrasilAuth });
-  require('./settings/ipc').registerSettingsIpc({ BrowserWindow, dialog, ipcMain, getSettingsStore, getJavaProbeCache });
+  require('./settings/ipc').registerSettingsIpc({ BrowserWindow, dialog, ipcMain, getSettingsStore, getJavaProbeCache, getJavaService });
   require('./minecraft/ipc').registerMinecraftIpc({
     app, ipcMain, shell, dialog, BrowserWindow, getSettingsStore, getAccountStore, getMicrosoftAuth, getYggdrasilAuth, getJavaProbeCache
   });
@@ -384,4 +398,23 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+let modulesStopping = false;
+let modulesStopped = false;
+app.on('before-quit', (event) => {
+  if (modulesStopped) return;
+  const runtime = require.cache[require.resolve('./module-process')];
+  const installers = require.cache[require.resolve('./minecraft/loader-install-process')];
+  if (!runtime && !installers) return;
+  event.preventDefault();
+  if (modulesStopping) return;
+  modulesStopping = true;
+  void Promise.allSettled([
+    runtime?.exports.disposeModuleProcesses(),
+    installers?.exports.disposeLoaderInstallProcesses()
+  ]).finally(() => {
+    modulesStopped = true;
+    app.quit();
+  });
 });

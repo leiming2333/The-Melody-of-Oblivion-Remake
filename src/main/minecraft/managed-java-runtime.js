@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { findJavaExecutable, javaMajorVersion, javaRuntimeDetails, installedJavaExecutable, SUPPORTED_JAVA_MAJORS } = require('./java-runtime');
+const { findJavaExecutable, javaMajorVersion, javaRuntimeDetails, installedJavaExecutable, SUPPORTED_JAVA_MAJORS, awaitJavaOperation } = require('./java-runtime');
 const { DEFAULT_SEGMENT_CONCURRENCY, downloadFile, throwIfAborted } = require('./downloader');
 const { userAgent } = require('../../shared/build-info');
 
@@ -217,9 +217,9 @@ class ManagedJavaRuntime {
     return path.join(this.gameDirectory, 'runtime', 'melody', `java-${majorVersion}-${this.architecture}`);
   }
 
-  async installedExecutable(majorVersion) {
+  async installedExecutable(majorVersion, signal) {
     return installedJavaExecutable(this.gameDirectory, majorVersion, this.probeJava, {
-      architecture: this.architecture, platform: this.platform
+      architecture: this.architecture, platform: this.platform, signal
     });
   }
 
@@ -227,18 +227,25 @@ class ManagedJavaRuntime {
     throwIfAborted(signal);
     const candidates = [explicitPath, ...savedRuntimes.map((entry) => entry?.path)];
     const seen = new Set();
+    const savedCandidates = [];
     for (const candidate of candidates) {
       if (typeof candidate !== 'string' || !path.isAbsolute(candidate)) continue;
       const normalized = path.normalize(candidate);
       const key = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
       if (seen.has(key)) continue;
       seen.add(key);
-      let majorVersion;
-      try { majorVersion = await this.probeJava(normalized); } catch { /* Try the next saved runtime. */ }
-      throwIfAborted(signal);
-      if (majorVersion !== requiredMajorVersion) continue;
-      onProgress({ message: `使用 Java ${requiredMajorVersion}：${normalized}`, javaPath: normalized, majorVersion });
-      return normalized;
+      savedCandidates.push(normalized);
+    }
+    if (savedCandidates.length) {
+      try {
+        const preferred = typeof explicitPath === 'string' && path.isAbsolute(explicitPath) ? path.normalize(explicitPath) : undefined;
+        const executable = await findJavaExecutable(preferred, requiredMajorVersion, this.probeJava,
+          async () => savedCandidates, { signal, onProgress });
+        onProgress({ message: `使用 Java ${requiredMajorVersion}：${executable}`, javaPath: executable, majorVersion: requiredMajorVersion });
+        return executable;
+      } catch {
+        throwIfAborted(signal);
+      }
     }
     // No compatible saved path: use the existing system/managed lookup, without treating
     // the user's preferred path as a mandatory version override.
@@ -247,31 +254,40 @@ class ManagedJavaRuntime {
     return executable;
   }
 
-  async resolve(explicitPath, requiredMajorVersion, _onProgress = () => {}, signal) {
+  async resolve(explicitPath, requiredMajorVersion, onProgress = () => {}, signal) {
     throwIfAborted(signal);
+    const findSystem = () => awaitJavaOperation(this.findSystemJava(explicitPath, requiredMajorVersion,
+      this.probeJava, undefined, { signal, onProgress }), signal);
+    onProgress({ message: `正在查找${Number.isInteger(requiredMajorVersion) ? ` Java ${requiredMajorVersion}` : ' Java'} 运行环境…` });
     if (!Number.isInteger(requiredMajorVersion)) {
-      const executable = await this.findSystemJava(explicitPath, requiredMajorVersion);
+      const executable = await findSystem();
       throwIfAborted(signal);
       return executable;
     }
     try {
-      const executable = await this.findSystemJava(explicitPath, requiredMajorVersion);
+      const executable = await findSystem();
       throwIfAborted(signal);
+      onProgress({ message: `使用 Java ${requiredMajorVersion}：${executable}`, javaPath: executable, majorVersion: requiredMajorVersion });
       return executable;
     } catch (error) {
       throwIfAborted(signal);
       if (explicitPath) throw new Error(`手动指定的 Java 不可用或版本不兼容：${error.message}。请在设置中重新指定或切换自动检测`);
     }
-    const installed = await this.installedExecutable(requiredMajorVersion);
+    onProgress({ message: `正在检查启动器已安装的 Java ${requiredMajorVersion}…` });
+    const installed = await awaitJavaOperation(this.installedExecutable(requiredMajorVersion, signal), signal);
     throwIfAborted(signal);
-    if (installed) return installed;
+    if (installed) {
+      onProgress({ message: `使用 Java ${requiredMajorVersion}：${installed}`, javaPath: installed, majorVersion: requiredMajorVersion });
+      return installed;
+    }
     throw new Error(`该游戏版本需要 Java ${requiredMajorVersion}，请在设置的 Java 环境旁下载对应运行环境，或选择已安装的 Java ${requiredMajorVersion}`);
   }
 
   async ensureInstalled(majorVersion, onProgress = () => {}, signal) {
     if (!SUPPORTED_JAVA_MAJORS.includes(majorVersion)) throw new Error('请选择 Java 8、16、17、21 或 25');
     throwIfAborted(signal);
-    const installed = await this.installedExecutable(majorVersion);
+    onProgress({ message: `正在检查已安装的 Java ${majorVersion}…`, majorVersion });
+    const installed = await awaitJavaOperation(this.installedExecutable(majorVersion, signal), signal);
     throwIfAborted(signal);
     if (installed) return installed;
     const pending = this.installing.get(majorVersion);

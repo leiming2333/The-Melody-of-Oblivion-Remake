@@ -31,7 +31,7 @@ runner 标签不是不可变镜像；每个构建另记实际 `ImageOS`、`Image
 
 ## 启动与升级验收范围
 
-启动检查调用最终包的 `--smoke-test`，必须成功退出并生成 `ok:true`、`startupReady:true` 且平台、架构、包内版本相符的报告；仅零退出码或页面加载完成不算通过。每次使用全新的隔离用户数据和游戏目录，检查窗口、preload、renderer 和四个延迟加载界面模块，并等待文件准备成功、准备页关闭、主页区域恢复交互，再读取新建的 `settings.json` 与 `accounts.json` 确认 JSON 可解析。准备失败或超时会使检查失败。该检查不验证真实账户登录、远程游戏下载或 Java 游戏启动。
+启动检查调用最终包的 `--smoke-test`，必须成功退出并生成 `ok:true`、`startupReady:true` 且平台、架构、包内版本相符的报告；仅零退出码或页面加载完成不算通过。每次使用全新的隔离用户数据和游戏目录，检查窗口、preload、renderer 和四个延迟加载界面模块，并等待核心静态资源检查成功、准备页关闭、主页区域恢复交互。随后显式等待设置和账户模块准备完成，读取新建的 `settings.json` 与 `accounts.json` 确认 JSON 可解析；这些额外断言属于烟测门槛，产品主页不等待业务数据读取。检查实际启动通用模块工作进程及加载器安装工作进程，覆盖最终包内 `app.asar` 的入口路径；加载器以无效版本输入验证错误返回，不执行完整 Forge 安装。核心准备、模块调用或断言失败及超时都会使检查失败。该检查不验证真实账户登录、远程游戏下载、完整加载器安装或 Java 游戏启动。
 
 源码检查 `npm run smoke` 通过 `scripts/smoke.cjs` 调用同一验收程序，允许源码运行时的 `packaged:false`，仍要求 `startupReady:true`。源码与最终包检查均由验收程序在应用退出后清理临时目录，避免 Windows 下 Chromium 文件仍被占用。
 
@@ -39,9 +39,9 @@ runner 标签不是不可变镜像；每个构建另记实际 `ImageOS`、`Image
 
 ARMv7 曾尝试用 QEMU 用户态替代原生验收：`ubuntu-24.04` 上注册 binfmt 后，armhf 容器可以执行自身工具链，但 AppImage 运行时（ELF 带尾部 squashfs）在 qemu-user 下始终返回 `ENOEXEC`，因此该路线暂时不纳入发布门槛，armv7 产物只做构建与校验。`verify-packaged.cjs` 与 `verify-upgrade.cjs` 保留 `--emulated <机制>` 参数，报告写入 `native:false` 与 `emulatedBy`，汇总时记为 `passed-emulated`；重新启用时不需要改脚本。待 AppImage 运行时可在模拟环境中执行后，把 `linux-armv7l` 的 `smokeRunner` 与 `emulatedBy` 加回 `scripts/release-targets.cjs` 即可恢复门槛。
 
-测试使用隔离安装目录和用户数据目录。健康确认由测试程序在新版启动报告成功后调用；实际产品要求新版窗口显示、主框架本地页面加载、预加载桥接就绪、文件准备成功，且设置、账户和本地游戏列表读取成功后，才允许渲染进程报告就绪。后台 Java 检测、在线皮肤刷新和网络更新检查不阻挡健康确认。开发模式和 smoke 模式不自动确认更新健康。两类 macOS runner 还实际撤销隔离应用目录的写权限，要求系统拒绝写入后保留已校验 ZIP、降级为手动替换入口，且不退出或启动辅助进程；报告必须包含 `manualPermissionFallbackPassed:true`。App Translocation 降级、Windows 文件锁与辅助进程错误、回滚错误、不同安装路径隔离等故障分支另由事务测试覆盖。
+测试使用隔离安装目录和用户数据目录。健康确认由测试程序在新版启动报告成功后调用；实际产品要求新版窗口显示、主框架本地页面加载、预加载桥接就绪和核心静态资源检查成功，主页解除交互限制后，渲染进程在后台报告就绪。健康确认不等待设置、账户、本地游戏列表、Java 检测、在线皮肤刷新或网络更新检查；业务模块故障各自报告，不阻止其他模块或主页使用。更新模块的健康确认本身也不阻挡主页开放。开发模式和 smoke 模式不自动确认更新健康。两类 macOS runner 还实际撤销隔离应用目录的写权限，要求系统拒绝写入后保留已校验 ZIP、降级为手动替换入口，且不退出或启动辅助进程；报告必须包含 `manualPermissionFallbackPassed:true`。App Translocation 降级、Windows 文件锁与辅助进程错误、回滚错误、不同安装路径隔离等故障分支另由事务测试覆盖。
 
-启动准备回归测试覆盖全新目录的配置与备份生成、已有配置保留、缺失配置恢复、缺失目录重建、资源缺失 / 空文件 / 目录占位、不可恢复的配置损坏、并发准备及失败重试。界面测试覆盖准备页先显示、必需读取失败时主页保持禁用，以及本地游戏目录不可写时改用系统目录后重试成功。相关测试位于 `test/startup-preparation.test.js`、`test/renderer.test.js`、`test/main-lazy-services.test.js`、`test/mod-drop.test.js` 与 `test/packaged-smoke.test.js`。
+启动准备回归测试覆盖核心资源缺失 / 空文件 / 目录占位时阻止就绪、修复重试、并发资源检查，以及可选资源损坏或业务存储无响应时仍可完成核心准备；核心准备不读取业务配置，也不创建用户、游戏或日志目录。配置与备份生成、已有配置保留、缺失配置恢复和损坏配置重试由各存储模块单独验证。界面测试覆盖准备页先显示、核心失败时主页保持禁用，以及设置、账户、版本扫描或窗口健康确认失败或挂起时其他功能仍可使用；同时检查设置共享读取和迟到结果不会覆盖编辑草稿。通用工作进程和加载器安装进程测试另覆盖真实进程启动、崩溃恢复、取消与子进程清理。相关测试位于 `test/startup-preparation.test.js`、`test/renderer.test.js`、`test/ui-module-boundaries.test.js`、`test/background-account-settings.test.js`、`test/module-process.test.js`、`test/loader-install-process.test.js`、`test/window-health.test.js` 与 `test/packaged-smoke.test.js`，模块职责见 [模块隔离说明](module-isolation.md)。
 
 ## 公开发布与对象存储
 
@@ -59,4 +59,4 @@ npm run smoke
 npm run build -- --target windows-x64
 ```
 
-在 Windows 实际运行便携包检查首次释放、再次复用、活动版本保护，再运行 `scripts/verify-upgrade.cjs` 验证隔离双版本升级。界面在实际 `760×466` 窗口检查首次准备、准备失败详情、重试及系统游戏目录切换，再检查导入确认、缺失文件列表、取消状态、错误建议及更新恢复入口。发布验收记录应附源码提交、CI 链接、八类产物、校验清单和原生报告，并清楚列出未执行或失败的项目。
+在 Windows 实际运行便携包检查首次释放、再次复用、活动版本保护，再运行 `scripts/verify-upgrade.cjs` 验证隔离双版本升级。界面在实际 `760×466` 窗口检查首次准备、核心资源失败详情与重试、各业务模块故障隔离及设置中的游戏目录切换，再检查导入确认、缺失文件列表、取消状态、错误建议及更新恢复入口。发布验收记录应附源码提交、CI 链接、八类产物、校验清单和原生报告，并清楚列出未执行或失败的项目。

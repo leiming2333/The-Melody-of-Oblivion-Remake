@@ -170,6 +170,9 @@ class UpdateManager {
     shell = null,
     onUpdateAvailable = null,
     onUpdateReady = null,
+    onStateChange = null,
+    parentPid = process.pid,
+    startLegacyHelper = null,
     platform = process.platform,
     arch = process.arch,
     env = process.env
@@ -190,6 +193,9 @@ class UpdateManager {
     this.shell = shell;
     this.onUpdateAvailable = onUpdateAvailable;
     this.onUpdateReady = onUpdateReady;
+    this.onStateChange = onStateChange;
+    this.parentPid = parentPid;
+    this.startLegacyHelper = startLegacyHelper;
     this.platform = platform;
     this.arch = arch;
     this.env = env;
@@ -320,6 +326,7 @@ class UpdateManager {
   setState(patch) {
     this.state = { ...this.state, ...patch };
     const state = this.publicState();
+    this.onStateChange?.(state);
     for (const window of this.BrowserWindow?.getAllWindows?.() ?? []) {
       if (!window.isDestroyed?.()) window.webContents.send(UPDATE_CHANNEL, state);
     }
@@ -1018,10 +1025,13 @@ class UpdateManager {
           throw new Error('更新包校验失败：安装前 SHA-256 不匹配');
         }
         if (this.platform === 'win32') {
-          const { launchScript } = require('./windows-replacement');
-          child = await startWindowsHelper({ directory: path.dirname(this.updateFilePath), fileSystem: this.fileSystem,
-            spawnProcess: this.spawnProcess, signal, makeScript: (options) => launchScript(this.updateFilePath, process.pid, options) });
-        } else this.app.relaunch?.();
+          if (this.startLegacyHelper) child = await this.startLegacyHelper({ sourcePath: this.updateFilePath, signal });
+          else {
+            const { launchScript } = require('./windows-replacement');
+            child = await startWindowsHelper({ directory: path.dirname(this.updateFilePath), fileSystem: this.fileSystem,
+              spawnProcess: this.spawnProcess, signal, makeScript: (options) => launchScript(this.updateFilePath, this.parentPid, options) });
+          }
+        } else await this.app.relaunch?.();
       } else {
         if (!this.store.valid(record)) throw new Error('更新恢复路径无效');
         await assertManagedAncestors(this.fileSystem, record.targetPath, path.dirname(record.targetPath));
@@ -1053,15 +1063,15 @@ class UpdateManager {
           record.phase = rollback ? 'rolled-back' : 'awaiting-health';
           await this.store.save(record);
           this.updateFilePath = record.targetPath;
-          this.app.relaunch?.();
+          await this.app.relaunch?.();
         } else {
           child = await this.startHelper({ record, store: this.store, platform: this.platform,
-            spawnProcess: this.spawnProcess, signal, rollback });
+            spawnProcess: this.spawnProcess, parentPid: this.parentPid, signal, rollback });
         }
       }
       throwIfAborted(signal);
       this.setState({ status: 'installing', canCancel: false, message: rollback ? '正在恢复上一版本…' : '正在退出并安装更新…' });
-      this.app.quit?.();
+      await this.app.quit?.();
       return { installing: true };
     } catch (error) {
       child?.kill?.();

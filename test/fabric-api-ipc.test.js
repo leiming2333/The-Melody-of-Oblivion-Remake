@@ -6,9 +6,10 @@ const path = require('node:path');
 const Module = require('node:module');
 const { EventEmitter } = require('node:events');
 const { registerMinecraftIpc, resolveGameDirectory } = require('../src/main/minecraft/ipc');
-const { MinecraftLoaderManager } = require('../src/main/minecraft/loader-manager');
+const { LoaderInstallProcess } = require('../src/main/minecraft/loader-install-process');
 const { GameProcessRegistry } = require('../src/main/minecraft/game-process-registry');
 const { profileGameDirectory } = require('../src/main/minecraft/launch-target');
+const { createInlineMinecraftServices } = require('./helpers/inline-minecraft-services');
 
 function deferred() {
   let resolve;
@@ -71,7 +72,7 @@ async function fixture(t, settingsOverrides = {}) {
     }
     return originalLoad.call(this, request, parent, isMain);
   });
-  t.mock.method(MinecraftLoaderManager.prototype, 'installLoader', async function (request, progress, options = {}) {
+  t.mock.method(LoaderInstallProcess.prototype, 'installLoader', async function (request, progress, options = {}) {
     calls.events.push('loader');
     calls.loader.push({ request, signal: options.signal, directory: this.gameDirectory });
     progress({ phase: 'installing-loader', message: 'Installing Fabric' });
@@ -82,6 +83,8 @@ async function fixture(t, settingsOverrides = {}) {
   const settingsStore = { getState: async () => { calls.settings++; return { ...settings }; } };
   const handlers = new Map();
   registerMinecraftIpc({ app, settingsStore, shell: { trashItem: async () => {} },
+    createServices: options => createInlineMinecraftServices({ ...options, implementations: { FabricApiManager } }),
+    createFabricApiCatalog: () => new FabricApiManager({}),
     ipcMain: { handle: (name, handler) => handlers.set(name, handler) } });
   const owner = sender(1);
   const invokeRaw = (name, currentOwner = owner, ...args) => {

@@ -11,7 +11,9 @@ function registerUpdateIpc({ ipcMain, getUpdateManager }) {
   });
   registerTaskHandler(ipcMain, 'updater:check', async () => {
     const manager = getUpdateManager();
-    const settings = await manager.settingsStore?.getState();
+    let settings;
+    try { settings = await manager.settingsStore?.getState(); }
+    catch { settings = { launcherUpdatePolicy: 'notify' }; }
     return manager.check({ autoDownload: settings ? settings.launcherUpdatePolicy === 'auto' : true });
   });
   registerTaskHandler(ipcMain, 'updater:download', () => getUpdateManager().download());

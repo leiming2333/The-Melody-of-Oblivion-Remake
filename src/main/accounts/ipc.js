@@ -44,7 +44,7 @@ function registerAccountIpc({
     watchMicrosoftOwner(event.sender, microsoftAuth);
     const result = await microsoftAuth.begin(ownerId);
     if (event.sender.isDestroyed?.()) {
-      microsoftAuth.cancel(result.sessionId, ownerId);
+      await microsoftAuth.cancel(result.sessionId, ownerId);
       throw new Error('Microsoft 登录已取消');
     }
     try {

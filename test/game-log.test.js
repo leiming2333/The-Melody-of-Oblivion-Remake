@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { EventEmitter } = require('node:events');
+const { EventEmitter, once } = require('node:events');
+const { fork } = require('node:child_process');
 const { PassThrough } = require('node:stream');
 const { createGameLog } = require('../src/main/minecraft/game-log');
 const { MinecraftLauncher } = require('../src/main/minecraft/launch-core');
@@ -71,6 +72,60 @@ test('game log history is limited while active game logs remain available', asyn
   await fs.access(active.filePath);
   await active.close('Exit 0');
   assert.equal((await fs.readdir(directory)).length, 2);
+});
+
+test('isolated processes retain each other\'s logs until the owner exits', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-cross-process-log-'));
+  const workerPath = path.join(root, 'log-owner.cjs');
+  let child;
+  t.after(async () => {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close');
+      child.kill();
+      await closed;
+    }
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.writeFile(workerPath, `
+    const { createGameLog } = require(${JSON.stringify(require.resolve('../src/main/minecraft/game-log'))});
+    let log;
+    process.on('message', async (message) => {
+      if (message.type === 'start') {
+        log = await createGameLog(message.root, 'running-game', {}, { maxFiles: 100 });
+        log.write('stdout', Buffer.from('Game is running\\n'));
+        await log.flush();
+        process.send({ type: 'ready', filePath: log.filePath });
+      } else if (message.type === 'close') {
+        await log.close('Game finished');
+        process.send({ type: 'closed' });
+      } else if (message.type === 'exit') process.exit(0);
+    });
+  `);
+  child = fork(workerPath, [], { windowsHide: true, execArgv: [],
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  const ready = once(child, 'message');
+  child.send({ type: 'start', root });
+  const [message] = await ready;
+  assert.equal(message.type, 'ready');
+  const foreignLogPath = message.filePath;
+  for (let index = 0; index < 3; index += 1) {
+    const localLog = await createGameLog(root, `installer-${index}`, {}, { maxFiles: 1 });
+    await localLog.close('Installer finished');
+    assert.match(await fs.readFile(foreignLogPath, 'utf8'), /Game is running/);
+  }
+  const closed = once(child, 'message');
+  child.send({ type: 'close' });
+  assert.equal((await closed)[0].type, 'closed');
+  const whileOwnerLives = await createGameLog(root, 'another-installer', {}, { maxFiles: 1 });
+  await whileOwnerLives.close('Installer finished');
+  assert.match(await fs.readFile(foreignLogPath, 'utf8'), /Game finished/);
+  const exited = once(child, 'close');
+  child.send({ type: 'exit' });
+  await exited;
+  const latest = await createGameLog(root, 'latest-installer', {}, { maxFiles: 1 });
+  await latest.close('Installer finished');
+  await assert.rejects(fs.access(foreignLogPath), { code: 'ENOENT' });
+  assert.equal((await fs.readdir(path.dirname(latest.filePath))).length, 1);
 });
 
 async function writeLaunchProfile(root) {
