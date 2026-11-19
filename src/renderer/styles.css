@@ -1220,7 +1220,22 @@ dialog ::-webkit-scrollbar-thumb {
 }
 
 .version-dialog form {
-  padding: 20px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px 14px;
+  overflow: hidden;
+}
+
+.version-dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+
+.version-dialog .dialog-header,
+.version-dialog-actions {
+  flex-shrink: 0;
 }
 
 .account-dialog form {
@@ -1244,7 +1259,8 @@ dialog ::-webkit-scrollbar-thumb {
 
 .version-dialog-header {
   gap: 14px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
 }
 
 .account-dialog-header {
@@ -1753,7 +1769,7 @@ dialog ::-webkit-scrollbar-thumb {
 
 .version-toolbar {
   display: grid;
-  grid-template-columns: 1fr 120px;
+  grid-template-columns: minmax(0, 1fr) 120px;
   gap: 8px;
   margin-bottom: 9px;
 }
@@ -1762,7 +1778,7 @@ dialog ::-webkit-scrollbar-thumb {
   display: grid;
   grid-template-columns: 1fr 1.25fr;
   gap: 8px;
-  margin-bottom: 9px;
+  margin: 10px 0 0;
 }
 
 .loader-toolbar label {
@@ -1859,7 +1875,43 @@ dialog ::-webkit-scrollbar-thumb {
   line-height: 1.6;
 }
 
+.version-selection-summary {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--launcher-accent);
+  color: var(--panel-ink);
+  background: var(--panel-card);
+  font-size: 10px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.version-selection-detail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.version-selection-detail .version-selection-summary {
+  flex: 1;
+  min-width: 0;
+}
+
+#addFabricApiButton {
+  flex-shrink: 0;
+  min-height: 32px;
+  margin-top: 8px;
+  padding: 0 10px;
+  border-radius: var(--control-radius);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+#addFabricApiButton[hidden] { display: none; }
+#addFabricApiButton:disabled { opacity: 0.42; cursor: not-allowed; }
+
 .download-status {
+  flex-shrink: 0;
   margin-top: 9px;
   padding: 10px;
   border: 1px solid var(--panel-border);
@@ -1922,6 +1974,11 @@ dialog ::-webkit-scrollbar-thumb {
 
 .download-metrics span:last-child {
   text-align: right;
+}
+
+.download-counts {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  font-variant-numeric: tabular-nums;
 }
 
 .setting-group {
@@ -2340,8 +2397,16 @@ progress:indeterminate::-moz-progress-bar {
   border-top: 1px solid var(--panel-border);
 }
 
-.version-dialog-actions {
-  margin-top: 14px;
+.version-dialog .version-dialog-actions {
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+@media (max-width: 520px) {
+  .version-dialog form { padding: 14px; }
+  .loader-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .version-dialog-actions { gap: 6px; }
+  .version-dialog-actions .dialog-action-spacer { display: none; }
 }
 
 .dialog-action-spacer {
@@ -2444,6 +2509,7 @@ progress:indeterminate::-moz-progress-bar {
 .fabric-api-description,
 .fabric-api-status { margin: 8px 0; font-size: 12px; line-height: 1.6; color: rgba(255, 255, 255, 0.8); }
 .fabric-api-check { margin: 12px 0; }
+.fabric-api-check[hidden] { display: none; }
 .fabric-api-version { display: block; margin: 10px 0 6px; font-size: 12px; }
 #fabricApiVersionSelect { width: 100%; min-height: 32px; }
 .fabric-api-status { min-height: 38px; overflow-wrap: anywhere; }

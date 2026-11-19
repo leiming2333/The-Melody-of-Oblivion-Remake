@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('launcherEnvironment', {
     ),
     installLoader: (request) => invokeTask('minecraft:install-loader', request),
     listFabricApiVersions: (gameVersion, options = {}) => invokeTask('minecraft:list-fabric-api-versions', gameVersion, options),
+    installFabricApi: (request) => invokeTask('minecraft:install-fabric-api', request),
     cancelDownload: (options = {}) => invokeTask('minecraft:cancel-download', options),
     verifyVersion: (versionId) => ipcRenderer.invoke('minecraft:verify-version', versionId),
     repairVersion: (targetId, options = {}) => invokeTask('minecraft:repair-version', targetId, options),

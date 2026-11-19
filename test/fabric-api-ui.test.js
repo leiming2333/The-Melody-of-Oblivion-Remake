@@ -26,7 +26,7 @@ async function fixture(listVersions) {
   });
   const elements = { dialog, target: node(), includeApi: node(), versionSelect: node(),
     status: node(), retryButton: node(), installButton: node(), skipButton: node(),
-    cancelButtons: [node(), node()] };
+    title: node(), description: node(), includeSetting: node(), cancelButtons: [node(), node()] };
   const requests = [];
   const ui = createFabricApiUi({ elements, minecraft: {
     listFabricApiVersions: (version, options) => { requests.push({ version, options }); return listVersions(version, options); }
@@ -213,4 +213,62 @@ test('changing API selection and toggling the checkbox preserves a valid choice 
   await elements.versionSelect.dispatch('change');
   await elements.installButton.dispatch('click');
   assert.deepEqual(await answer, { fabricApiVersionId: 'older' });
+});
+
+test('adding API to installed Fabric requires a compatible selection and returns only that API choice', async () => {
+  const query = deferred();
+  const { ui, elements } = await fixture(() => query.promise);
+  const answer = ui.confirm({ ...target, apiOnly: true });
+  assert.equal(elements.title.textContent, '添加 Fabric API');
+  assert.match(elements.description.textContent, /已安装的 Fabric.*Mod 目录/);
+  assert.equal(elements.includeSetting.hidden, true);
+  assert.equal(elements.includeApi.disabled, true);
+  assert.equal(elements.skipButton.hidden, true);
+  assert.equal(elements.installButton.textContent, '添加 Fabric API');
+  assert.equal(elements.installButton.disabled, true);
+  query.resolve(response([api('latest', 'release', '2026-10-31'), api('older', 'release', '2026-10-30')]));
+  await flush();
+  elements.versionSelect.value = 'older';
+  await elements.versionSelect.dispatch('change');
+  // An unchecked value cannot turn an API-only request into loader installation.
+  elements.includeApi.checked = false;
+  await elements.includeApi.dispatch('change');
+  assert.equal(elements.includeApi.checked, true);
+  assert.equal(elements.versionSelect.disabled, false);
+  assert.equal(elements.installButton.disabled, false);
+  await elements.installButton.dispatch('click');
+  assert.deepEqual(await answer, { fabricApiVersionId: 'older' });
+});
+
+test('API-only lookup failures and empty lists offer retry or cancellation without a Fabric-only action', async () => {
+  for (const query of [async () => response([]), async () => { throw new Error('offline'); }]) {
+    const { ui, elements } = await fixture(query);
+    const answer = ui.confirm({ ...target, apiOnly: true });
+    await flush();
+    assert.equal(elements.installButton.disabled, true);
+    assert.equal(elements.retryButton.hidden, false);
+    assert.match(elements.status.textContent, /取消/);
+    assert.doesNotMatch(elements.status.textContent, /仅安装 Fabric/);
+    await elements.skipButton.dispatch('click');
+    assert.equal(await answer, null);
+  }
+});
+
+test('switching from API-only to joint installation restores optional Fabric-only controls and copy', async () => {
+  const { ui, elements } = await fixture(async () => response([api('latest', 'release', '2026-10-31')]));
+  const apiOnly = ui.confirm({ ...target, apiOnly: true });
+  await flush();
+  const joint = ui.confirm(target);
+  assert.equal(await apiOnly, null);
+  await flush();
+  assert.equal(elements.title.textContent, '同时安装 Fabric API？');
+  assert.match(elements.description.textContent, /许多 Fabric 模组/);
+  assert.equal(elements.includeSetting.hidden, false);
+  assert.equal(elements.includeApi.disabled, false);
+  assert.equal(elements.skipButton.hidden, false);
+  elements.includeApi.checked = false;
+  await elements.includeApi.dispatch('change');
+  assert.equal(elements.installButton.textContent, '仅安装 Fabric');
+  await elements.installButton.dispatch('click');
+  assert.deepEqual(await joint, { fabricApiVersionId: null });
 });

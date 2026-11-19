@@ -956,6 +956,105 @@ test('new Fabric installation sends the chosen API or an explicit skip in the sa
   }
 });
 
+async function installedFabricFixture() {
+  const fixture = await installationFixture();
+  const { context } = fixture;
+  const loader = context.selectedLoaderVersion();
+  loader.installed = true;
+  loader.profileId = 'existing-fabric-profile';
+  context.renderLoaderCatalog();
+  const added = [], progress = [];
+  context.minecraft.installFabricApi = async (request) => {
+    added.push(request);
+    return { profileId: request.profileId, fabricApi: { version: '0.123.0+1.21.1' } };
+  };
+  context.updateDownloadProgress = (value) => progress.push(value);
+  return { ...fixture, added, progress };
+}
+
+test('installed Fabric adds the selected API to its existing profile without reinstalling the loader', async () => {
+  const { context, installed, confirmations, added, progress } = await installedFabricFixture();
+  context.selectedRemoteVersion().installed = false;
+  await context.addSelectedFabricApi();
+  assert.equal(installed.length, 0);
+  assert.equal(added.length, 1);
+  assert.equal(added[0].profileId, 'existing-fabric-profile');
+  assert.equal(added[0].gameVersion, '1.21.1');
+  assert.equal(added[0].fabricApiVersionId, 'api-chosen');
+  assert.equal(added[0].taskId, 'test-install-task');
+  assert.equal(added[0].expectedGameDirectory, 'C:\\游戏 文件\\.minecraft');
+  assert.equal(confirmations[0][3].apiOnly, true);
+  assert.equal(context.selectedRemoteVersion().installed, false, 'adding a Mod does not certify base-game files');
+  assert.equal(context.selectedLoaderVersion().profileId, 'existing-fabric-profile');
+  assert.equal(progress.at(-1).phase, 'complete');
+  assert.match(progress.at(-1).message, /Fabric API.*已添加/);
+  assert.equal(context.fabricApiConfirmationActive, false);
+  assert.equal(context.versionDownloadActive, false);
+});
+
+test('cancelling or skipping API-only confirmation starts no download and duplicate clicks share the prompt', async () => {
+  for (const choice of [null, { fabricApiVersionId: null }]) {
+    const { context, installed, added } = await installedFabricFixture();
+    let finish, prompts = 0;
+    context.requestFabricApiChoice = () => {
+      prompts += 1;
+      return new Promise((resolve) => { finish = resolve; });
+    };
+    const pending = context.addSelectedFabricApi();
+    assert.equal(context.fabricApiConfirmationActive, true);
+    await context.addSelectedFabricApi();
+    assert.equal(prompts, 1);
+    finish(choice);
+    await pending;
+    assert.equal(added.length, 0);
+    assert.equal(installed.length, 0);
+    assert.equal(context.fabricApiConfirmationActive, false);
+    assert.equal(context.versionDownloadActive, false);
+  }
+});
+
+test('retrying a failed Fabric API addition stays on the API-only path', async () => {
+  const { context, installed, confirmations, added, problems } = await installedFabricFixture();
+  const successfulAdd = context.minecraft.installFabricApi;
+  let attempt = 0;
+  context.minecraft.installFabricApi = async (request) => {
+    if (++attempt === 1) throw new Error('API download interrupted');
+    return successfulAdd(request);
+  };
+  await context.addSelectedFabricApi();
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0][1], 'Fabric API 添加未完成');
+  assert.equal(context.versionDownloadActive, false);
+  await problems[0][2].retry();
+  assert.equal(attempt, 2);
+  assert.equal(added.length, 1);
+  assert.equal(added[0].profileId, 'existing-fabric-profile');
+  assert.equal(installed.length, 0);
+  assert.equal(confirmations.length, 2);
+  assert.ok(confirmations.every((call) => call[3].apiOnly === true));
+});
+
+test('API-only choices become invalid when the directory or selected game/profile changes', async () => {
+  for (const change of [
+    (context) => { context.currentGameDirectory = 'D:\\其他目录'; },
+    (context) => { context.versionCatalog.value = 'another-game'; },
+    (context) => { context.selectedLoaderVersion().profileId = 'another-fabric-profile'; },
+    (context) => { context.launcherSettings.isolateProfiles = false; }
+  ]) {
+    const { context, installed, added } = await installedFabricFixture();
+    let finish;
+    context.requestFabricApiChoice = () => new Promise((resolve) => { finish = resolve; });
+    const pending = context.addSelectedFabricApi();
+    change(context);
+    finish({ fabricApiVersionId: 'stale-api' });
+    await pending;
+    assert.equal(added.length, 0);
+    assert.equal(installed.length, 0);
+    assert.equal(context.fabricApiConfirmationActive, false);
+    assert.equal(context.versionDownloadActive, false);
+  }
+});
+
 test('a background loader installation keeps home task controls visible and its progress survives reopening', async () => {
   const { context, source } = { ...await installationFixture('forge'), source: fs.readFileSync(path.join(__dirname, '../src/renderer/renderer.js'), 'utf8') };
   let finish, shown = 0;

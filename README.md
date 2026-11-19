@@ -14,7 +14,7 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#平台支持与使用前提)
-[![Source](https://img.shields.io/badge/Source-v2.0.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v2.1.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
@@ -38,9 +38,9 @@
 
 - **启动准备**：先检查核心静态资源，通过后进入主页；设置、账户、本地游戏列表和 Java 各自后台加载，单个模块失败或无响应不会阻止主页开放。核心资源错误可查看详情并重试，其他错误由对应模块提示。
 - **模块隔离**：下载、加载器、Java、账户、设置、更新、日志等业务分别运行于独立后台进程。Forge 安装使用专用进程，取消或退出时等待 Java 子进程清理；共享游戏文件仍保留必要的写入互斥，详见[模块隔离说明](docs/module-isolation.md)。
-- **游戏版本**：浏览 Mojang 版本清单、识别本地安装、下载原版游戏、验证所需文件，并将可移除的配置移动到回收站。
-- **模组加载器**：通过统一流程查询并安装 Fabric、Forge、NeoForge 与 Quilt。新装 Fabric 时可在确认框中选择与 Minecraft 版本兼容的 Fabric API，也可跳过；所选 API 经摘要校验后安装到该版本使用的 `mods` 目录。
-- **可靠下载**：在 Mojang 官方源与 BMCLAPI 之间选择；自动模式会测速；支持任务并发、大文件 HTTP Range 分段、SHA-1 校验、取消下载及失败后切换来源重试。
+- **游戏版本**：浏览 Mojang 版本清单，按正式版、快照、已安装或远古版本筛选；搜索优先显示精确版本与同系列结果，标出最新版本及待修复文件。支持下载原版、验证文件，并将可移除的配置移动到回收站；后台刷新保留当前选择，安装期间锁定目标。
+- **模组加载器**：通过统一流程查询并安装 Fabric、Forge、NeoForge 与 Quilt。新装 Fabric 时可选择兼容的 Fabric API，也可跳过；已安装的普通 Fabric 配置可通过「添加 Fabric API」选择版本并单独补装，无需重装加载器，此入口不用于整合包实例。API 经摘要校验后写入该配置实际使用的 `mods` 目录；发现冲突文件时提示处理，不覆盖已有 Mod。
+- **可靠下载**：在 Mojang 官方源与 BMCLAPI 之间选择；自动模式会测速；支持任务并发、大文件 HTTP Range 分段、SHA-1 校验、取消下载及失败后切换来源重试。任务面板显示体积、文件数、速度及剩余时间，区分下载、校验、安装与等待补齐等阶段；小窗口中进度和操作按钮保持可见。
 - **账户系统**：支持 Microsoft 设备代码登录、离线账户及 LittleSkin Yggdrasil；启动前刷新在线凭据，并阻止令牌进入渲染进程。LittleSkin 皮肤同步失败不影响已成功的登录。
 - **Java 管理**：匹配游戏所需的 Java 主版本，检测系统安装与启动器托管环境。首页启动按钮实时显示所选版本的 Java 就绪状态；启动时缺少所需 Java 会提供一键下载并自动重试，也可在 Java 路径设置旁手动下载 Java 8、16、17、21 或 25（支持进度与取消；优先 Azul JRE，失败后切换 Adoptium，使用并行下载与 SHA-256 校验）。
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
@@ -69,8 +69,8 @@
 ## 平台支持与使用前提
 
 - **平台覆盖**：Windows x64 / ia32 / ARM64、Linux x64 / ARM64 / ARMv7、macOS x64 / ARM64 均提供公开构建与 SHA-256 校验。除 Linux ARMv7 外，每个目标都由对应的原生 runner 执行启动与升级验收，未通过不发布。ARMv7 目前只做构建与文件校验：GitHub 不提供 32 位 ARM runner，且 AppImage 运行时在 QEMU 用户态下无法执行，因此该产物尚未完成启动验收。
-- **更新替换**：更新下载完成后点击「重启并安装」才替换程序。Windows 保留当前 EXE 名称；macOS 使用系统 `ditto` 校验并替换 `.app`，在只读介质、目录不可写或 App Translocation 环境下提供 ZIP 手动替换入口；Linux 替换 AppImage。辅助进程握手成功后才退出旧程序。新版窗口实际显示、预加载桥接与本地界面加载完成、核心资源检查通过且主页就绪后，在后台确认更新；设置、账户和版本扫描独立加载。未确认时保留备份并提供重试或恢复入口。
-- **更新记录与清理**：每个安装路径独立记录更新状态，确认成功后保留最近一份回退版本，只清理该记录拥有的旧文件。无记录的 Windows 历史 EXE 和 `.old` 可在设置中勾选后移入回收站。游戏数据不在更新清理范围内。
+- **更新替换**：更新下载完成后点击「重启并安装」才替换程序。Windows 保留当前 EXE 名称；macOS 使用系统 `ditto` 校验并替换 `.app`，在只读介质、目录不可写或 App Translocation 环境下提供 ZIP 手动替换入口；Linux 替换 AppImage。辅助进程握手成功后才退出旧程序。新版窗口实际显示、预加载桥接与本地界面加载完成、核心资源检查通过且主页就绪后，在后台确认更新；设置、账户和版本扫描独立加载。未确认时保留备份，按事务状态提供重试或保留当前版本；界面不再提供「恢复上一版」选项。
+- **更新记录与清理**：每个安装路径独立记录更新状态，确认成功后保留最近一份旧版备份，只清理该记录拥有的旧文件。无记录的 Windows 历史 EXE 和 `.old` 可在设置中勾选后移入回收站。游戏数据不在更新清理范围内。
 - **LittleSkin 验证服务**：Yggdrasil 仅在客户端和服务端使用相同验证服务时生效；LittleSkin 账户不能替代正版账户，也不会获得进入正版验证服务器的权限。参见 [LittleSkin 用户使用手册](https://manual.littleskin.cn/yggdrasil/)。
 - **CurseForge 元数据**：安装依赖 CurseTools 提供的文件元数据，或配置 `CURSEFORGE_API_KEY`。临时查询失败会自动重试，已解析的元数据随补齐会话保存，重启后无需重新查询；缺少可信摘要时不会用本地文件顶替校验，已下架文件仍需从整合包发布页获取。
 - **加载器兼容性**：支持 Fabric、Forge、NeoForge 与 Quilt 整合包，加载器版本安装前会向各自官方元数据校验；整合包能否正常运行最终取决于游戏版本与其中具体 Mod。

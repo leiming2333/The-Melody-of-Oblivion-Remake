@@ -36,10 +36,11 @@
 2. 在下载过程中点击「取消下载」，等待清理结束。
 3. 重新安装同一个版本并等待完成，关闭再打开版本列表。
 4. 在测试虚拟机中断开网络，尝试下载另一个未安装版本；出现错误后恢复网络并使用重试入口。
+5. 切换正式版、快照、已安装和远古版本筛选，搜索一个精确版本；在刷新尚未完成时更改选择，观察结果返回后的选择与状态。
 
-**预期**：关闭弹窗后任务继续且重新打开可看到进度；取消后不会把不完整版本标记为已安装，界面允许再次操作；重新安装仅在所需文件检查通过后显示完成；断网错误可理解，重试可以继续流程。取消与暂存清理不应破坏其他已安装版本。
+**预期**：关闭弹窗后任务继续且重新打开可看到体积、文件数和进度；下载、校验、安装与终态文案对应当前阶段，终态不残留下载速度。小窗口中操作按钮和进度保持可见。筛选结果正确，精确版本优先，同系列结果靠前，最新版本与待修复状态可辨认；后台刷新不抢回旧选择，安装期间旧请求不能改变目标或解锁控件。取消后不会把不完整版本标记为已安装，界面允许再次操作；重新安装仅在所需文件检查通过后显示完成；断网错误可理解，重试可以继续流程。取消与暂存清理不应破坏其他已安装版本。
 
-**自动化对应**：[minecraft-core.test.js](../test/minecraft-core.test.js) 覆盖 Range、摘要校验、取消、源回退与完整安装标记；[download-replacement.test.js](../test/download-replacement.test.js) 覆盖替换失败保留旧文件；[task-ipc.test.js](../test/task-ipc.test.js) 覆盖任务身份与取消归属。
+**自动化对应**：[minecraft-core.test.js](../test/minecraft-core.test.js) 覆盖 Range、摘要校验、取消、源回退与完整安装标记；[download-replacement.test.js](../test/download-replacement.test.js) 覆盖替换失败保留旧文件；[task-ipc.test.js](../test/task-ipc.test.js) 覆盖任务身份与取消归属；[version-catalog-ui.test.js](../test/version-catalog-ui.test.js)、[download-ui.test.js](../test/download-ui.test.js) 覆盖筛选、刷新竞态和阶段反馈。
 
 ## DC-03 Java 缺失、手动路径错误与修复
 
@@ -63,11 +64,13 @@
 
 1. 新装 Fabric，在确认框中选择兼容的 Fabric API 并完成安装，检查目标配置的 `mods` 目录。
 2. 使用另一个干净测试目录，重复安装并跳过 Fabric API。
-3. 若修改了 Forge、NeoForge 或 Quilt 安装逻辑，再实际安装对应加载器；若修改了 Forge/NeoForge 依赖下载，在依赖下载期间取消一次，再重新安装。
+3. 选择步骤 2 已安装的普通 Fabric 配置，点击「添加 Fabric API」，选择兼容版本补装；查询时取消一次，再重试安装。此入口不用于整合包实例。
+4. 在独立测试配置中准备另一个或处于禁用状态的 Fabric API，尝试补装冲突版本并检查原文件；游戏运行时尝试补装，确认被阻止。
+5. 若修改了 Forge、NeoForge 或 Quilt 安装逻辑，再实际安装对应加载器；若修改了 Forge/NeoForge 依赖下载，在依赖下载期间取消一次，再重新安装。
 
-**预期**：选择 API 时只安装与当前游戏兼容且摘要通过的文件；跳过时不会自动加入 API。加载器安装完成后才显示成功；取消后不继续执行安装器处理器。官方没有发布的组合不应被当成兼容目标。
+**预期**：选择 API 时只安装与当前游戏兼容且摘要通过的文件；新装时跳过不会自动加入 API。已装配置补装 API 时不重装加载器，写入该配置实际使用的 `mods` 目录；取消不开始任务，失败重试仍只补装 API，切换目标或目录后旧选择失效。同一 API 已存在时可复用；不同、同名或禁用 API 发生冲突时提示处理并保留原 Mod。游戏运行中拒绝修改。联合安装在加载器和所选 API 均完成后才显示成功；取消后不继续执行安装器处理器。官方没有发布的组合不应被当成兼容目标。
 
-**自动化对应**：[fabric-api-manager.test.js](../test/fabric-api-manager.test.js)、[fabric-api-ui.test.js](../test/fabric-api-ui.test.js)、[loader-manager.test.js](../test/loader-manager.test.js)、[quilt.test.js](../test/quilt.test.js)、[installer-archive.test.js](../test/installer-archive.test.js)。
+**自动化对应**：[fabric-api-manager.test.js](../test/fabric-api-manager.test.js)、[fabric-api-ui.test.js](../test/fabric-api-ui.test.js)、[fabric-api-ipc.test.js](../test/fabric-api-ipc.test.js)、[renderer.test.js](../test/renderer.test.js)、[loader-manager.test.js](../test/loader-manager.test.js)、[quilt.test.js](../test/quilt.test.js)、[installer-archive.test.js](../test/installer-archive.test.js)。
 
 ## DC-05 整合包补齐、错误文件与重启恢复
 
@@ -121,6 +124,7 @@
 | --- | --- | --- |
 | 更新下载、增量补丁 | `node --test test/update-downloader.test.js test/update-manager-delta.test.js test/update-patch.test.js` | 在临时安装位置验证损坏补丁回退完整包、取消后不可安装；真实替换与恢复按 [发布验证](ci-release-validation.md) 的隔离双版本流程执行 |
 | 更新事务与辅助进程 | `node --test test/update-transactions.test.js test/update-transaction-store.test.js` | 验证当前平台实际打包产物的启动、升级与健康确认，记录未覆盖的平台 |
+| 更新恢复界面 | `node --test test/task-ui.test.js test/renderer-modules.test.js` | 确认不再显示「恢复上一版」选项或正常更新后的回退提示；未确认更新仍保留备份，并按事务状态显示重试或保留当前版本 |
 | 网站下载与验证 | `node --test test/website-downloader.test.js test/website-download-auth.test.js test/website-download-ui.test.js test/cloudflare-download-worker.test.js` | 在配置好的测试部署检查平台选择、验证失败、下载取消与成功保存；取消不得触发文件保存，摘要错误不得交付文件。环境要求见 [下载网关说明](../cloudflare/README.md) |
 | 主进程、preload 或界面 | `npm run check`、`npm test` | 启动真实 Electron 检查本次修改的交互、布局和窗口行为；自动化 DOM 模拟通过不等于真实窗口验收通过 |
 

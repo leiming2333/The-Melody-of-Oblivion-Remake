@@ -1,6 +1,7 @@
 (function exposeUiModules(root) {
   function createVersionCatalogUi(context) {
     let onlineCatalogError;
+    let installationActive = false;
     const { state, document, minecraft, delay, fallbackLocalVersionResult, fallbackLoaderResult, fallbackVersionResult,
       loaderNames, versionSelect, versionCatalog, loaderTypeSelect, loaderVersionSelect, versionSearch, versionTypeFilter,
       versionEmpty, refreshVersionsButton, downloadVersionButton, deleteVersionButton, clearVersionSelectionButton,
@@ -216,11 +217,11 @@
         loaderVersionSelect.append(emptyOption);
       }
 
-      loaderVersionSelect.disabled = loaderTypeSelect.value === 'vanilla' || (state.loaderCatalogLoading && !state.loaderVersions.length);
       updateVersionAction();
     }
 
     async function loadLoaderCatalog(force = false) {
+      if (state.versionDownloadActive) return;
       const gameVersion = selectedRemoteVersion();
       const loaderType = loaderTypeSelect.value;
       const requestToken = ++state.loaderLoadToken;
@@ -277,20 +278,61 @@
         request?.finish();
         if (requestToken === state.loaderLoadToken) {
           state.loaderCatalogLoading = false;
-          loaderVersionSelect.disabled = loaderType === 'vanilla';
           updateVersionAction();
         }
       }
     }
 
     function updateVersionAction() {
+      if (state.versionDownloadActive && !installationActive) {
+        // Requests begun before installation describe the old disk state. Their
+        // results must stay stale even if they arrive after installation ends.
+        state.versionCatalogLoadToken += 1;
+        state.loaderLoadToken += 1;
+        state.localProfilesLoadToken = (state.localProfilesLoadToken ?? 0) + 1;
+        state.localProfilesLoadingPromise = undefined;
+        state.localProfilesLoaded = false;
+        versionSelect.classList?.remove('startup-placeholder');
+        versionSelect.setAttribute?.('aria-busy', 'false');
+        state.versionCatalogLoading = false;
+        state.loaderCatalogLoading = false;
+        context.cancelRequest?.('versions');
+        context.cancelRequest?.('loaders');
+        context.cancelRequest?.('local-profiles');
+      }
+      installationActive = Boolean(state.versionDownloadActive);
       const version = selectedRemoteVersion();
       const loaderType = loaderTypeSelect.value;
       const loader = selectedLoaderVersion();
-      const busy = state.versionDownloadActive || state.fabricApiConfirmationActive || state.versionDeleteActive || state.versionVerifyActive;
-      downloadVersionButton.disabled = !version || !loader || busy;
+      const busy = Boolean(state.versionDownloadActive || state.fabricApiConfirmationActive || state.versionDeleteActive || state.versionVerifyActive);
+      const localOnlyUnavailable = Boolean(version?.localOnly && loaderType === 'vanilla' && !loader?.installed);
+      if (refreshVersionsButton) refreshVersionsButton.disabled = busy || Boolean(state.versionCatalogLoading);
+      loaderTypeSelect.disabled = !version || busy;
+      loaderVersionSelect.disabled = !version || busy || loaderType === 'vanilla' || !state.loaderVersions.length;
+      downloadVersionButton.disabled = !version || !loader || busy || localOnlyUnavailable;
+      if (context.addFabricApiButton) {
+        context.addFabricApiButton.hidden = loaderType !== 'fabric';
+        context.addFabricApiButton.disabled = !version || !loader || busy;
+        context.addFabricApiButton.textContent = loader?.installed ? '添加 Fabric API' : '选择 Fabric API';
+      }
       deleteVersionButton.disabled = !loader?.installed || busy;
       clearVersionSelectionButton.disabled = !versionSelect.value || busy || state.launchRequestActive;
+      if (context.versionSelectionSummary) {
+        let summary = '选择一个 Minecraft 版本，查看安装选项';
+        if (version) {
+          const target = loaderType === 'vanilla' ? '原版'
+            : `${loaderNames[loaderType] ?? loaderType}${loader ? ` ${loader.version}` : ''}`;
+          const availability = state.versionDownloadActive ? '正在安装'
+            : state.fabricApiConfirmationActive ? '等待安装确认'
+              : !loader ? (state.loaderCatalogLoading ? '正在获取加载器版本' : '暂无可用加载器')
+                : loader.installed ? '已安装，可直接使用'
+                  : localOnlyUnavailable ? '仅本地，可选择已安装加载器'
+                  : version.localFilesPresent && version.complete === false && loaderType === 'vanilla'
+                    ? '文件不完整，安装时补齐' : '待安装';
+          summary = `Minecraft ${version.id} · ${target} · ${availability}`;
+        }
+        context.versionSelectionSummary.textContent = summary;
+      }
       if (!version) {
         downloadVersionButton.textContent = '选择版本';
         return;
@@ -303,6 +345,14 @@
         downloadVersionButton.textContent = '等待安装确认';
         return;
       }
+      if (state.versionDownloadActive) {
+        downloadVersionButton.textContent = '正在安装';
+        return;
+      }
+      if (localOnlyUnavailable) {
+        downloadVersionButton.textContent = '请选择已安装加载器';
+        return;
+      }
       if (loader.installed) {
         downloadVersionButton.textContent = '使用此版本';
         return;
@@ -312,7 +362,7 @@
         return;
       }
       downloadVersionButton.textContent = loaderType === 'vanilla'
-        ? '下载原版'
+        ? (version.localFilesPresent && version.complete === false ? '补齐游戏文件' : '下载原版')
         : `安装 ${loaderNames[loaderType]}`;
     }
 
@@ -320,41 +370,75 @@
       const query = versionSearch.value.trim().toLowerCase();
       const type = versionTypeFilter.value;
       const previousId = preferredId ?? versionCatalog.value;
+      const localProfiles = new Map(state.localProfiles.filter((profile) => profile.valid && !profile.isInstance)
+        .map((profile) => [profile.profileId, profile]));
+      const installedBaseIds = new Set();
+      for (const profile of localProfiles.values()) {
+        if (!profile.complete) continue;
+        const visited = new Set();
+        let current = profile;
+        while (current && !visited.has(current.profileId)) {
+          visited.add(current.profileId);
+          installedBaseIds.add(current.profileId);
+          if (current.inheritsFrom) installedBaseIds.add(current.inheritsFrom);
+          current = localProfiles.get(current.inheritsFrom);
+        }
+      }
+      const latest = {};
+      for (const version of state.remoteVersions) {
+        if (version.localOnly || !['release', 'snapshot'].includes(version.type)) continue;
+        const previous = latest[version.type];
+        const releasedAt = Date.parse(version.releaseTime);
+        const previousReleasedAt = Date.parse(previous?.releaseTime);
+        if (!previous || (Number.isFinite(releasedAt) && (!Number.isFinite(previousReleasedAt) || releasedAt > previousReleasedAt))) {
+          latest[version.type] = version;
+        }
+      }
+      function searchRank(version) {
+        const id = version.id.toLowerCase();
+        if (id === query) return 0;
+        if (id.startsWith(`${query}.`) || id.startsWith(`${query}-`)) return 1;
+        return id.startsWith(query) ? 2 : 3;
+      }
 
       state.filteredVersions = state.remoteVersions.filter((version) => {
-        const typeMatches = type === 'all' || version.type === type;
+        const typeMatches = type === 'all' || version.type === type
+          || (type === 'old' && ['old_beta', 'old_alpha'].includes(version.type))
+          || (type === 'installed' && (version.installed || installedBaseIds.has(version.id)));
         const queryMatches = !query || version.id.toLowerCase().includes(query);
         return typeMatches && queryMatches;
       });
+      if (query) state.filteredVersions.sort((a, b) => searchRank(a) - searchRank(b));
 
       const installedVersions = state.filteredVersions.filter((version) => version.installed);
-      const availableVersions = state.filteredVersions.filter((version) => !version.installed);
+      const repairVersions = state.filteredVersions.filter((version) => !version.installed && version.localFilesPresent);
+      const availableVersions = state.filteredVersions.filter((version) => !version.installed && !version.localFilesPresent);
 
       versionCatalog.replaceChildren();
-
-      if (installedVersions.length > 0) {
-        const installedGroup = document.createElement('optgroup');
-        installedGroup.label = `已安装（${installedVersions.length}）`;
-        for (const version of installedVersions) {
+      const groups = query ? [{ label: '搜索结果', versions: state.filteredVersions }] : [
+        { label: '已安装', versions: installedVersions },
+        { label: '待修复', versions: repairVersions },
+        { label: '可下载', versions: availableVersions }
+      ];
+      for (const group of groups) {
+        if (!group.versions.length) continue;
+        const optionGroup = document.createElement('optgroup');
+        optionGroup.label = `${group.label}（${group.versions.length}）`;
+        for (const version of group.versions) {
           const option = document.createElement('option');
           option.value = version.id;
-          option.textContent = `${version.id}  ·  ${versionTypeName(version.type)}`;
-          installedGroup.append(option);
+          const details = [versionTypeName(version.type)];
+          if (latest.release?.id === version.id) details.push('最新正式版');
+          if (latest.snapshot?.id === version.id) details.push('最新快照');
+          if (version.installed) details.push('已安装');
+          else if (installedBaseIds.has(version.id)) details.push('已装加载器');
+          else if (version.localFilesPresent) details.push('待修复');
+          if (version.localOnly) details.push('仅本地');
+          option.textContent = `${version.id}  ·  ${details.join(' · ')}`;
+          option.disabled = version.localOnly === true && !version.installed && !installedBaseIds.has(version.id);
+          optionGroup.append(option);
         }
-        versionCatalog.append(installedGroup);
-      }
-
-      if (availableVersions.length > 0) {
-        const availableGroup = document.createElement('optgroup');
-        availableGroup.label = `可下载（${availableVersions.length}）`;
-        for (const version of availableVersions) {
-          const option = document.createElement('option');
-          option.value = version.id;
-          option.textContent = `${version.id}  ·  ${versionTypeName(version.type)}`;
-          option.disabled = version.localOnly === true;
-          availableGroup.append(option);
-        }
-        versionCatalog.append(availableGroup);
+        versionCatalog.append(optionGroup);
       }
 
       const preferredOption = [...versionCatalog.options]
@@ -367,8 +451,9 @@
       }
 
       versionEmpty.textContent = state.filteredVersions.length
-        ? `共 ${state.filteredVersions.length} 个版本，发现 ${state.localProfiles.length} 个启动配置`
-        : '没有符合条件的版本';
+        ? `${state.filteredVersions.length} 个版本 · ${installedVersions.length} 个原版已安装${repairVersions.length ? ` · ${repairVersions.length} 个待修复` : ''}`
+        : query ? `没有找到“${versionSearch.value.trim()}”，可更换关键词或筛选条件`
+          : type === 'installed' ? '当前目录没有已安装版本，可切换到正式版下载' : '没有符合条件的版本';
       updateVersionAction();
     }
 
@@ -416,7 +501,7 @@
     }
 
     async function loadVersionCatalog(force = false) {
-      if (state.versionCatalogLoading) {
+      if (state.versionCatalogLoading || state.versionDownloadActive) {
         return;
       }
 
@@ -424,13 +509,14 @@
       onlineCatalogError = undefined;
       const request = context.beginRequest?.('versions');
       const requestToken = ++state.versionCatalogLoadToken;
+      const initialSelection = versionCatalog.value || versionSelect.value;
       versionCatalog.disabled = false;
       versionSearch.disabled = false;
       versionTypeFilter.disabled = false;
       refreshVersionsButton.disabled = true;
       if (!state.versionCatalogLoaded) {
         seedCatalogWithLocalProfiles();
-        renderVersionCatalog(versionSelect.value);
+        renderVersionCatalog(initialSelection);
         seedLoaderCatalogWithLocalProfiles();
       }
       versionEmpty.textContent = '正在加载在线版本，可继续使用已安装版本…';
@@ -442,7 +528,7 @@
         if (requestToken !== state.versionCatalogLoadToken || state.versionDownloadActive) return;
         if (state.versionCatalogLoaded) state.remoteVersions = mergeRemoteAndLocalVersions(state.remoteVersions);
         else seedCatalogWithLocalProfiles();
-        renderVersionCatalog(versionSelect.value);
+        renderVersionCatalog(versionCatalog.value || initialSelection);
         if (catalogError) versionEmpty.textContent = `在线版本加载失败：${readableError(catalogError)}`;
         void loadLoaderCatalog(force);
       }).catch((error) => {
@@ -458,7 +544,7 @@
         if (requestToken !== state.versionCatalogLoadToken || request?.signal.aborted) return;
         state.remoteVersions = mergeRemoteAndLocalVersions(result.versions);
         state.versionCatalogLoaded = true;
-        renderVersionCatalog(versionSelect.value);
+        renderVersionCatalog(versionCatalog.value || initialSelection);
         void loadLoaderCatalog(force);
       } catch (error) {
         if (requestToken !== state.versionCatalogLoadToken) return;
@@ -473,7 +559,6 @@
         request?.finish();
         if (requestToken === state.versionCatalogLoadToken) {
           state.versionCatalogLoading = false;
-          refreshVersionsButton.disabled = false;
           updateVersionAction();
         }
       }

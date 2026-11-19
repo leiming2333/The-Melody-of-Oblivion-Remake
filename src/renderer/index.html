@@ -234,58 +234,71 @@
             <button class="dialog-close" value="cancel" aria-label="关闭版本管理" type="submit">×</button>
           </header>
 
-          <div class="version-toolbar">
-            <input id="versionSearch" type="search" placeholder="搜索版本，例如 1.21" autocomplete="off" />
-            <select id="versionTypeFilter" aria-label="版本类型">
-              <option value="release" selected>正式版</option>
-              <option value="snapshot">快照版</option>
-              <option value="all">全部版本</option>
-            </select>
-          </div>
-
-          <div class="loader-toolbar">
-            <label>
-              <span>游戏加载器</span>
-              <select id="loaderTypeSelect" aria-label="游戏加载器">
-                <option value="vanilla">原版</option>
-                <option value="fabric">Fabric</option>
-                <option value="quilt">Quilt</option>
-                <option value="forge">Forge</option>
-                <option value="neoforge">NeoForge</option>
+          <div class="version-dialog-body">
+            <div class="version-toolbar">
+              <input id="versionSearch" type="search" aria-label="搜索 Minecraft 版本" placeholder="搜索版本，例如 1.21.1" autocomplete="off" />
+              <select id="versionTypeFilter" aria-label="版本类型">
+                <option value="release" selected>正式版</option>
+                <option value="snapshot">快照版</option>
+                <option value="installed">已安装</option>
+                <option value="old">远古版本</option>
+                <option value="all">全部版本</option>
               </select>
-            </label>
-            <label>
-              <span>加载器版本</span>
-              <select id="loaderVersionSelect" aria-label="加载器版本" disabled>
-                <option value="">跟随 Minecraft 原版</option>
-              </select>
-            </label>
-          </div>
+            </div>
 
-          <select id="versionCatalog" class="version-catalog" size="6" aria-label="可用 Minecraft 版本"></select>
-          <p id="versionEmpty" class="version-empty">点击刷新以获取 Minecraft 版本列表</p>
+            <select id="versionCatalog" class="version-catalog" size="6" aria-label="可用 Minecraft 版本" aria-describedby="versionEmpty"></select>
+            <p id="versionEmpty" class="version-empty" role="status">点击刷新以获取 Minecraft 版本列表</p>
+
+            <div class="loader-toolbar">
+              <label>
+                <span>游戏加载器</span>
+                <select id="loaderTypeSelect" aria-label="游戏加载器">
+                  <option value="vanilla">原版</option>
+                  <option value="fabric">Fabric</option>
+                  <option value="quilt">Quilt</option>
+                  <option value="forge">Forge</option>
+                  <option value="neoforge">NeoForge</option>
+                </select>
+              </label>
+              <label>
+                <span>加载器版本</span>
+                <select id="loaderVersionSelect" aria-label="加载器版本" disabled>
+                  <option value="">跟随 Minecraft 原版</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="version-selection-detail">
+              <p id="versionSelectionSummary" class="version-selection-summary" role="status">请选择 Minecraft 版本</p>
+              <button id="addFabricApiButton" class="secondary-dialog-button" type="button" hidden>选择 Fabric API</button>
+            </div>
+
+            <section id="modpackRecoveryPanel" class="modpack-recovery" aria-live="polite" hidden>
+              <strong id="modpackRecoveryTitle">需要补齐整合包文件</strong>
+              <p>已校验的文件会保留。请从官方页面下载缺失文件，选择本地文件后继续。</p>
+              <ul id="modpackMissingFiles"></ul>
+              <div class="task-actions">
+                <button id="modpackResumeButton" class="primary-dialog-button" type="button">重新查询并继续</button>
+                <button id="modpackDiscardButton" class="secondary-dialog-button" type="button">取消安装</button>
+              </div>
+            </section>
+          </div>
 
           <div id="downloadStatus" class="download-status" hidden>
             <div class="download-status-line">
               <span><span id="downloadStage">准备下载</span><span id="downloadMessage">正在准备下载…</span></span>
               <strong id="downloadPercent">0%</strong>
             </div>
-            <progress id="downloadProgress" max="1" value="0"></progress>
+            <progress id="downloadProgress" aria-label="游戏安装进度" max="1" value="0"></progress>
+            <div class="download-metrics download-counts" aria-label="下载大小与文件数量">
+              <span id="downloadSize">大小待确认</span>
+              <span id="downloadFiles">文件待确认</span>
+            </div>
             <div class="download-metrics" aria-label="下载速度与剩余时间">
               <span id="downloadSpeed">速度 —</span>
               <span id="downloadEta">剩余时间 —</span>
             </div>
           </div>
-
-          <section id="modpackRecoveryPanel" class="modpack-recovery" aria-live="polite" hidden>
-            <strong id="modpackRecoveryTitle">需要补齐整合包文件</strong>
-            <p>已校验的文件会保留。请从官方页面下载缺失文件，选择本地文件后继续。</p>
-            <ul id="modpackMissingFiles"></ul>
-            <div class="task-actions">
-              <button id="modpackResumeButton" class="primary-dialog-button" type="button">重新查询并继续</button>
-              <button id="modpackDiscardButton" class="secondary-dialog-button" type="button">取消安装</button>
-            </div>
-          </section>
 
           <footer class="dialog-actions version-dialog-actions">
             <button id="refreshVersionsButton" class="secondary-dialog-button" type="button">刷新列表</button>
@@ -418,7 +431,6 @@
             <p id="launcherUpdateRecoveryMessage"></p>
             <div class="task-actions">
               <button id="launcherUpdateRetryButton" class="secondary-dialog-button" type="button">重试安装</button>
-              <button id="launcherUpdateRollbackButton" class="secondary-dialog-button" type="button">恢复上一版</button>
               <button id="launcherUpdateKeepButton" class="secondary-dialog-button" type="button">保留当前版</button>
             </div>
           </div>
@@ -495,8 +507,8 @@
             <button class="dialog-close" data-fabric-api-cancel aria-label="取消安装 Fabric" type="button">×</button>
           </header>
           <p id="fabricApiTarget" class="fabric-api-target"></p>
-          <p class="fabric-api-description">许多 Fabric 模组需要 Fabric API，可一起安装，也可稍后添加。</p>
-          <label class="check-setting fabric-api-check">
+          <p id="fabricApiDescription" class="fabric-api-description">许多 Fabric 模组需要 Fabric API，可一起安装，也可稍后添加。</p>
+          <label id="fabricApiIncludeSetting" class="check-setting fabric-api-check">
             <input id="fabricApiInclude" type="checkbox" checked />
             <span aria-hidden="true"></span>同时安装 Fabric API
           </label>

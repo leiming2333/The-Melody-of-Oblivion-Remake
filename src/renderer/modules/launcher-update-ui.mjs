@@ -6,7 +6,7 @@ export function createLauncherUpdateUi(context) {
     launcherUpdateProgress, launcherUpdateButton, launcherUpdateNotesSetting,
     launcherUpdateNotes, settingsDialog } = elements;
   const { launcherUpdateCancelButton, launcherUpdateRecovery, launcherUpdateRecoveryMessage,
-    launcherUpdateRetryButton, launcherUpdateRollbackButton, launcherUpdateKeepButton,
+    launcherUpdateRetryButton, launcherUpdateKeepButton,
     launcherHistorySetting, launcherHistoryButton, launcherHistoryList, launcherHistoryCleanupButton } = elements;
   let currentState = { status: 'idle', progress: 0, installAction: null, message: '尚未检查更新' };
 
@@ -66,11 +66,10 @@ export function createLauncherUpdateUi(context) {
       launcherUpdateCancelButton.textContent = state.status === 'cancelling' ? '正在取消…' : '取消';
     }
     if (launcherUpdateRecovery) {
-      launcherUpdateRecovery.hidden = !state.recovery && !state.rollbackAvailable;
-      launcherUpdateRecoveryMessage.textContent = state.recovery?.message
-        ?? `保留了可回退版本 ${state.rollbackVersion ?? ''}。恢复后会重新启动。`;
-      const actions = state.recovery?.actions ?? (state.rollbackAvailable ? ['rollback'] : []);
-      for (const [button, action] of [[launcherUpdateRetryButton, 'retry'], [launcherUpdateRollbackButton, 'rollback'],
+      launcherUpdateRecovery.hidden = !state.recovery;
+      launcherUpdateRecoveryMessage.textContent = state.recovery?.message ?? '';
+      const actions = state.recovery?.actions ?? [];
+      for (const [button, action] of [[launcherUpdateRetryButton, 'retry'],
         [launcherUpdateKeepButton, 'keep-current']]) {
         button.hidden = !actions.includes(action);
         button.disabled = ['preparing', 'installing', 'cancelling'].includes(state.status);
@@ -124,9 +123,8 @@ export function createLauncherUpdateUi(context) {
   }
 
   async function recover(action) {
+    if (!['retry', 'keep-current'].includes(action)) return;
     try {
-      if (action === 'rollback' && context.confirmRollback
-          && !await context.confirmRollback(currentState.rollbackVersion)) return;
       const result = await updaterApi.recover(action);
       if (result?.status) render(result);
     } catch (error) { showProblem(error, '更新恢复未完成', { domain: 'update' }); }
@@ -168,7 +166,6 @@ export function createLauncherUpdateUi(context) {
 
   launcherUpdateCancelButton?.addEventListener('click', () => { void cancel(); });
   launcherUpdateRetryButton?.addEventListener('click', () => { void recover('retry'); });
-  launcherUpdateRollbackButton?.addEventListener('click', () => { void recover('rollback'); });
   launcherUpdateKeepButton?.addEventListener('click', () => { void recover('keep-current'); });
   launcherHistoryButton?.addEventListener('click', () => { void loadHistory(); });
   launcherHistoryCleanupButton?.addEventListener('click', () => { void cleanupHistory(); });

@@ -317,6 +317,48 @@ function registerMinecraftIpc({
     return fabricApiCatalog.listVersions(gameVersion, { force: options.force === true });
   });
 
+  registerTaskHandler(ipcMain, 'minecraft:install-fabric-api', (event, request = {}) => (
+    runDownloadTask(event, 'fabric-api', async (signal, report, task) => {
+      const settings = await applyDownloadSettings(task);
+      const directory = gameDirectory;
+      const selectedServices = services;
+      const directoryKey = (value) => process.platform === 'win32'
+        ? path.resolve(value).toLowerCase() : path.resolve(value);
+      if (request.expectedGameDirectory && (typeof request.expectedGameDirectory !== 'string'
+          || directoryKey(request.expectedGameDirectory) !== directoryKey(directory))) {
+        throw createTaskError('GAME_DIRECTORY_CHANGED', '游戏目录已改变，请重新选择版本后安装');
+      }
+      if (gameProcesses.isBusy(directory)) {
+        throw createTaskError('GAME_RUNNING', '请先关闭当前目录中运行的游戏，再安装 Fabric API');
+      }
+      report({ phase: 'preparing', message: '正在核对已安装 Fabric 和游戏版本…' });
+      const { profiles } = await selectedServices.versionManager.listLocalProfiles();
+      if (signal.aborted) throw createTaskError('TASK_CANCELLED', '下载已取消');
+      const byId = new Map(profiles.filter((profile) => !profile.isInstance).map((profile) => [profile.profileId, profile]));
+      const profile = byId.get(request.profileId);
+      if (!profile?.valid || !profile.complete || profile.loaderType !== 'fabric') {
+        throw createTaskError('FABRIC_API_INCOMPATIBLE', '请先选择完整安装的 Fabric 游戏版本，再添加 Fabric API');
+      }
+      const visited = new Set();
+      let base = profile;
+      while (base?.inheritsFrom && !visited.has(base.profileId)) {
+        visited.add(base.profileId);
+        base = byId.get(base.inheritsFrom);
+      }
+      if (!base?.valid || base.inheritsFrom || base.profileId !== request.gameVersion) {
+        throw createTaskError('FABRIC_API_INCOMPATIBLE', '所选 Minecraft 版本与已安装 Fabric 不匹配，请重新选择');
+      }
+      const instanceDirectory = await selectedServices.versionManager.resolveModDirectory(profile.profileId, settings.isolateProfiles);
+      if (signal.aborted) throw createTaskError('TASK_CANCELLED', '下载已取消');
+      const fabricApi = await selectedServices.fabricApiManager.installVersion({
+        gameVersion: base.profileId, versionId: request.fabricApiVersionId, instanceDirectory
+      }, (progress) => report({ ...progress, phase: progress.phase === 'complete' ? 'fabric-api-ready' : progress.phase }), { signal });
+      report({ phase: 'complete', message: 'Fabric API 安装完成', profileId: profile.profileId,
+        gameDirectory: directory, cancellable: false });
+      return { profileId: profile.profileId, fabricApi };
+    }, request)
+  ));
+
   registerTaskHandler(ipcMain, 'minecraft:install-loader', (event, request = {}) => (
     runDownloadTask(event, 'loader', async (signal, report, task) => {
       const withFabricApi = request.fabricApiVersionId != null;

@@ -79,6 +79,8 @@ const versionTypeFilter = document.querySelector('#versionTypeFilter');
 const loaderTypeSelect = document.querySelector('#loaderTypeSelect');
 const loaderVersionSelect = document.querySelector('#loaderVersionSelect');
 const versionEmpty = document.querySelector('#versionEmpty');
+const versionSelectionSummary = document.querySelector('#versionSelectionSummary');
+const addFabricApiButton = document.querySelector('#addFabricApiButton');
 const refreshVersionsButton = document.querySelector('#refreshVersionsButton');
 const deleteVersionButton = document.querySelector('#deleteVersionButton');
 const clearVersionSelectionButton = document.querySelector('#clearVersionSelectionButton');
@@ -94,6 +96,8 @@ const downloadPercent = document.querySelector('#downloadPercent');
 const downloadProgress = document.querySelector('#downloadProgress');
 const downloadSpeed = document.querySelector('#downloadSpeed');
 const downloadEta = document.querySelector('#downloadEta');
+const downloadSize = document.querySelector('#downloadSize');
+const downloadFiles = document.querySelector('#downloadFiles');
 const settingsDialog = document.querySelector('#settingsDialog');
 const launcherApp = document.querySelector('.launcher-app');
 const javaSelect = document.querySelector('#javaSelect');
@@ -125,7 +129,6 @@ const launcherUpdateCancelButton = document.querySelector('#launcherUpdateCancel
 const launcherUpdateRecovery = document.querySelector('#launcherUpdateRecovery');
 const launcherUpdateRecoveryMessage = document.querySelector('#launcherUpdateRecoveryMessage');
 const launcherUpdateRetryButton = document.querySelector('#launcherUpdateRetryButton');
-const launcherUpdateRollbackButton = document.querySelector('#launcherUpdateRollbackButton');
 const launcherUpdateKeepButton = document.querySelector('#launcherUpdateKeepButton');
 const launcherHistorySetting = document.querySelector('#launcherHistorySetting');
 const launcherHistoryButton = document.querySelector('#launcherHistoryButton');
@@ -229,10 +232,10 @@ async function withLauncherUpdateUi(callback) {
           updateBadgeRefresh, updateBadgeCheck, updateBadgeDownload, updateBadgeError,
           launcherUpdateProgress, launcherUpdateButton, launcherUpdateNotesSetting,
           launcherUpdateNotes, settingsDialog, launcherUpdateCancelButton, launcherUpdateRecovery,
-          launcherUpdateRecoveryMessage, launcherUpdateRetryButton, launcherUpdateRollbackButton,
+          launcherUpdateRecoveryMessage, launcherUpdateRetryButton,
           launcherUpdateKeepButton, launcherHistorySetting, launcherHistoryButton, launcherHistoryList,
           launcherHistoryCleanupButton },
-        ensureSettingsOpen, confirmRollback: async (version) => window.confirm(`恢复到上一版本 ${version ?? ''}？启动器将重新启动，游戏数据会保留。`)
+        ensureSettingsOpen
       })
     )).catch((error) => {
       launcherUpdateUiModule = undefined;
@@ -1272,7 +1275,7 @@ function getDownloadUi() {
       get downloadCancelRequested() { return downloadCancelRequested; }, set downloadCancelRequested(value) { downloadCancelRequested = value; },
       get activeDownloadLabel() { return activeDownloadLabel; }, set activeDownloadLabel(value) { activeDownloadLabel = value; },
       get launcherSettings() { return launcherSettings; }, set launcherSettings(value) { launcherSettings = value; }
-    }, sourceHint, cancelDownloadButton, homeCancelDownloadButton, taskButton, downloadStatus, downloadMessage, downloadStage, downloadProgress, downloadPercent, gameStatus, statusBadge, downloadSpeed, downloadEta, renderProgressBar });
+    }, sourceHint, cancelDownloadButton, homeCancelDownloadButton, taskButton, downloadStatus, downloadMessage, downloadStage, downloadProgress, downloadPercent, gameStatus, statusBadge, downloadSpeed, downloadEta, downloadSize, downloadFiles, renderProgressBar });
     },
     onError: (error) => showToast('任务进度：' + readableError(error), true)
   });
@@ -1311,7 +1314,7 @@ function getVersionCatalogUi() {
       get versionVerifyActive() { return versionVerifyActive; }, set versionVerifyActive(value) { versionVerifyActive = value; },
       get lastDownloadFailed() { return lastDownloadFailed; }, set lastDownloadFailed(value) { lastDownloadFailed = value; }
     },
-        document, minecraft, delay, fallbackLocalVersionResult, fallbackLoaderResult, fallbackVersionResult, loaderNames, versionSelect, versionCatalog, loaderTypeSelect, loaderVersionSelect, versionSearch, versionTypeFilter, versionEmpty, refreshVersionsButton, downloadVersionButton, deleteVersionButton, clearVersionSelectionButton, gameStatus, statusBadge, activeGameProfiles, rememberedSelectedGame, rememberSelectedGame, gameProcessKey, updateLaunchButtonState, refreshJavaReadiness, versionTypeName, readableError, showToast, cancelFabricApiConfirmation,
+        document, minecraft, delay, fallbackLocalVersionResult, fallbackLoaderResult, fallbackVersionResult, loaderNames, versionSelect, versionCatalog, loaderTypeSelect, loaderVersionSelect, versionSearch, versionTypeFilter, versionEmpty, versionSelectionSummary, addFabricApiButton, refreshVersionsButton, downloadVersionButton, deleteVersionButton, clearVersionSelectionButton, gameStatus, statusBadge, activeGameProfiles, rememberedSelectedGame, rememberSelectedGame, gameProcessKey, updateLaunchButtonState, refreshJavaReadiness, versionTypeName, readableError, showToast, cancelFabricApiConfirmation,
         beginRequest: (key) => getVersionCatalogUi().beginRequest(key),
         cancelRequest: (key) => getVersionCatalogUi().cancel(key),
         renderProfiles: () => renderLocalProfileOptions(),
@@ -1404,11 +1407,14 @@ function cancelFabricApiConfirmation() {
   updateVersionAction();
 }
 
-async function requestFabricApiChoice(gameVersion, loaderVersion, token) {
+async function requestFabricApiChoice(gameVersion, loaderVersion, token, options = {}) {
   fabricApiUiModule ??= import('./modules/fabric-api-ui.mjs').then(({ createFabricApiUi }) => {
     const dialog = document.querySelector('#fabricApiDialog');
     fabricApiUi = createFabricApiUi({ minecraft, readableError, elements: {
       dialog,
+      title: document.querySelector('#fabricApiTitle'),
+      description: document.querySelector('#fabricApiDescription'),
+      includeSetting: document.querySelector('#fabricApiIncludeSetting'),
       target: document.querySelector('#fabricApiTarget'),
       includeApi: document.querySelector('#fabricApiInclude'),
       versionSelect: document.querySelector('#fabricApiVersionSelect'),
@@ -1422,28 +1428,39 @@ async function requestFabricApiChoice(gameVersion, loaderVersion, token) {
   }).catch((error) => { fabricApiUiModule = undefined; throw error; });
   const ui = await fabricApiUiModule;
   if (token !== fabricApiConfirmationToken) return null;
-  return ui.confirm({ gameVersion, loaderVersion });
+  return ui.confirm({ gameVersion, loaderVersion, apiOnly: options.apiOnly === true });
 }
 
 async function installSelectedVersion() {
+  return installVersionSelection();
+}
+
+async function addSelectedFabricApi() {
+  if (loaderTypeSelect.value !== 'fabric') return;
+  return installVersionSelection({ apiOnly: selectedLoaderVersion()?.installed === true });
+}
+
+async function installVersionSelection({ apiOnly = false } = {}) {
   const version = selectedRemoteVersion();
   const loaderType = loaderTypeSelect.value;
   const loader = selectedLoaderVersion();
   if (!version || !loader || versionDownloadActive || fabricApiConfirmationActive) {
     return;
   }
+  if (apiOnly && (loaderType !== 'fabric' || !loader.installed || !loader.profileId)) return;
 
   const loaderLabel = loaderType === 'vanilla'
     ? `Minecraft ${version.id}`
     : `Minecraft ${version.id} · ${loaderNames[loaderType]} ${loader.version}`;
 
-  if (loader.installed) {
+  if (loader.installed && !apiOnly) {
     useVersion(loader.profileId ?? version.id, loaderLabel);
     versionDialog.close();
     return;
   }
 
   const expectedGameDirectory = currentGameDirectory;
+  const expectedProfileId = loader.profileId;
   const directoryMode = launcherSettings.gameDirectoryMode;
   const isolateProfiles = launcherSettings.isolateProfiles;
   let fabricApiVersionId;
@@ -1452,15 +1469,18 @@ async function installSelectedVersion() {
     fabricApiConfirmationActive = true;
     updateVersionAction();
     try {
-      const choice = await requestFabricApiChoice(version.id, loader.version, token);
+      const choice = await requestFabricApiChoice(version.id, loader.version, token, { apiOnly });
       if (!choice || token !== fabricApiConfirmationToken || versionDownloadActive
         || selectedRemoteVersion()?.id !== version.id || loaderTypeSelect.value !== loaderType
         || selectedLoaderVersion()?.version !== loader.version
+        || (apiOnly && selectedLoaderVersion()?.profileId !== expectedProfileId)
         || currentGameDirectory !== expectedGameDirectory || launcherSettings.gameDirectoryMode !== directoryMode
         || launcherSettings.isolateProfiles !== isolateProfiles) return;
       fabricApiVersionId = choice.fabricApiVersionId;
+      if (apiOnly && !fabricApiVersionId) return;
     } catch (error) {
-      if (token === fabricApiConfirmationToken) showProblem(error, 'Fabric 安装尚未开始', { retry: installSelectedVersion });
+      if (token === fabricApiConfirmationToken) showProblem(error, 'Fabric 安装尚未开始',
+        { retry: () => installVersionSelection({ apiOnly }) });
       return;
     } finally {
       if (token === fabricApiConfirmationToken) {
@@ -1475,7 +1495,8 @@ async function installSelectedVersion() {
   downloadCancellable = true;
   downloadCancelRequested = false;
   lastDownloadFailed = false;
-  activeDownloadLabel = loaderLabel;
+  activeDownloadLabel = apiOnly ? `Minecraft ${version.id} · Fabric API` : loaderLabel;
+  updateVersionAction();
   homeStatus.hidden = false;
   versionCatalog.disabled = true;
   versionSearch.disabled = true;
@@ -1486,13 +1507,18 @@ async function installSelectedVersion() {
   cancelDownloadButton.hidden = false;
   cancelDownloadButton.disabled = false;
   downloadStatus.hidden = false;
-  updateDownloadProgress({ phase: 'preparing', message: `正在准备 ${loaderLabel}…` });
-  gameStatus.textContent = `正在安装 ${loaderLabel}`;
+  updateDownloadProgress({ phase: 'preparing', message: `正在准备 ${activeDownloadLabel}…` });
+  gameStatus.textContent = `正在安装 ${activeDownloadLabel}`;
   statusBadge.textContent = 'DOWNLOAD';
 
   try {
     let result;
-    if (minecraft?.installLoader) {
+    if (apiOnly) {
+      if (!minecraft?.installFabricApi) throw new Error('当前环境不支持单独添加 Fabric API，请重新打开启动器');
+      result = await minecraft.installFabricApi({ taskId: activeTaskId, gameVersion: version.id,
+        profileId: loader.profileId, fabricApiVersionId,
+        ...(expectedGameDirectory ? { expectedGameDirectory } : {}) });
+    } else if (minecraft?.installLoader) {
       result = await minecraft.installLoader({
         taskId: activeTaskId,
         gameVersion: version.id,
@@ -1515,22 +1541,24 @@ async function installSelectedVersion() {
       result = { profileId: loaderType === 'vanilla' ? version.id : `${version.id}-${loaderType}-${loader.version}` };
     }
 
-    version.installed = true;
+    if (!apiOnly) version.installed = true;
     loader.installed = true;
     loader.profileId = result.profileId;
     renderVersionCatalog(version.id);
     renderLoaderCatalog(loader.version);
     useVersion(result.profileId ?? version.id, loaderLabel);
     const apiLabel = result.fabricApi?.version ? ` + Fabric API ${result.fabricApi.version}` : '';
-    updateDownloadProgress({ phase: 'complete', message: `${loaderLabel}${apiLabel} 安装完成` });
+    updateDownloadProgress({ phase: 'complete', message: apiOnly
+      ? `Fabric API ${result.fabricApi?.version ?? ''} 已添加到 Minecraft ${version.id}`
+      : `${loaderLabel}${apiLabel} 安装完成` });
     if (result.fabricApi?.cleanupWarning) showToast(result.fabricApi.cleanupWarning, true);
     statusBadge.textContent = 'READY';
   } catch (error) {
     const message = readableError(error);
     const cancelled = error?.code === 'TASK_CANCELLED' || error?.name === 'AbortError' || message === '下载已取消';
-    downloadMessage.textContent = cancelled
-      ? '下载已取消'
-      : `下载失败：${message}。可重新点击「重试」再次下载。`;
+    updateDownloadProgress({ phase: cancelled ? 'cancelled' : 'failed',
+      message: cancelled ? '下载已取消，已校验文件可在下次安装时复用'
+        : `下载失败：${message}。${apiOnly ? '可点击「添加 Fabric API」重试。' : '可重新点击「重试」再次下载。'}` });
     if (!downloadProgress.hasAttribute('value')) downloadProgress.value = 0;
     downloadStage.textContent = cancelled ? '已取消' : '下载失败';
     downloadPercent.textContent = cancelled ? '—' : downloadPercent.textContent;
@@ -1538,8 +1566,9 @@ async function installSelectedVersion() {
     gameStatus.textContent = cancelled ? '下载已取消' : '下载失败，可重试';
     if (!cancelled) {
       lastDownloadFailed = true;
-      showToast(`下载失败：${message}，可点击「重试」重新下载`, true);
-      showProblem(error, '游戏安装未完成', { retry: installSelectedVersion });
+      showToast(`下载失败：${message}，可${apiOnly ? '重新添加 Fabric API' : '点击「重试」重新下载'}`, true);
+      showProblem(error, apiOnly ? 'Fabric API 添加未完成' : '游戏安装未完成',
+        { retry: () => installVersionSelection({ apiOnly }) });
     } else {
       showToast('已取消下载，可重新安装');
     }
@@ -1878,6 +1907,7 @@ refreshVersionsButton.addEventListener('click', () => loadVersionCatalog(true));
 deleteVersionButton.addEventListener('click', deleteSelectedVersion);
 clearVersionSelectionButton.addEventListener('click', clearVersionSelection);
 downloadVersionButton.addEventListener('click', installSelectedVersion);
+addFabricApiButton.addEventListener('click', addSelectedFabricApi);
 cancelDownloadButton.addEventListener('click', async () => {
   if (!versionDownloadActive || downloadCancelRequested || !downloadCancellable) return;
   downloadCancelRequested = true;

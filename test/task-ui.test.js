@@ -157,14 +157,13 @@ async function updateFixture(t) {
   const names = ['launcherUpdateStatus', 'launcherVersionMeta', 'updateStatusBadge', 'updateStatusBadgeSvg',
     'updateBadgeRefresh', 'updateBadgeCheck', 'updateBadgeDownload', 'updateBadgeError', 'launcherUpdateProgress',
     'launcherUpdateButton', 'launcherUpdateNotesSetting', 'launcherUpdateNotes', 'launcherUpdateCancelButton',
-    'launcherUpdateRecovery', 'launcherUpdateRecoveryMessage', 'launcherUpdateRetryButton', 'launcherUpdateRollbackButton',
+    'launcherUpdateRecovery', 'launcherUpdateRecoveryMessage', 'launcherUpdateRetryButton',
     'launcherUpdateKeepButton', 'launcherHistorySetting', 'launcherHistoryButton', 'launcherHistoryList', 'launcherHistoryCleanupButton'];
   const elements = Object.fromEntries(names.map(name => [name, element()]));
   elements.settingsDialog = { querySelector: () => ({ scrollIntoView() {} }) };
   const calls = [], problems = [];
   const context = { elements, ensureSettingsOpen: async () => {}, renderProgressBar: (_element, value) => value ?? null,
     showToast: (...args) => calls.push(['toast', ...args]), showProblem: (...args) => problems.push(args),
-    confirmRollback: async () => true,
     updaterApi: { cancel: async () => ({ status: 'available', availableVersion: '2.0', canCancel: false }),
       recover: async action => { calls.push(['recover', action]); return { status: 'preparing' }; },
       listHistory: async () => [{ id: 'one', name: 'old-one.exe', path: 'C:/launcher/old-one.exe', size: 123 },
@@ -187,13 +186,14 @@ test('update cancellation and recovery buttons reflect cancellable, committing a
   assert.equal(e.launcherUpdateRecovery.hidden, false);
   assert.equal(e.launcherUpdateRetryButton.hidden, false);
   assert.equal(e.launcherUpdateKeepButton.hidden, false);
-  assert.equal(e.launcherUpdateRollbackButton.hidden, true);
   assert.equal(e.launcherUpdateButton.disabled, true);
   await f.ui.recover('retry');
   assert.deepEqual(f.calls.find(call => call[0] === 'recover'), ['recover', 'retry']);
   assert.equal(e.launcherUpdateRetryButton.disabled, true);
   f.ui.render({ status: 'current', rollbackAvailable: true, rollbackVersion: '1.0' });
-  f.context.confirmRollback = async () => false;
+  assert.equal(e.launcherUpdateRecovery.hidden, true);
+  assert.equal(e.launcherUpdateRecoveryMessage.textContent, '');
+  assert.equal(e.launcherUpdateButton.disabled, false);
   await f.ui.recover('rollback');
   assert.equal(f.calls.filter(call => call[0] === 'recover').length, 1);
 });
@@ -213,6 +213,9 @@ test('the update badge opens recovery without starting another check or download
   f.context.updaterApi.check = async () => { checked++; return { status: 'available' }; };
   f.ui.render({ status: 'error', availableVersion: '2.0',
     recovery: { message: '需要恢复', actions: ['rollback', 'keep-current'] } });
+  assert.equal(f.elements.launcherUpdateRecovery.hidden, false);
+  assert.equal(f.elements.launcherUpdateRetryButton.hidden, true);
+  assert.equal(f.elements.launcherUpdateKeepButton.hidden, false);
   await f.ui.handleFromBadge();
   assert.equal(checked, 0);
   assert.equal(f.problems.length, 0);
