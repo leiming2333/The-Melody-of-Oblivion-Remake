@@ -7,6 +7,8 @@ const { fork, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { once } = require('node:events');
 const { ModuleProcess } = require('../src/main/module-process');
+const { getInstalledElectronPath } = require('./helpers/electron-runtime');
+const electronRuntime = getInstalledElectronPath();
 
 const source = `
   exports.createModule = ({ options, callMain, emit }) => {
@@ -34,7 +36,10 @@ const source = `
         });
         return name;
       },
-      ignoreCancel: (_context) => new Promise(() => {}),
+      ignoreCancel: (context) => {
+        context.onProgress({ phase: 'ignoring-cancellation' });
+        return new Promise(() => {});
+      },
       callback: async (value) => {
         const result = await callMain('double', [value]);
         emit('updated', result);
@@ -137,12 +142,15 @@ test('crashing a module rejects all its requests and the next invocation starts 
   assert.notEqual(before.pid, after.pid);
 });
 
-test('a module ignoring cancellation is killed and can be retried', async (t) => {
+test('a module ignoring cancellation is killed and can be retried', { timeout: 30000 }, async (t) => {
   const module = await fixture(t, { cancelGraceMs: 20 });
   const before = await module.invoke('increment');
   const controller = new AbortController();
-  const pending = module.invoke('ignoreCancel', [], { signal: controller.signal });
+  let entered;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const pending = module.invoke('ignoreCancel', [], { signal: controller.signal, onProgress: () => entered() });
   const rejected = assert.rejects(pending, { code: 'TASK_CANCELLED' });
+  await started;
   controller.abort();
   await rejected;
   const after = await module.invoke('increment');
@@ -191,14 +199,16 @@ test('an idle persistent module does not prevent its parent process from exiting
     new ModuleProcess({ modulePath: process.argv[1] }).invoke('increment').then(() => console.log('DONE'));
   `;
   const { stdout } = await promisify(execFile)(process.execPath, ['-e', script, module.modulePath], {
-    timeout: 8000, windowsHide: true
+    timeout: 30000, windowsHide: true
   });
   assert.match(stdout, /DONE/);
 });
 
-test('the persistent worker runs under the packaged Electron runtime', async (t) => {
+test('the persistent worker runs under the installed Electron runtime', {
+  skip: electronRuntime ? false : 'Electron runtime is not installed; tests never download it'
+}, async (t) => {
   const module = await fixture(t, { forkProcess: (filename, args, options) => fork(filename, args, {
-    ...options, execPath: require('electron')
+    ...options, execPath: electronRuntime
   }) });
   assert.equal((await module.invoke('increment')).count, 1);
 });

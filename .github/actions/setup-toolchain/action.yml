@@ -27,3 +27,7 @@ runs:
         ELECTRON_SKIP_BINARY_DOWNLOAD: ${{ inputs.skip-electron == 'true' && '1' || '' }}
       run: |
         if [ "$OMIT_DEV" = true ]; then npm ci --omit=dev; else npm ci; fi
+    - name: Prepare Electron runtime before parallel tests
+      if: inputs.omit-dev != 'true' && inputs.skip-electron != 'true'
+      shell: bash
+      run: node node_modules/electron/install.js

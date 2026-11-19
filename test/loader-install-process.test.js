@@ -5,6 +5,8 @@ const path = require('node:path');
 const os = require('node:os');
 const { fork } = require('node:child_process');
 const { LoaderInstallProcess, disposeLoaderInstallProcesses } = require('../src/main/minecraft/loader-install-process');
+const { getInstalledElectronPath } = require('./helpers/electron-runtime');
+const electronRuntime = getInstalledElectronPath();
 
 async function fixture(t, source) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'melody-loader-process-'));
@@ -39,7 +41,7 @@ async function assertStopped(pid) {
     try {
       return /^State:\s+Z\b/m.test(await fs.readFile(`/proc/${pid}/status`, 'utf8'));
     } catch (error) {
-      if (error.code === 'ENOENT') return true;
+      if (error.code === 'ENOENT' || error.code === 'ESRCH') return true;
       throw error;
     }
   }, `process ${pid} is still running after cleanup`);
@@ -268,10 +270,13 @@ test('the production worker wires the downloader and installation settings into 
 });
 
 for (const runtime of ['node', 'electron']) {
-  test(`the production installation worker starts with ${runtime} and reports validation errors without network access`, async () => {
+  const execPath = runtime === 'electron' ? electronRuntime : process.execPath;
+  test(`the production installation worker starts with ${runtime} and reports validation errors without network access`, {
+    skip: execPath ? false : 'Electron runtime is not installed; tests never download it'
+  }, async () => {
     const installer = new LoaderInstallProcess({
       forkProcess: (filename, args, options) => fork(filename, args, {
-        ...options, execPath: runtime === 'electron' ? require('electron') : process.execPath
+        ...options, execPath
       })
     });
     await assert.rejects(installer.installLoader({ gameVersion: '../invalid', loaderType: 'forge' }), /Minecraft 版本号格式无效/);
