@@ -527,7 +527,7 @@ test('JSON metadata deadlines include stalled response bodies', async (t) => {
     return new Promise((resolve) => server.close(resolve));
   });
   const url = `http://127.0.0.1:${server.address().port}/metadata`;
-  await assert.rejects(fetchJson(url, 500), { name: 'AbortError' });
+  await assert.rejects(fetchJson(url, 500), { name: 'TimeoutError', code: 'ETIMEDOUT', timeoutMs: 500 });
   assert.equal(requests, 1);
 });
 

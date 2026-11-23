@@ -1495,6 +1495,7 @@ async function installVersionSelection({ apiOnly = false } = {}) {
   downloadCancellable = true;
   downloadCancelRequested = false;
   lastDownloadFailed = false;
+  lastDownloadProgress = null;
   activeDownloadLabel = apiOnly ? `Minecraft ${version.id} · Fabric API` : loaderLabel;
   updateVersionAction();
   homeStatus.hidden = false;
@@ -1507,7 +1508,7 @@ async function installVersionSelection({ apiOnly = false } = {}) {
   cancelDownloadButton.hidden = false;
   cancelDownloadButton.disabled = false;
   downloadStatus.hidden = false;
-  updateDownloadProgress({ phase: 'preparing', message: `正在准备 ${activeDownloadLabel}…` });
+  updateDownloadProgress({ taskId: activeTaskId, phase: 'preparing', message: `正在准备 ${activeDownloadLabel}…` });
   gameStatus.textContent = `正在安装 ${activeDownloadLabel}`;
   statusBadge.textContent = 'DOWNLOAD';
 
@@ -1531,6 +1532,7 @@ async function installVersionSelection({ apiOnly = false } = {}) {
       for (let completedFiles = 0; completedFiles <= 20; completedFiles += 1) {
         if (downloadCancelRequested) throw new Error('下载已取消');
         updateDownloadProgress({
+          taskId: activeTaskId,
           phase: completedFiles === 20 ? 'complete' : 'downloading',
           message: `正在下载预览文件 ${completedFiles}/20`,
           completedFiles,
@@ -1548,7 +1550,7 @@ async function installVersionSelection({ apiOnly = false } = {}) {
     renderLoaderCatalog(loader.version);
     useVersion(result.profileId ?? version.id, loaderLabel);
     const apiLabel = result.fabricApi?.version ? ` + Fabric API ${result.fabricApi.version}` : '';
-    updateDownloadProgress({ phase: 'complete', message: apiOnly
+    updateDownloadProgress({ taskId: activeTaskId, phase: 'complete', message: apiOnly
       ? `Fabric API ${result.fabricApi?.version ?? ''} 已添加到 Minecraft ${version.id}`
       : `${loaderLabel}${apiLabel} 安装完成` });
     if (result.fabricApi?.cleanupWarning) showToast(result.fabricApi.cleanupWarning, true);
@@ -1556,7 +1558,7 @@ async function installVersionSelection({ apiOnly = false } = {}) {
   } catch (error) {
     const message = readableError(error);
     const cancelled = error?.code === 'TASK_CANCELLED' || error?.name === 'AbortError' || message === '下载已取消';
-    updateDownloadProgress({ phase: cancelled ? 'cancelled' : 'failed',
+    updateDownloadProgress({ taskId: activeTaskId, phase: cancelled ? 'cancelled' : 'failed',
       message: cancelled ? '下载已取消，已校验文件可在下次安装时复用'
         : `下载失败：${message}。${apiOnly ? '可点击「添加 Fabric API」重试。' : '可重新点击「重试」再次下载。'}` });
     if (!downloadProgress.hasAttribute('value')) downloadProgress.value = 0;
@@ -1889,20 +1891,37 @@ memoryRange.addEventListener('input', () => {
   memoryValue.value = `${memoryRange.value} MB`;
 });
 
+function resetVersionDownloadFeedback() {
+  if (versionDownloadActive) return;
+  const showingFailure = statusBadge.textContent === 'ERROR' && gameStatus.textContent === '下载失败，可重试';
+  const showingCancellation = statusBadge.textContent === 'READY' && gameStatus.textContent === '下载已取消';
+  lastDownloadFailed = false;
+  lastDownloadProgress = null;
+  activeDownloadLabel = '';
+  downloadStatus.hidden = true;
+  downloadMessage.textContent = '';
+  if (showingFailure || showingCancellation) {
+    const version = selectedRemoteVersion();
+    gameStatus.textContent = version ? `已选择 Minecraft ${version.id} 的安装选项` : '请选择游戏版本';
+    statusBadge.textContent = 'READY';
+  }
+}
+
 function filterVersionCatalog() {
   const previousVersion = versionCatalog.value;
   renderVersionCatalog();
   if (versionCatalog.value !== previousVersion) {
     cancelFabricApiConfirmation();
+    resetVersionDownloadFeedback();
     loadLoaderCatalog();
   }
 }
 
 versionSearch.addEventListener('input', filterVersionCatalog);
 versionTypeFilter.addEventListener('change', filterVersionCatalog);
-versionCatalog.addEventListener('change', () => { cancelFabricApiConfirmation(); lastDownloadFailed = false; loadLoaderCatalog(); });
-loaderTypeSelect.addEventListener('change', () => { cancelFabricApiConfirmation(); lastDownloadFailed = false; loadLoaderCatalog(); });
-loaderVersionSelect.addEventListener('change', () => { cancelFabricApiConfirmation(); lastDownloadFailed = false; updateVersionAction(); });
+versionCatalog.addEventListener('change', () => { cancelFabricApiConfirmation(); resetVersionDownloadFeedback(); loadLoaderCatalog(); });
+loaderTypeSelect.addEventListener('change', () => { cancelFabricApiConfirmation(); resetVersionDownloadFeedback(); loadLoaderCatalog(); });
+loaderVersionSelect.addEventListener('change', () => { cancelFabricApiConfirmation(); resetVersionDownloadFeedback(); updateVersionAction(); });
 refreshVersionsButton.addEventListener('click', () => loadVersionCatalog(true));
 deleteVersionButton.addEventListener('click', deleteSelectedVersion);
 clearVersionSelectionButton.addEventListener('click', clearVersionSelection);
@@ -1910,22 +1929,33 @@ downloadVersionButton.addEventListener('click', installSelectedVersion);
 addFabricApiButton.addEventListener('click', addSelectedFabricApi);
 cancelDownloadButton.addEventListener('click', async () => {
   if (!versionDownloadActive || downloadCancelRequested || !downloadCancellable) return;
+  const taskId = activeTaskId;
+  const currentTask = () => versionDownloadActive && activeTaskId === taskId;
+  const previousMessage = downloadMessage.textContent;
+  const previousBadge = statusBadge.textContent;
   downloadCancelRequested = true;
   cancelDownloadButton.disabled = true;
+  homeCancelDownloadButton.disabled = true;
   downloadMessage.textContent = '正在取消下载并清理临时文件…';
   statusBadge.textContent = 'CANCEL';
   try {
-    const result = await minecraft?.cancelDownload?.({ taskId: activeTaskId });
+    const result = await minecraft?.cancelDownload?.({ taskId });
+    if (!currentTask()) return;
     if (result?.committing || result?.cancelled === 0) {
       downloadCancelRequested = false;
       downloadCancellable = !result.committing;
       cancelDownloadButton.disabled = Boolean(result.committing);
       homeCancelDownloadButton.hidden = Boolean(result.committing);
+      homeCancelDownloadButton.disabled = Boolean(result.committing);
       downloadMessage.textContent = result.committing ? '正在保存实例，完成后即可使用' : '任务正在结束，请稍候…';
     }
   } catch (error) {
+    if (!currentTask()) return;
     downloadCancelRequested = false;
     cancelDownloadButton.disabled = false;
+    homeCancelDownloadButton.disabled = false;
+    downloadMessage.textContent = previousMessage;
+    statusBadge.textContent = previousBadge;
     showProblem(error);
   }
 });

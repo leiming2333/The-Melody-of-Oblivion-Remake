@@ -44,7 +44,10 @@ function unique(values) {
 
 function createTimeoutSignal(timeoutMs) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const reason = Object.assign(new Error(`请求超时（${timeoutMs / 1000} 秒）`), {
+    name: 'TimeoutError', code: 'ETIMEDOUT', timeoutMs
+  });
+  const timer = setTimeout(() => controller.abort(reason), timeoutMs);
   return { controller, timer };
 }
 
@@ -84,6 +87,11 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000, consumeRes
       throw new Error('下载地址重定向次数过多');
     }
     return consumeResponse ? await consumeResponse(response) : response;
+  } catch (error) {
+    // Reading an aborted response body can throw a generic AbortError instead
+    // of the signal's reason. Keep our deadline distinct from user cancellation.
+    if (controller.signal.aborted && !fetchOptions.signal?.aborted) throw controller.signal.reason;
+    throw error;
   } finally {
     clearTimeout(timer);
   }

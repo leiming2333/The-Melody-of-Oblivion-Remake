@@ -250,6 +250,26 @@ test('installer checksums come from official Maven and only a missing SHA-256 pe
   assert.deepEqual(requested, [`${officialUrl}.sha256`, `${officialUrl}.sha1`]);
 });
 
+test('installer checksum retries remain visible in task progress and the installation log', async (t) => {
+  const fixture = await installerFixture(t, { systemVersions: new Map([['java-21', 21]]) });
+  const originalFetch = globalThis.fetch;
+  let failed = false;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (!failed && String(url).endsWith('.sha256')) {
+      failed = true;
+      return new Response('', { status: 503 });
+    }
+    return originalFetch(url, options);
+  });
+  const progress = [];
+  const result = await fixture.manager.installLoader(fixture.request, (value) => progress.push(value));
+  const retry = progress.find((value) => value.phase === 'verifying-installer' && value.attempt === 2);
+  assert.equal(retry.loaderType, 'forge');
+  assert.equal(retry.logPath, result.logPath);
+  assert.match(retry.message, /正在重试（2\/3）/);
+  assert.match(await fs.readFile(result.logPath, 'utf8'), /Official checksum retry 2\/3: .*HTTP 503/);
+});
+
 for (const [status, text, code] of [
   [503, 'upstream unavailable', 'NETWORK_ERROR'],
   [200, '<html>download page</html>', 'INSTALLER_CHECKSUM_INVALID']
@@ -266,7 +286,8 @@ for (const [status, text, code] of [
       assert.ok(error.details.logPath);
       return true;
     });
-    assert.deepEqual(requested, [`${loaderArtifact('forge', '1.21.1', '52.1.16').officialUrl}.sha256`]);
+    assert.deepEqual(requested, Array(status === 503 ? 3 : 1)
+      .fill(`${loaderArtifact('forge', '1.21.1', '52.1.16').officialUrl}.sha256`));
     assert.deepEqual(fixture.installerExecutables, []);
   });
 }
@@ -284,9 +305,21 @@ test('installer checksum timeouts and user cancellation remain distinct and cove
     })
   }));
   const timedOut = fetchTrustedInstallerChecksum(officialUrl);
-  const timeoutRejected = assert.rejects(timedOut, { code: 'NETWORK_ERROR', retryable: true });
-  await started;
-  t.mock.timers.tick(10001);
+  const timeoutRejected = assert.rejects(timedOut, (error) => {
+    assert.equal(error.code, 'NETWORK_ERROR');
+    assert.equal(error.retryable, true);
+    assert.match(error.message, /请求超时（20 秒）/);
+    assert.equal(error.details.attempts, 3);
+    assert.equal(error.details.timeoutMs, 20000);
+    return true;
+  });
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await started;
+    if (attempt < 3) started = new Promise((resolve) => { bodyStarted = resolve; });
+    t.mock.timers.tick(20001);
+    await new Promise(setImmediate);
+    if (attempt < 3) t.mock.timers.tick(attempt * 500);
+  }
   await timeoutRejected;
   const controller = new AbortController();
   started = new Promise((resolve) => { bodyStarted = resolve; });

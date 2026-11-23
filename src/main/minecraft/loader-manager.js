@@ -506,7 +506,10 @@ class MinecraftLoaderManager {
     throwIfAborted(signal);
     const artifact = loaderArtifact(loaderType, gameVersion, loaderVersion);
     onProgress({ phase: 'verifying-installer', loaderType, message: '正在获取安装器官方校验信息…', logPath: log.filePath });
-    const checksum = await this.fetchInstallerChecksum(artifact.officialUrl, signal);
+    const checksum = await this.fetchInstallerChecksum(artifact.officialUrl, signal, (progress) => {
+      log.append(`[launcher] Official checksum retry ${progress.attempt}/${progress.attempts}: ${progress.reason}; url: ${progress.url}`);
+      onProgress({ ...progress, loaderType, logPath: log.filePath });
+    });
     log.append(`[launcher] Official ${checksum.algorithm}: ${checksum.digest}; artifact: ${artifact.officialUrl}`);
     const fileName = path.basename(artifact.path);
     const installerPath = safePath(

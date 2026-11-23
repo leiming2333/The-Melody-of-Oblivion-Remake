@@ -972,6 +972,111 @@ async function installedFabricFixture() {
   return { ...fixture, added, progress };
 }
 
+for (const loaderType of ['vanilla', 'forge']) {
+test(`switching versions after a failed ${loaderType} install clears its feedback and installs the new selection`, async () => {
+  const { context, source } = catalogFixture();
+  let taskNumber = 0;
+  Object.assign(context, {
+    currentGameDirectory: 'C:\\games\\.minecraft',
+    launcherSettings: { gameDirectoryMode: 'local' },
+    crypto: { randomUUID: () => `new-install-task-${++taskNumber}` },
+    lastDownloadProgress: null, activeDownloadLabel: '',
+    cancelFabricApiConfirmation() {}, showProblem() {}
+  });
+  for (const name of ['homeStatus', 'cancelDownloadButton', 'downloadStatus', 'downloadMessage',
+    'downloadStage', 'downloadPercent', 'homeCancelDownloadButton', 'taskButton']) context[name] = {};
+  context.downloadProgress = { hasAttribute: () => true };
+  const progress = [], installed = [], changes = {};
+  context.updateDownloadProgress = (value) => { context.lastDownloadProgress = value; progress.push(value); };
+  context.remoteVersions = [
+    { id: '1.20.1', type: 'release', installed: false },
+    { id: '1.21.1', type: 'release', installed: false }
+  ];
+  context.loaderNames.forge = 'Forge';
+  context.loaderTypeSelect.value = loaderType;
+  context.minecraft.listLoaders = async (gameVersion) => ({ versions: [
+    { version: gameVersion === '1.20.1' ? '47.3.22' : '52.1.16', installed: false }
+  ] });
+  context.renderVersionCatalog('1.20.1');
+  await context.loadLoaderCatalog();
+  context.minecraft.installLoader = async (request) => {
+    installed.push(request);
+    if (installed.length === 1) throw Object.assign(new Error('official checksum timed out'), { code: 'NETWORK_ERROR' });
+    assert.equal(context.lastDownloadProgress.phase, 'preparing');
+    assert.equal(context.lastDownloadProgress.taskId, request.taskId);
+    return { profileId: request.gameVersion };
+  };
+  await context.installSelectedVersion();
+  assert.equal(context.versionDownloadActive, false);
+  assert.equal(context.lastDownloadFailed, true);
+  assert.equal(context.lastDownloadProgress.phase, 'failed');
+  assert.equal(context.downloadStatus.hidden, false);
+
+  for (const name of ['versionSearch', 'versionTypeFilter', 'versionCatalog', 'loaderTypeSelect', 'loaderVersionSelect']) {
+    context[name].addEventListener = (event, handler) => { changes[`${name}:${event}`] = handler; };
+  }
+  vm.runInContext(source.slice(source.indexOf('function resetVersionDownloadFeedback()'),
+    source.indexOf("refreshVersionsButton.addEventListener('click'")), context);
+  context.versionCatalog.value = '1.21.1';
+  await changes['versionCatalog:change']();
+  assert.equal(context.downloadStatus.hidden, true);
+  assert.equal(context.lastDownloadProgress, null);
+  assert.equal(context.activeDownloadLabel, '');
+  assert.equal(context.lastDownloadFailed, false);
+  assert.equal(context.downloadVersionButton.textContent, loaderType === 'vanilla' ? '下载原版' : '安装 Forge');
+  assert.equal(context.downloadVersionButton.disabled, false);
+  await context.installSelectedVersion();
+  assert.deepEqual(installed.map((request) => request.gameVersion), ['1.20.1', '1.21.1']);
+  assert.deepEqual(installed.map((request) => request.loaderVersion),
+    loaderType === 'vanilla' ? ['1.20.1', '1.21.1'] : ['47.3.22', '52.1.16']);
+  assert.notEqual(installed[0].taskId, installed[1].taskId);
+  assert.match(progress.at(-1).message, /1\.21\.1.*安装完成/);
+});
+}
+
+test('changing loader options or filtered versions clears failed feedback while active tasks keep their progress', async () => {
+  const { context, source } = catalogFixture();
+  const changes = {};
+  for (const name of ['versionSearch', 'versionTypeFilter', 'versionCatalog', 'loaderTypeSelect', 'loaderVersionSelect']) {
+    context[name].addEventListener = (event, handler) => { changes[`${name}:${event}`] = handler; };
+  }
+  context.cancelFabricApiConfirmation = () => {};
+  context.downloadStatus = { hidden: false };
+  context.downloadMessage = {};
+  context.remoteVersions = [{ id: '1.20.1', type: 'release' }, { id: '1.21.1', type: 'release' }];
+  context.renderVersionCatalog('1.20.1');
+  vm.runInContext(source.slice(source.indexOf('function resetVersionDownloadFeedback()'),
+    source.indexOf("refreshVersionsButton.addEventListener('click'")), context);
+  for (const event of ['loaderTypeSelect:change', 'loaderVersionSelect:change', 'versionSearch:input']) {
+    context.lastDownloadFailed = true;
+    context.activeDownloadLabel = 'Minecraft 1.20.1';
+    context.lastDownloadProgress = { phase: 'failed', message: 'old installation' };
+    context.downloadStatus.hidden = false;
+    if (event === 'versionSearch:input') context.versionSearch.value = '1.21.1';
+    await changes[event]();
+    assert.equal(context.lastDownloadFailed, false, event);
+    assert.equal(context.downloadStatus.hidden, true, event);
+    assert.equal(context.lastDownloadProgress, null, event);
+  }
+  context.versionDownloadActive = true;
+  const currentProgress = { taskId: 'active', phase: 'downloading' };
+  context.lastDownloadProgress = currentProgress;
+  context.downloadStatus.hidden = false;
+  context.resetVersionDownloadFeedback();
+  assert.equal(context.lastDownloadProgress, currentProgress);
+  assert.equal(context.downloadStatus.hidden, false);
+  context.versionDownloadActive = false;
+  for (const [message, badge] of [['游戏运行中', 'RUNNING'], ['正在准备 Java', 'DOWNLOAD'], ['正在启动游戏', 'LAUNCH']]) {
+    context.lastDownloadProgress = { phase: 'failed' };
+    context.activeDownloadLabel = 'Old game';
+    context.gameStatus.textContent = message;
+    context.statusBadge.textContent = badge;
+    context.resetVersionDownloadFeedback();
+    assert.equal(context.gameStatus.textContent, message);
+    assert.equal(context.statusBadge.textContent, badge);
+  }
+});
+
 test('installed Fabric adds the selected API to its existing profile without reinstalling the loader', async () => {
   const { context, installed, confirmations, added, progress } = await installedFabricFixture();
   context.selectedRemoteVersion().installed = false;

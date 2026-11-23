@@ -4,52 +4,85 @@ const path = require('node:path');
 const { runFileExclusive } = require('../file-write-queue');
 const { fetchWithTimeout } = require('./source-manager');
 const { safePath, throwIfAborted } = require('./downloader');
+const INSTALLER_CHECKSUM_TIMEOUT_MS = 20000;
+const INSTALLER_CHECKSUM_ATTEMPTS = 3;
 
 function checksumError(code, message, details, retryable = false) {
   return Object.assign(new Error(message), { code, phase: 'verifying-installer', details, retryable });
 }
 
+async function waitForChecksumRetry(attempt, signal) {
+  throwIfAborted(signal);
+  await new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      try { throwIfAborted(signal); } catch (error) { reject(error); }
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, attempt * 500);
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
 // Mirror metadata is useful for discovery, but executable installers must be
 // checked against a digest fetched independently from their official Maven.
-async function fetchTrustedInstallerChecksum(officialUrl, signal) {
+async function fetchTrustedInstallerChecksum(officialUrl, signal, onProgress = () => {}) {
   const artifact = new URL(officialUrl);
   if (artifact.protocol !== 'https:' || artifact.username || artifact.password
       || !['maven.minecraftforge.net', 'maven.neoforged.net'].includes(artifact.hostname)) {
     throw checksumError('INSTALLER_CHECKSUM_INVALID', '安装器官方校验地址不安全');
   }
   for (const [algorithm, length] of [['sha256', 64], ['sha1', 40]]) {
-    throwIfAborted(signal);
     const url = `${officialUrl}.${algorithm}`;
-    try {
-      const digest = await fetchWithTimeout(url, {
-        signal,
-        validateRedirect: (redirectUrl) => {
-          const target = new URL(redirectUrl);
-          if (target.origin !== artifact.origin || target.username || target.password) {
-            throw checksumError('INSTALLER_CHECKSUM_INVALID', '安装器校验地址跳转到了非官方来源', { url });
-          }
-        }
-      }, 10000, async (response) => {
-        if ([404, 410].includes(response.status)) {
-          await response.body?.cancel().catch(() => {});
-          return undefined;
-        }
-        if (!response.ok) {
-          await response.body?.cancel().catch(() => {});
-          throw checksumError('NETWORK_ERROR', `安装器官方校验信息获取失败（HTTP ${response.status}）`, { url }, true);
-        }
-        const text = (await response.text()).trim();
-        const match = new RegExp(`^([a-f0-9]{${length}})(?:[ \\t]+\\*?[^\\r\\n]+)?$`, 'i').exec(text);
-        if (text.length > 4096 || !match) {
-          throw checksumError('INSTALLER_CHECKSUM_INVALID', `安装器官方 ${algorithm.toUpperCase()} 校验信息无效`, { url });
-        }
-        return match[1].toLowerCase();
-      });
-      if (digest) return { algorithm, digest };
-    } catch (error) {
+    for (let attempt = 1; attempt <= INSTALLER_CHECKSUM_ATTEMPTS; attempt += 1) {
       throwIfAborted(signal);
-      if (['NETWORK_ERROR', 'INSTALLER_CHECKSUM_INVALID'].includes(error.code)) throw error;
-      throw checksumError('NETWORK_ERROR', `无法获取安装器官方校验信息：${error.message}`, { url }, true);
+      try {
+        const digest = await fetchWithTimeout(url, {
+          signal,
+          validateRedirect: (redirectUrl) => {
+            const target = new URL(redirectUrl);
+            if (target.origin !== artifact.origin || target.username || target.password) {
+              throw checksumError('INSTALLER_CHECKSUM_INVALID', '安装器校验地址跳转到了非官方来源', { url });
+            }
+          }
+        }, INSTALLER_CHECKSUM_TIMEOUT_MS, async (response) => {
+          if ([404, 410].includes(response.status)) {
+            await response.body?.cancel().catch(() => {});
+            return undefined;
+          }
+          if (!response.ok) {
+            await response.body?.cancel().catch(() => {});
+            const retryable = [408, 425, 429].includes(response.status) || response.status >= 500;
+            throw checksumError('NETWORK_ERROR', `安装器官方校验信息获取失败（HTTP ${response.status}）`, {
+              url, status: response.status
+            }, retryable);
+          }
+          const text = (await response.text()).trim();
+          const match = new RegExp(`^([a-f0-9]{${length}})(?:[ \\t]+\\*?[^\\r\\n]+)?$`, 'i').exec(text);
+          if (text.length > 4096 || !match) {
+            throw checksumError('INSTALLER_CHECKSUM_INVALID', `安装器官方 ${algorithm.toUpperCase()} 校验信息无效`, { url });
+          }
+          return match[1].toLowerCase();
+        });
+        throwIfAborted(signal);
+        if (digest) return { algorithm, digest };
+        break;
+      } catch (error) {
+        throwIfAborted(signal);
+        if (error.code === 'INSTALLER_CHECKSUM_INVALID') throw error;
+        const failure = error.code === 'NETWORK_ERROR' ? error
+          : checksumError('NETWORK_ERROR', `无法获取安装器官方校验信息：${error.message}`, {
+            url, ...(error.code === 'ETIMEDOUT' ? { timeoutMs: error.timeoutMs } : {})
+          }, true);
+        failure.details = { ...failure.details, attempts: attempt };
+        if (!failure.retryable || attempt === INSTALLER_CHECKSUM_ATTEMPTS) throw failure;
+        onProgress({ phase: 'verifying-installer', attempt: attempt + 1, attempts: INSTALLER_CHECKSUM_ATTEMPTS,
+          message: `安装器官方校验信息获取失败，正在重试（${attempt + 1}/${INSTALLER_CHECKSUM_ATTEMPTS}）…`,
+          url, reason: error.message });
+        await waitForChecksumRetry(attempt, signal);
+      }
     }
   }
   throw checksumError('INSTALLER_CHECKSUM_UNAVAILABLE', '官方没有提供可用的安装器校验信息，已停止安装');
