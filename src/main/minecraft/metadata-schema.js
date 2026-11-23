@@ -8,12 +8,19 @@ function invalid(label, field) {
   throw error;
 }
 
-function validateDownload(value, label) {
+function validateDownload(value, label, { allowEmptyArtifactUrl = false } = {}) {
   if (!isObject(value)) invalid(label, '下载信息必须是对象');
   if (value.sha1 !== undefined && (typeof value.sha1 !== 'string' || !/^[a-f0-9]{40}$/i.test(value.sha1))) invalid(label, 'SHA-1');
   if (value.size !== undefined && (!Number.isSafeInteger(value.size) || value.size < 0)) invalid(label, '文件大小');
+  // Forge processors generate local artifacts with an explicitly empty URL.
+  // This exception belongs only to library artifacts, with a safe local path.
+  const generatedArtifact = allowEmptyArtifactUrl && value.url === '';
+  if (generatedArtifact && (typeof value.path !== 'string' || !value.path
+      || /^[\\/]/.test(value.path) || /[\0:]/.test(value.path)
+      || value.path.split(/[\\/]/).some((segment) => !segment || segment === '.' || segment === '..'))) invalid(label, 'path');
   for (const key of ['url', 'path', 'id']) {
-    if (value[key] !== undefined && (typeof value[key] !== 'string' || !value[key])) invalid(label, key);
+    if (value[key] !== undefined && (typeof value[key] !== 'string'
+        || (!value[key] && !(key === 'url' && generatedArtifact)))) invalid(label, key);
   }
 }
 
@@ -70,7 +77,7 @@ function validateVersionMetadata(value, expectedId) {
             || library.extract.exclude.some((prefix) => typeof prefix !== 'string'))))) invalid(label, 'extract.exclude');
       if (library.downloads !== undefined) {
         if (!isObject(library.downloads)) invalid(label, '依赖下载信息');
-        if (library.downloads.artifact !== undefined) validateDownload(library.downloads.artifact, label);
+        if (library.downloads.artifact !== undefined) validateDownload(library.downloads.artifact, label, { allowEmptyArtifactUrl: true });
         if (library.downloads.classifiers !== undefined) {
           if (!isObject(library.downloads.classifiers)) invalid(label, '原生库下载信息');
           for (const download of Object.values(library.downloads.classifiers)) validateDownload(download, label);

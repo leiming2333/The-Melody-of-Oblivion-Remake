@@ -17,15 +17,31 @@ async function readProfileMetadata(versionsRoot, profileId) {
 }
 
 function detectLoaderType(metadata, profileId) {
-  const description = [
-    profileId,
-    metadata?.mainClass,
-    ...(Array.isArray(metadata?.libraries) ? metadata.libraries : []).map((library) => library?.name)
-  ].filter(Boolean).join(' ').toLowerCase();
-  if (description.includes('quilt')) return 'quilt';
-  if (description.includes('fabric')) return 'fabric';
-  if (description.includes('neoforge')) return 'neoforge';
-  if (description.includes('forge')) return 'forge';
+  const mainClass = String(metadata?.mainClass ?? '').toLowerCase();
+  const libraries = new Set((Array.isArray(metadata?.libraries) ? metadata.libraries : [])
+    .map((library) => typeof library?.name === 'string' ? library.name.toLowerCase().split(':').slice(0, 2).join(':') : ''));
+  const gameArguments = [metadata?.minecraftArguments,
+    ...(Array.isArray(metadata?.arguments?.game) ? metadata.arguments.game : []).flatMap((entry) => (
+      typeof entry === 'string' ? entry : entry?.value ?? []
+    ))].filter((entry) => typeof entry === 'string').join(' ').toLowerCase();
+  // Loader artifacts and entrypoints identify the runtime. Shared dependencies
+  // such as Fabric's sponge-mixin and Forge's srgutils also appear in NeoForge.
+  if (mainClass.startsWith('net.neoforged.')
+      || ['net.neoforged:neoforge', 'net.neoforged:forge', 'net.neoforged:fmlloader',
+        'net.neoforged.fancymodloader:loader'].some((name) => libraries.has(name))
+      || /(?:^|\s)--fml\.neoforgeversion(?:\s|$)/.test(gameArguments)) return 'neoforge';
+  if (mainClass.startsWith('org.quiltmc.loader.') || libraries.has('org.quiltmc:quilt-loader')) return 'quilt';
+  if (mainClass.startsWith('net.minecraftforge.') || mainClass.startsWith('cpw.mods.fml.')
+      || ['net.minecraftforge:forge', 'net.minecraftforge:fmlloader', 'net.minecraftforge:minecraftforge']
+        .some((name) => libraries.has(name))
+      || /(?:^|\s)--fml\.forgeversion(?:\s|$)/.test(gameArguments)
+      || /(?:cpw\.mods\.fml|net\.minecraftforge\.fml)\.common\.launcher\.fmltweaker\b/.test(gameArguments)) return 'forge';
+  if (mainClass.startsWith('net.fabricmc.loader.') || libraries.has('net.fabricmc:fabric-loader')) return 'fabric';
+  // Keep conventional profile IDs as a fallback for older, minimal profiles;
+  // renamed IDs must not override the actual loader declared above.
+  for (const loaderType of ['neoforge', 'quilt', 'fabric', 'forge']) {
+    if (new RegExp(`(?:^|[-_.])${loaderType}(?:[-_.]|$)`, 'i').test(profileId ?? '')) return loaderType;
+  }
   return metadata?.inheritsFrom ? 'custom' : 'vanilla';
 }
 

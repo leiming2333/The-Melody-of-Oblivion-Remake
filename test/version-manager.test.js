@@ -104,6 +104,82 @@ test('加载器识别会优先区分 NeoForge 与 Forge', () => {
   assert.equal(detectLoaderType({ libraries: [{ name: 'net.minecraftforge:forge:47.0' }] }, 'custom'), 'forge');
 });
 
+const neoForgeInstallerProfile = {
+  inheritsFrom: '1.21.1',
+  mainClass: 'cpw.mods.bootstraplauncher.BootstrapLauncher',
+  arguments: { game: ['--fml.neoForgeVersion', '21.1.267', '--launchTarget', 'forgeclient'] },
+  libraries: [
+    { name: 'net.neoforged.fancymodloader:loader:4.0.45' },
+    { name: 'net.fabricmc:sponge-mixin:0.16.4+mixin.0.8.7' },
+    { name: 'net.minecraftforge:srgutils:0.4.15' }
+  ]
+};
+
+test('real NeoForge installer profiles stay NeoForge with shared Fabric and Forge dependencies', () => {
+  for (const profileId of ['neoforge-21.1.267', 'renamed-profile', 'fabric-loader-renamed']) {
+    assert.equal(detectLoaderType(neoForgeInstallerProfile, profileId), 'neoforge', profileId);
+  }
+  assert.equal(detectLoaderType({ ...neoForgeInstallerProfile, arguments: undefined }, 'renamed-profile'), 'neoforge');
+  assert.equal(detectLoaderType({ ...neoForgeInstallerProfile, libraries: [] }, 'renamed-profile'), 'neoforge');
+});
+
+test('renamed profiles use loader coordinates and entrypoints instead of their display names', () => {
+  for (const [loaderType, metadata] of [
+    ['forge', { mainClass: 'cpw.mods.modlauncher.Launcher',
+      libraries: [{ name: 'net.minecraftforge:forge:1.21.1-52.1.21:universal' },
+        { name: 'net.fabricmc:sponge-mixin:0.16.4+mixin.0.8.7' }] }],
+    ['forge', { libraries: [{ name: 'net.minecraftforge:fmlloader:1.20.1-47.4.0' }] }],
+    ['forge', { mainClass: 'net.minecraft.launchwrapper.Launch',
+      minecraftArguments: '--tweakClass cpw.mods.fml.common.launcher.FMLTweaker' }],
+    ['forge', { mainClass: 'net.minecraft.launchwrapper.Launch',
+      minecraftArguments: '--tweakClass net.minecraftforge.fml.common.launcher.FMLTweaker' }],
+    ['forge', { arguments: { game: ['--fml.forgeVersion', '52.1.21'] } }],
+    ['neoforge', { libraries: [{ name: 'net.neoforged:forge:1.20.1-47.1.106' }] }],
+    ['neoforge', { libraries: [{ name: 'net.neoforged:fmlloader:20.4.251' }] }],
+    ['neoforge', { libraries: [{ name: 'net.neoforged:neoforge:21.1.267:universal' }] }],
+    ['fabric', { libraries: [{ name: 'net.fabricmc:fabric-loader:0.20.1' }] }],
+    ['fabric', { mainClass: 'net.fabricmc.loader.launch.knot.KnotClient' }],
+    ['fabric', { mainClass: 'net.fabricmc.loader.impl.launch.knot.KnotClient' }],
+    ['quilt', { libraries: [{ name: 'net.fabricmc:fabric-loader:0.16.0' },
+      { name: 'org.quiltmc:quilt-loader:0.30.2' }] }],
+    ['quilt', { mainClass: 'org.quiltmc.loader.impl.launch.knot.KnotClient' }]
+  ]) {
+    assert.equal(detectLoaderType({ inheritsFrom: '1.21.1', ...metadata }, 'renamed-profile'), loaderType,
+      JSON.stringify(metadata));
+  }
+});
+
+test('shared mapping, mixin and utility libraries are not loader evidence', () => {
+  const libraries = [
+    { name: 'net.fabricmc:sponge-mixin:0.16.4+mixin.0.8.7' },
+    { name: 'net.fabricmc:intermediary:1.21.1' },
+    { name: 'net.minecraftforge:srgutils:0.4.15' },
+    { name: 'net.neoforged:JarJarFileSystems:0.4.1' },
+    { name: 'org.quiltmc:quilt-config:1.3.3' }
+  ];
+  assert.equal(detectLoaderType({ libraries }, 'custom-profile'), 'vanilla');
+  assert.equal(detectLoaderType({ inheritsFrom: '1.21.1', libraries }, 'custom-profile'), 'custom');
+  assert.equal(detectLoaderType({}, 'fabricated-profile'), 'vanilla');
+  for (const [profileId, loaderType] of [
+    ['fabric-loader-0.20.1-1.21.1', 'fabric'], ['quilt-loader-0.30.2-1.21.1', 'quilt'],
+    ['1.21.1-forge-52.1.21', 'forge'], ['neoforge-21.1.267', 'neoforge']
+  ]) assert.equal(detectLoaderType({ inheritsFrom: '1.21.1' }, profileId), loaderType);
+});
+
+test('the local profile scan exposes real NeoForge metadata correctly after renaming', async (t) => {
+  const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-neoforge-list-test-'));
+  t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));
+  await writeProfile(gameDirectory, '1.21.1', { mainClass: 'net.minecraft.client.main.Main' });
+  await writeProfile(gameDirectory, 'renamed-profile', neoForgeInstallerProfile);
+  await writeMarker(gameDirectory, '1.21.1');
+  await writeMarker(gameDirectory, 'renamed-profile');
+  const { profiles } = await new MinecraftVersionManager({ gameDirectory }).listLocalProfiles();
+  const profile = profiles.find(item => item.profileId === 'renamed-profile');
+  assert.equal(profile.loaderType, 'neoforge');
+  assert.equal(profile.valid, true);
+  assert.equal(profile.complete, true);
+});
+
 test('版本列表会解析继承链上的 Java 需求并安全终止循环', async (t) => {
   const gameDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'launcher-java-requirement-test-'));
   t.after(() => fs.rm(gameDirectory, { recursive: true, force: true }));

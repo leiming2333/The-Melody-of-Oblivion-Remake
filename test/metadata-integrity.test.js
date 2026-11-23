@@ -10,6 +10,7 @@ const { hasInstallationMarker, readInstallationMarkerState } = require('../src/m
 const { validateAssetIndex, validateVersionMetadata } = require('../src/main/minecraft/metadata-schema');
 const { MinecraftVersionManager, validateProfileId } = require('../src/main/minecraft/version-manager');
 const { readVersionMetadata } = require('../src/main/minecraft/version-metadata');
+const { libraryArtifactPath } = require('../src/main/minecraft/launch-core');
 const { ruleMatches, rulesAllow } = require('../src/main/minecraft/platform-rules');
 const { platformName } = require('../src/main/minecraft/platform-rules');
 
@@ -66,6 +67,48 @@ test('logging configuration IDs are single safe filenames and cannot redirect ma
   for (const id of ['../../mods/user.jar', '..\\..\\mods\\user.jar', 'nested/client.xml', 'nested\\client.xml', 'C:\\mods\\user.jar']) {
     assert.throws(() => validateVersionMetadata(metadata(id), 'fixture'), /格式无效/, id);
   }
+});
+
+function generatedForgeClient() {
+  // Shape emitted by the real Forge 52.1.21 installer for Minecraft 1.21.1.
+  return { name: 'net.minecraftforge:forge:1.21.1-52.1.21:client', downloads: { artifact: {
+    path: 'net/minecraftforge/forge/1.21.1-52.1.21/forge-1.21.1-52.1.21-client.jar',
+    url: '', sha1: '28f7acaa0e9b1c2d2a7bf52c07ae16133bd3da4e', size: 28056385
+  } } };
+}
+
+test('Forge generated client artifacts with empty URLs remain valid inherited launch libraries', async (t) => {
+  const root = await temporaryDirectory(t);
+  const profileId = '1.21.1-forge-52.1.21';
+  const library = generatedForgeClient();
+  const profile = { id: profileId, inheritsFrom: '1.21.1', mainClass: 'net.minecraftforge.bootstrap.ForgeBootstrap', libraries: [library] };
+  assert.equal(validateVersionMetadata(profile, profileId), profile);
+  await write(root, 'versions/1.21.1/1.21.1.json', JSON.stringify({ id: '1.21.1', javaVersion: { majorVersion: 21 } }));
+  await write(root, `versions/${profileId}/${profileId}.json`, JSON.stringify(profile));
+  const metadata = await readVersionMetadata(root, profileId);
+  assert.equal(metadata.mainClass, 'net.minecraftforge.bootstrap.ForgeBootstrap');
+  assert.equal(metadata.javaVersion.majorVersion, 21);
+  assert.deepEqual(metadata.libraries, [library]);
+  assert.equal(libraryArtifactPath(root, metadata.libraries[0]), path.join(root, 'libraries', library.downloads.artifact.path));
+});
+
+test('empty URLs are limited to safe generated library artifacts without bypassing integrity checks', () => {
+  for (const changes of [
+    { path: undefined }, { path: '' }, { path: '../mods/user.jar' }, { path: '..\\mods\\user.jar' },
+    { path: '/outside.jar' }, { path: 'C:\\outside.jar' }, { path: 'net/client.jar:stream' },
+    { path: 'net/./client.jar' }, { path: 'net//client.jar' }, { path: 'net/\0client.jar' },
+    { sha1: '' }, { sha1: 'invalid' }, { size: -1 }, { size: 1.5 }, { url: null }, { url: 7 }
+  ]) {
+    const library = generatedForgeClient();
+    Object.assign(library.downloads.artifact, changes);
+    assert.throws(() => validateVersionMetadata({ libraries: [library] }), { code: 'INVALID_MINECRAFT_METADATA' }, JSON.stringify(changes));
+  }
+  for (const metadata of [
+    { downloads: { client: { url: '' } } },
+    { assetIndex: { id: 'fixture', url: '' } },
+    { logging: { client: { file: { id: 'client.xml', url: '' } } } },
+    { libraries: [{ name: 'example:native:1', downloads: { classifiers: { native: { path: 'native.jar', url: '' } } } }] }
+  ]) assert.throws(() => validateVersionMetadata(metadata), { code: 'INVALID_MINECRAFT_METADATA' });
 });
 
 test('installation preserves upstream JSON bytes and never substitutes serialization for a declared digest', async (t) => {
