@@ -4,5 +4,8 @@ contact_links:
     url: https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/blob/main/CONTRIBUTING.md
     about: 查看开发环境、测试用例和提交 PR 的流程。
   - name: 安全问题 / Security reports
-    url: https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/security
-    about: 如已启用私密漏洞报告，请从 Security 页面报告；入口不可用时先请求私密联系方式，勿公开漏洞细节。
+    url: https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/blob/main/SECURITY.md
+    about: 按安全政策私密报告至 leiming2333@qq.com；勿在公开 Issue 中发布漏洞细节。Report vulnerabilities privately; do not disclose details in public issues.
+  - name: 行为准则 / Code of Conduct
+    url: https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/blob/main/CODE_OF_CONDUCT.md
+    about: 查看社区标准与私密举报方式。Read community standards and private reporting instructions.

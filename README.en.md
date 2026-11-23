@@ -129,6 +129,8 @@ Issues and pull requests for code, documentation, and translations are welcome.
 - [Development and regression cases](docs/development-cases.md) (Chinese): steps, expected results, and related automated tests.
 - [Module isolation](docs/module-isolation.md) (Chinese): process and UI boundaries, recovery, cancellation, and shared-file constraints.
 - [Contributing](CONTRIBUTING.md): fork, branch, PR, and review instructions, with a short English guide.
+- [Code of Conduct](CODE_OF_CONDUCT.md#english): community standards, private reporting, and enforcement.
+- [Security Policy](SECURITY.md#english): supported versions, vulnerability reporting, and coordinated disclosure.
 
 Bug and feature forms and a PR template help capture reproducible details. Existing CI runs checks and package validation according to the files changed.
 
@@ -166,7 +168,7 @@ Public Cloudflare R2 objects and manifests remain available to launcher updates 
 - Download destinations, modpack paths, archive extraction, and remote mod URLs are validated to reduce path-traversal and unsafe-URL risks.
 - SHA-1 checks detect accidental corruption when upstream metadata provides a hash; SHA-1 should not be treated as a modern authenticity guarantee.
 
-Security-sensitive reports should not include account files, access tokens, refresh tokens, device codes, or personal Minecraft data.
+Report vulnerabilities privately to [leiming2333@qq.com](mailto:leiming2333@qq.com) under the [Security Policy](SECURITY.md#english). Do not include account files, access tokens, refresh tokens, device codes, or personal Minecraft data.
 
 ## Diagnostics and installation retries
 

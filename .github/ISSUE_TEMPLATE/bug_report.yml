@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        请先搜索已有 Issue。安全漏洞请查看仓库 Security 页面，优先使用已启用的私密报告入口；不要在公开 Issue 中发布令牌或漏洞利用细节。
+        请先搜索已有 Issue。安全漏洞请按[安全政策](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/blob/main/SECURITY.md)私密报告至 leiming2333@qq.com；不要在公开 Issue 中发布令牌或漏洞利用细节。
   - type: input
     id: version
     attributes:

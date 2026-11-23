@@ -4,6 +4,10 @@
 
 English contributions are welcome. Fork the repository, create a branch from `main`, and open a pull request against `main`. Describe the problem, the change, and how you verified it. See the [development guide](docs/development.md) and [development cases](docs/development-cases.md) for setup and validation examples (in Chinese).
 
+参与项目请遵守[行为准则](CODE_OF_CONDUCT.md)。安全漏洞请按[安全政策](SECURITY.md)私密报告。
+
+Please follow the [Code of Conduct](CODE_OF_CONDUCT.md#english). Report vulnerabilities privately under the [Security Policy](SECURITY.md#english).
+
 ## 开始开发
 
 - [开发指南](docs/development.md)：环境准备、目录结构、常用命令和测试方式。
@@ -26,7 +30,7 @@ npm run dev
 
 日志和截图分享前，请删除令牌、设备代码、邮箱、用户名、私人路径及服务器地址等敏感内容。不要上传账号数据文件、完整用户目录或未获授权的整合包。
 
-安全漏洞请优先使用仓库的 [私密漏洞报告入口](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/security/advisories/new)。该入口需要维护者在 GitHub 启用；如果不可用，可以开普通 Issue 仅请求提供私密报告方式，暂不公开漏洞细节或利用代码。
+如需报告安全漏洞，请按[安全政策](SECURITY.md)发邮件至 [leiming2333@qq.com](mailto:leiming2333@qq.com)。仓库启用 GitHub 私密漏洞报告后，也可使用[私密漏洞报告入口](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake/security/advisories/new)。如果该入口不可用，请直接发邮件。不要在公开 Issue 中发布漏洞细节或利用代码。
 
 ## 提交 Pull Request
 
