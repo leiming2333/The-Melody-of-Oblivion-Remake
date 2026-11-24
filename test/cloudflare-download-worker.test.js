@@ -320,16 +320,19 @@ test('slow cache writes cannot stall native delivery and client caches cannot ou
 
 test('missing, forged, expired, future, and duplicate permits fail before cache/origin access', async () => {
   const { createDownloadWorker } = await workerModule;
+  const fixedNow = 1795500000000;
+  const currentSeconds = Math.floor(fixedNow / 1000);
   let lookups = 0;
   let calls = 0;
-  const worker = createDownloadWorker({ cache: { async match() { lookups++; }, async put() {} },
+  const worker = createDownloadWorker({ now: () => fixedNow,
+    cache: { async match() { lookups++; }, async put() {} },
     fetchImpl() { calls++; assert.fail('must not fetch'); } });
-  const valid = signedUrl();
+  const valid = signedUrl(unsignedUrl, currentSeconds + 900);
   const forged = new URL(valid);
   forged.searchParams.set('signature', 'a'.repeat(43));
   const cases = [unsignedUrl, forged.href, valid.replace(`/${tag}/`, '/v1.9.2/'),
-    signedUrl(unsignedUrl, Math.floor(Date.now() / 1000) - 1),
-    signedUrl(unsignedUrl, Math.floor(Date.now() / 1000) + 3601),
+    signedUrl(unsignedUrl, currentSeconds - 1),
+    signedUrl(unsignedUrl, currentSeconds + 3601),
     `${valid}&expires=123`, `${valid}&signature=${'b'.repeat(43)}`];
   for (const url of cases) {
     for (const method of ['GET', 'HEAD']) {
