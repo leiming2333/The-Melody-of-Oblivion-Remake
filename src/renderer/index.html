@@ -139,6 +139,12 @@
           <p id="accountEmpty" class="account-empty">还没有账户，可选择 Microsoft、离线或 LittleSkin 外置登录。</p>
           <p class="account-help">Microsoft 登录失效时，直接重新登录同一账户即可更新授权，无需先删除账户。</p>
 
+          <p class="account-help">Microsoft 登录暂不可用时，可选择以下方式；离线账户和 LittleSkin 均不能提供正版服务器验证。</p>
+          <div class="task-actions">
+            <button id="microsoftUseOfflineButton" class="text-link-button" type="button">使用离线账户</button>
+            <button id="microsoftUseLittleSkinButton" class="text-link-button" type="button">使用 LittleSkin</button>
+          </div>
+
           <div class="standard-account-methods" aria-label="Microsoft 与离线登录">
           <section class="microsoft-account-form" aria-label="Microsoft 账户">
             <button id="microsoftLoginButton" class="microsoft-account-button" type="button">
@@ -146,6 +152,7 @@
               <span><strong>Microsoft 登录</strong><small>Xbox Live · Minecraft Java</small></span>
               <b>登录</b>
             </button>
+            <p id="microsoftClientStatus" class="account-help" role="status">Minecraft Services 应用审核状态未确认。</p>
             <div id="microsoftDevicePanel" class="microsoft-device-panel" hidden>
               <span>在浏览器中输入代码</span>
               <div class="microsoft-device-code-row">
@@ -320,7 +327,7 @@
               <p>LAUNCH OPTIONS</p>
               <h2>启动与更新设置</h2>
             </div>
-            <button class="dialog-close" value="cancel" aria-label="关闭设置" type="submit">×</button>
+            <button class="dialog-close" value="cancel" aria-label="关闭设置" type="submit" formnovalidate>×</button>
           </header>
 
           <div class="setting-group">
@@ -456,6 +463,16 @@
             <pre id="launcherUpdateNotes" class="launcher-update-notes"></pre>
           </div>
 
+          <details class="setting-group">
+            <summary>高级登录设置</summary>
+            <label for="microsoftClientIdInput">自有 Microsoft Client ID</label>
+            <input id="microsoftClientIdInput" type="text" maxlength="36" spellcheck="false" autocomplete="off"
+              pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+              placeholder="留空使用启动器内置 ID" aria-describedby="microsoftClientSettingsStatus microsoftClientSettingsHint" />
+            <p id="microsoftClientSettingsStatus" class="setting-hint" role="status">Minecraft Services 应用审核状态未确认。</p>
+            <p id="microsoftClientSettingsHint" class="setting-hint">仅供应用所有者或分叉维护者使用。填写你自己的已配置设备代码登录的公开应用 ID；环境变量优先。保存后用于新的登录，现有账户仍使用原授权 ID。格式有效不代表审核通过。</p>
+          </details>
+
           <div class="setting-group sponsor-support-setting">
             <label>赞助支持</label>
             <p class="sponsor-support-row">
@@ -474,7 +491,7 @@
           </div>
 
           <footer class="dialog-actions">
-            <button class="secondary-dialog-button" value="cancel" type="submit">取消</button>
+            <button class="secondary-dialog-button" value="cancel" type="submit" formnovalidate>取消</button>
             <button class="primary-dialog-button" value="save" type="submit">保存设置</button>
           </footer>
         </form>

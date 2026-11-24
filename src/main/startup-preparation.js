@@ -16,7 +16,8 @@ const REQUIRED_STARTUP_RESOURCES = Object.freeze([
 
 // A broken optional feature must be reported without disabling the launcher.
 const MODULE_STARTUP_RESOURCES = Object.freeze({
-  account: Object.freeze(['src/renderer/modules/account-ui.mjs', 'src/main/accounts/microsoft-client-id.json']),
+  account: Object.freeze(['src/renderer/modules/account-ui.mjs', 'src/renderer/modules/microsoft-client-ui.mjs',
+    'src/main/accounts/microsoft-client-id.json']),
   modpack: Object.freeze(['src/renderer/modules/modpack-ui.mjs']),
   updater: Object.freeze(['src/renderer/modules/launcher-update-ui.mjs',
     'src/shared/release-metadata.js', 'src/shared/website-cdn-config.json']),

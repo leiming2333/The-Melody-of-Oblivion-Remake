@@ -191,7 +191,7 @@ test('R2 synchronization uploads and verifies all eight packages before publishi
   const r2 = mockR2();
   const { syncReleaseToR2 } = await import('../scripts/sync-release-to-r2.mjs');
   const result = await syncReleaseToR2(fixtureData.root, TAG, fixtureData.metadataPath, {
-    env: env(), fetchImpl: r2.fetchImpl, now: () => new Date('2026-11-09T00:00:00.000Z')
+    trustedKeys: [], env: env(), fetchImpl: r2.fetchImpl, now: () => new Date('2026-11-09T00:00:00.000Z')
   });
 
   assert.equal(result.assets.length, targets.length);
@@ -215,7 +215,7 @@ test('R2 latest updates use a strong ETag from an identity-encoded response', as
   r2.objects.set('releases/latest.json', Buffer.from(JSON.stringify({ tag_name: 'v1.9.1', assets: [] })));
   const { syncReleaseToR2 } = await import('../scripts/sync-release-to-r2.mjs');
   const result = await syncReleaseToR2(fixtureData.root, TAG, fixtureData.metadataPath, {
-    env: env(), fetchImpl: r2.fetchImpl, now: () => new Date('2026-11-09T00:00:00.000Z')
+    trustedKeys: [], env: env(), fetchImpl: r2.fetchImpl, now: () => new Date('2026-11-09T00:00:00.000Z')
   });
   assert.equal(result.latestUpdated, true);
   const latestGet = r2.requests.find(request => request.method === 'GET'
@@ -232,7 +232,7 @@ test('R2 synchronization mirrors verified patch files and the patch manifest', a
   const r2 = mockR2();
   const { syncReleaseToR2 } = await import('../scripts/sync-release-to-r2.mjs');
   const result = await syncReleaseToR2(fixtureData.root, TAG, fixtureData.metadataPath, {
-    env: env(), fetchImpl: r2.fetchImpl, now: () => new Date('2026-11-09T00:00:00.000Z')
+    trustedKeys: [], env: env(), fetchImpl: r2.fetchImpl, now: () => new Date('2026-11-09T00:00:00.000Z')
   });
   assert.equal(result.patches, 1);
   assert.equal(result.latestUpdated, true);
@@ -256,7 +256,7 @@ test('R2 synchronization refuses a changed immutable object without overwriting 
   r2.objects.set(immutablePath, original);
   const { syncReleaseToR2 } = await import('../scripts/sync-release-to-r2.mjs');
   await assert.rejects(syncReleaseToR2(fixtureData.root, TAG, fixtureData.metadataPath, {
-    env: env(), fetchImpl: r2.fetchImpl, now: () => new Date('2026-11-09T00:00:00.000Z')
+    trustedKeys: [], env: env(), fetchImpl: r2.fetchImpl, now: () => new Date('2026-11-09T00:00:00.000Z')
   }), /digest mismatch/);
   assert.deepEqual(r2.objects.get(immutablePath), original);
   assert.equal(r2.objects.has('releases/latest.json'), false);

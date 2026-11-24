@@ -76,6 +76,7 @@ async function fixture(t, { patch = true, corruptPatch = false, currentFile = nu
   };
   const calls = { downloads: [], quit: 0, relaunch: 0, ready: [] };
   const manager = new UpdateManager({
+    trustedKeys: [],
     app: {
       isPackaged: true, getVersion: () => '1.9.3',
       getPath: (name) => path.join(root, name), relaunch: () => { calls.relaunch += 1; },

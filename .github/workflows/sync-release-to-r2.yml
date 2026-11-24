@@ -38,7 +38,8 @@ jobs:
           gh release download "$RELEASE_TAG" --repo "$GH_REPO" --dir release-published \
             --pattern '*-Windows-*.exe' --pattern '*-Linux-*.AppImage' \
             --pattern '*-macOS-*.zip' --pattern 'release-manifest.json' \
-            --pattern 'patch-manifest.json*' --pattern 'patch-*'
+            --pattern 'patch-manifest.json*' --pattern 'patch-*' --pattern '*.sig' \
+            --pattern '*.sha256' --pattern 'SHA256SUMS'
           gh release view "$RELEASE_TAG" --repo "$GH_REPO" \
             --json tagName,name,url,body,publishedAt > release-published/release.json
 

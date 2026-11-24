@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const { normalizeSkinUrl, skinUrlFromProfile } = require('./account-store');
+const { CLIENT_ID_PATTERN } = require('./microsoft-client-config');
 
 const MICROSOFT_TENANT = 'consumers';
 const MICROSOFT_SCOPE = 'XboxLive.signin offline_access';
@@ -11,12 +12,11 @@ const MINECRAFT_LOGIN_ENDPOINT = 'https://api.minecraftservices.com/authenticati
 const MINECRAFT_ENTITLEMENTS_ENDPOINT = 'https://api.minecraftservices.com/entitlements/mcstore';
 const MINECRAFT_PROFILE_ENDPOINT = 'https://api.minecraftservices.com/minecraft/profile';
 const MINECRAFT_SESSION_PROFILE_ENDPOINT = 'https://sessionserver.mojang.com/session/minecraft/profile';
-const CLIENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function validateClientId(clientId) {
   const normalized = String(clientId ?? '').trim();
   if (!CLIENT_ID_PATTERN.test(normalized)) {
-    throw new Error('启动器内置的 Microsoft Client ID 配置无效');
+    throw new Error('Microsoft Client ID 配置无效，请填写 UUID 格式的应用 ID');
   }
   return normalized.toLowerCase();
 }
@@ -55,7 +55,7 @@ function providerError(payload, fallback) {
     payload?.message
   ].map((value) => String(value ?? '').trim()).find(Boolean) ?? '';
   if (/invalid app registration/i.test(description)) {
-    return '此启动器的 Microsoft 应用尚未通过 Minecraft Services 注册审核；应用所有者需要前往 https://aka.ms/AppRegInfo 提交 Client ID，普通玩家无需处理';
+    return 'Minecraft Services 注册审核或应用配置未被服务接受（Invalid app registration）；这不是账户密码或网络错误。应用所有者请前往 https://aka.ms/AppRegInfo 核对当前 Client ID 及审核记录，玩家可联系维护者或在账户管理中选择离线 / LittleSkin 登录（不提供正版验证）';
   }
   const code = description.match(/AADSTS\d+/i)?.[0]?.toUpperCase()
     ?? (Number(payload?.error_codes?.[0]) ? `AADSTS${Number(payload.error_codes[0])}` : '');
@@ -270,8 +270,8 @@ class MicrosoftAuthManager {
     return this.clientId;
   }
 
-  async begin(ownerId) {
-    const validatedId = this.requireClientId();
+  async begin(ownerId, clientId) {
+    const validatedId = clientId === undefined ? this.requireClientId() : validateClientId(clientId);
     const controller = new AbortController();
     const sessionId = crypto.randomUUID();
     this.sessions.set(sessionId, {

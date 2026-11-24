@@ -12,9 +12,14 @@ function npmUserAgent() {
   return process.env.npm_config_user_agent || '';
 }
 
-function assertToolchain({ node = process.versions.node, userAgent = npmUserAgent(), lock = require('../package-lock.json') } = {}) {
+function assertToolchain({ node = process.versions.node, userAgent = npmUserAgent(), lock = require('../package-lock.json'), development = false } = {}) {
   const npm = /^npm\/([^ ]+)/.exec(userAgent)?.[1];
-  if (node !== versions.node || npm !== versions.npm) {
+  const nodeMajor = /^(\d+)\.\d+\.\d+$/.exec(node)?.[1];
+  const npmMajor = /^(\d+)\.\d+\.\d+$/.exec(npm ?? '')?.[1];
+  if (development && (!nodeMajor || Number(nodeMajor) < 24 || Number(nodeMajor) >= 27 || npmMajor !== '11')) {
+    throw new Error(`Development requires Node >=24 <27 and npm >=11 <12; received Node ${node}, npm ${npm || 'unknown'}. Run through npm.`);
+  }
+  if (!development && (node !== versions.node || npm !== versions.npm)) {
     throw new Error(`Build requires Node ${versions.node} and npm ${versions.npm}; received Node ${node}, npm ${npm || 'unknown'}. Run through the pinned npm version.`);
   }
   for (const [name, expected] of [['electron', versions.electron], ['electron-builder', versions.builder]]) {
@@ -29,7 +34,13 @@ function assertToolchain({ node = process.versions.node, userAgent = npmUserAgen
 }
 
 if (require.main === module) {
-  try { assertToolchain(); console.log(JSON.stringify(versions)); }
+  try {
+    const args = process.argv.slice(2);
+    if (args.some(argument => argument !== '--development')) throw new Error('Supported toolchain option: --development');
+    const development = args.includes('--development');
+    assertToolchain({ development });
+    console.log(JSON.stringify({ mode: development ? 'development' : 'release', ...versions }));
+  }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }
 

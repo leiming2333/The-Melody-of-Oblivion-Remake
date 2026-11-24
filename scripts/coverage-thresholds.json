@@ -1,0 +1,26 @@
+{
+  "accounts": {
+    "include": "src/main/accounts/**/*.js",
+    "lines": 85,
+    "branches": 75,
+    "functions": 85
+  },
+  "updater": {
+    "include": "src/main/updater/**/*.js",
+    "lines": 90,
+    "branches": 73,
+    "functions": 78
+  },
+  "downloader": {
+    "include": "src/main/minecraft/downloader.js",
+    "lines": 85,
+    "branches": 80,
+    "functions": 85
+  },
+  "modpacks": {
+    "include": "src/main/minecraft/modpack-*.js",
+    "lines": 88,
+    "branches": 72,
+    "functions": 82
+  }
+}

@@ -8,6 +8,8 @@ const { createVersionCatalogUi } = require('../src/renderer/modules/version-cata
 const { createDownloadUi } = require('../src/renderer/modules/download-ui');
 
 function installUiBoundaries(context) {
+  context.microsoftClientIdInput ??= { value: '' };
+  context.refreshMicrosoftConfiguration ??= async () => {};
   const selected = context.selectedRemoteVersion;
   context.launcherSettingsLoaded ??= false;
   context.launcherSettingsLoadingPromise ??= undefined;

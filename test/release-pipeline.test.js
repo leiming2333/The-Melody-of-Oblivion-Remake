@@ -153,9 +153,9 @@ test('published release retries are read-only and reject changed bytes before an
     if (args[1] === 'download') { await fs.cp(remote, args[args.indexOf('--dir') + 1], { recursive: true }); return ''; }
     throw new Error('Unexpected mutation');
   };
-  assert.equal((await publishRelease(f.output, `v${version}`, 'owner/repo', gh)).reused, true);
+  assert.equal((await publishRelease(f.output, `v${version}`, 'owner/repo', gh, { trustedKeys: [], requireSignatures: false })).reused, true);
   await fs.appendFile(path.join(remote, targets[0].filename), 'different');
-  await assert.rejects(publishRelease(f.output, `v${version}`, 'owner/repo', gh), /immutable/);
+  await assert.rejects(publishRelease(f.output, `v${version}`, 'owner/repo', gh, { trustedKeys: [], requireSignatures: false }), /immutable/);
   assert.ok(commands.every(args => args[0] === 'api' || args[1] === 'download'));
 });
 
@@ -164,7 +164,7 @@ test('publication rejects a moved or unrelated tag before creating or changing a
   await f.prepare();
   const commands = [];
   const gh = async args => { commands.push(args); return 'b'.repeat(40); };
-  await assert.rejects(publishRelease(f.output, `v${version}`, 'owner/repo', gh), /source commit/);
+  await assert.rejects(publishRelease(f.output, `v${version}`, 'owner/repo', gh, { trustedKeys: [], requireSignatures: false }), /source commit/);
   assert.equal(commands.length, 1);
   assert.equal(commands[0][0], 'api');
   assert.match(commands[0][1], /\/commits\//);
@@ -182,6 +182,7 @@ test('Blob syncs all eight platforms and changes latest only after the final pac
   const puts = [];
   let fail = true;
   const options = {
+    trustedKeys: [],
     token: 'fixture',
     listBlobs: async ({ prefix }) => ({ blobs: [...blobs.keys()].filter(key => key.startsWith(prefix)).map(pathname => ({ pathname, url: `https://blob.invalid/${pathname}` })) }),
     delBlobs: async (pathnames) => { for (const pathname of pathnames) { deleted.push(pathname); blobs.delete(pathname); } },
@@ -235,6 +236,7 @@ test('Blob requires all platforms and rejects missing, duplicate or modified pac
   await fs.writeFile(metadataPath, JSON.stringify({ tagName: `v${version}` }));
   const blobs = new Map();
   const options = {
+    trustedKeys: [],
     token: 'fixture',
     listBlobs: async () => ({ blobs: [] }),
     putBlob: async (pathname, contents) => {
@@ -281,6 +283,7 @@ test('the existing immutable Windows-only tag can add its five missing platform 
   blobs.set('releases/latest.json', Buffer.from(JSON.stringify({ tag_name: `v${version}`, assets: [] })));
   const writes = [];
   const options = {
+    trustedKeys: [],
     token: 'fixture',
     listBlobs: async ({ prefix }) => ({ blobs: [...blobs.keys()].filter(key => key.startsWith(prefix))
       .map(pathname => ({ pathname, url: `https://blob.invalid/${pathname}` })) }),
@@ -312,7 +315,7 @@ test('manual Blob sync downloads all release platform families before publishing
   const yaml = require('js-yaml');
   const workflow = yaml.load(await fs.readFile(path.join(__dirname, '../.github/workflows/sync-release-to-blob.yml'), 'utf8'));
   const step = workflow.jobs.sync.steps.find(step => step.run?.includes('gh release download'));
-  for (const pattern of ['*-Windows-*.exe', '*-Linux-*.AppImage', '*-macOS-*.zip', 'release-manifest.json']) {
+  for (const pattern of ['*-Windows-*.exe', '*-Linux-*.AppImage', '*-macOS-*.zip', 'release-manifest.json', '*.sig', '*.sha256', 'SHA256SUMS']) {
     assert.ok(step.run.includes(`--pattern '${pattern}'`));
   }
 });
@@ -321,7 +324,7 @@ test('manual R2 sync downloads all release platform families and passes R2 confi
   const yaml = require('js-yaml');
   const workflow = yaml.load(await fs.readFile(path.join(__dirname, '../.github/workflows/sync-release-to-r2.yml'), 'utf8'));
   const download = workflow.jobs.sync.steps.find(step => step.run?.includes('gh release download'));
-  for (const pattern of ['*-Windows-*.exe', '*-Linux-*.AppImage', '*-macOS-*.zip', 'release-manifest.json']) {
+  for (const pattern of ['*-Windows-*.exe', '*-Linux-*.AppImage', '*-macOS-*.zip', 'release-manifest.json', '*.sig', '*.sha256', 'SHA256SUMS']) {
     assert.ok(download.run.includes(`--pattern '${pattern}'`));
   }
   const sync = workflow.jobs.sync.steps.find(step => step.name?.includes('publish R2 latest'));

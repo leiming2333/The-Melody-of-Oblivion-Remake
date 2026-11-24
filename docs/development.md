@@ -4,9 +4,9 @@
 
 ## 准备环境
 
-启动器开发使用 Node.js `26.10.0`、npm `11.13.0`；版本以 [工具链定义](../scripts/toolchain.cjs)、[.node-version](../.node-version) 和 [package.json](../package.json) 为准。Vercel 网站运行在 Node.js `24.x`，不代表启动器构建也可使用该版本。
+源码开发支持 Node.js `>=24 <27`、npm `11.x`；推荐版本为 Node.js `26.10.0`、npm `11.13.0`，分别记录在 [.node-version](../.node-version)、[.nvmrc](../.nvmrc) 和 [package.json](../package.json) 中。Vercel 网站运行在 Node.js `24.x`。正式打包和 CI 仍由[工具链检查](../scripts/toolchain.cjs)固定使用推荐版本，保证发布输入可追溯。
 
-先安装指定 Node.js，再确认 npm 版本。如果 npm 版本不同，可执行 `npm install --global npm@11.13.0` 后重新检查。
+先安装兼容的 Node.js，再确认 npm 版本。使用 nvm 的贡献者可运行 `nvm install` / `nvm use` 选择推荐版本；需要正式打包时，运行 `npm install --global npm@11.13.0` 安装对应 npm。
 
 ```powershell
 node --version
@@ -14,7 +14,7 @@ npm --version
 git clone https://github.com/leiming2333/The-Melody-of-Oblivion-Remake.git
 cd The-Melody-of-Oblivion-Remake
 npm ci
-npm run verify:toolchain
+npm run verify:dev-toolchain
 npm run check
 npm test
 ```

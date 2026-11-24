@@ -14,7 +14,7 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#平台支持与使用前提)
-[![Source](https://img.shields.io/badge/Source-v2.1.2-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v2.2.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
@@ -46,7 +46,7 @@
 - **启动核心**：处理版本继承、平台规则、参数与类路径、本地库安全解压、Java 进程启动及状态报告。LittleSkin 账户会自动准备经过 SHA-256 校验的 authlib-injector。
 - **整合包**：检查并安装 Modrinth `.mrpack` 与 CurseForge `.zip`，使用独立实例目录并支持 overrides、Fabric、Forge、NeoForge 与 Quilt。导入确认显示游戏、加载器和文件数，可选文件默认不安装；可选文件的远端解析或下载失败仅警告，必需文件失败可重试；磁盘、权限或安全检查错误会中止安装。CurseForge 受限文件可从官方页面下载后选择本地文件，通过可信摘要校验再继续安装。
 - **启动器更新**：启动时检测 GitHub Releases 新版本；提供三档更新策略（自动下载 / 仅提示 / 从不检查），发现新版本与更新就绪时发送系统通知，设置页可查看 Release 更新日志。更新前对 Blob、GitHub 镜像和官方源做小流量并行测速；大文件支持四段并发，切源时复用本次下载已完成的分段，不支持 Range 时回退单流。最近 3 个稳定版本存在时优先下载 bsdiff + Zstandard 增量补丁，校验旧文件与补丁后还原，再校验完整目标文件大小和官方 SHA-256；补丁优先从 R2 镜像读取，缺失或失败时回退 GitHub/镜像；补丁缺失、过期、损坏或当前文件被修改时自动回退完整包。macOS 保留一份已验证的官方 ZIP 作为补丁基线。低速判断参考实测结果，文件大小或 SHA-256 不匹配会清除分段并尝试其他源，通过校验后才可安装。旧版布尔更新设置会自动迁移为新策略，详见 [增量更新](docs/patch-updates.md)。
-- **桌面界面**：紧凑的固定尺寸无边框 Electron 窗口，覆盖版本、账户、下载、启动及设置流程。首页可重新打开后台任务，问题对话框提供重试和复制脱敏详情；关闭弹窗继续任务，取消按钮停止任务，最终提交期间禁用取消。
+- **桌面界面**：支持调整大小与最大化的无边框 Electron 窗口，默认 760×466、最小 680×417，覆盖版本、账户、下载、启动及设置流程。首页可重新打开后台任务，问题对话框提供重试和复制脱敏详情；关闭弹窗继续任务，取消按钮停止任务，最终提交期间禁用取消。
 
 ### 下载源覆盖
 
@@ -58,11 +58,11 @@
 
 ## 实际界面
 
-以下截图来自 `1.6.5` 源码运行的 Electron 启动器，截图时尚未添加账户或安装游戏。当前源码界面可能有所不同。
+以下截图于 2026-11-24 使用 `2.2.0` Electron 启动器源码截取，使用隔离目录，尚未添加账户或安装游戏。
 
 ![沙漠湖泊默认壁纸与启动器主界面](assets/launcher-screenshot.png)
 
-![v1.6.5 账户管理实际界面](assets/launcher-accounts.png)
+![当前源码账户管理实际界面](assets/launcher-accounts.png)
 
 官网不展示启动器真实界面截图，上面的截图仅在 README 中展示。下载区可选择系统和架构，主按钮完成 Cloudflare Turnstile 真人验证后通过独立签名 Worker 进行 1 MiB 分块、默认 4 路并发下载，显示速度、进度及取消，并在固定源失败时回退。文件大小和官方 SHA-256 校验通过后才交给浏览器保存，取消或关闭页面不会保留分段。GitHub 原始下载和网盘仍公开，不经过网页下载器。版本更新公告默认展开，只展示最新一个版本。官网不展示 SHA-256 数值；启动器安装更新前也会校验文件。配置和配套部署完成前，验证下载按钮保持不可用。
 
@@ -79,8 +79,8 @@
 ## 运行要求
 
 - Windows 10/11、macOS 或 Linux，安装包架构需与设备匹配；Electron 43 不支持 Windows 7/8/8.1
-- 源码开发与构建固定使用 Node.js `26.10.0`、npm `11.13.0`
-- Vercel 网站使用 Node.js `24.x`。`engines.node` 兼容网站与启动器两个环境；启动器构建仍由 `.node-version` 和工具链检查固定为 `26.10.0`。
+- 源码开发支持 Node.js `>=24 <27`、npm `11.x`；推荐版本由 `.nvmrc`、`.node-version` 与 `packageManager` 标明。
+- Vercel 网站使用 Node.js `24.x`。正式构建与 CI 仍固定使用 Node.js `26.10.0`、npm `11.13.0`，由工具链检查保证输入一致。
 - 用于元数据、游戏文件、账户验证及托管 Java 下载的网络连接
 - 进行正版在线游戏时，需要合法拥有的 Minecraft Java 版账户
 
@@ -117,6 +117,8 @@ Java 检测在主页就绪后于后台进行，使用已保存的设置。设置
 | `npm test` | 运行 Node.js 自动化测试 |
 | `npm run smoke` | 在全新的临时用户数据与游戏目录中运行 Electron，确认准备完成、配置可读且主页可操作后退出并清理 |
 | `npm run verify:toolchain` | 验证固定 Node、npm、Electron 和 electron-builder 版本 |
+| `npm run verify:dev-toolchain` | 检查兼容的开发环境和锁文件完整性 |
+| `npm run test:coverage` | 运行完整测试并检查高风险模块覆盖率门禁 |
 | `npm run build -- --target windows-x64` | 使用统一入口构建单一目标，默认不发布 |
 | `npm run build:win` | 构建 Windows 持久运行目录便携 EXE |
 | `npm run build:linux` | 构建 Linux AppImage |
@@ -192,6 +194,8 @@ Java 的标准输出和错误输出保存到游戏根目录的 `launcher-cache/g
 实例列表隐藏内部暂存目录。下次启动扫描或安装时仅回收带有本启动器归属标记、路径安全且非活跃的崩溃残留，保留已校验缓存；清理失败可在下次重试。需要释放缓存空间时，可在关闭游戏、停止安装后删除缓存目录。
 
 构建使用固定工具链、锁文件与单一平台目标定义，产物写入独立的干净目录。手动 CI 生成八类安装包、校验侧文件、`SHA256SUMS`、构建清单和七类原生启动/升级报告，不公开发布；版本标签验证通过后才发布。可重复构建在此指输入固定且产物可追溯，不承诺字节完全一致。详见[发布验证说明](docs/ci-release-validation.md)。
+
+v2.2.0 起，更新包与清单采用独立 Ed25519 签名，客户端内置公钥并在安装前验签。公钥指纹（SPKI DER / SHA-256）为 `7e5ccc6204ba9faad1b9afbb5baff26ff4ba2be922a0b32a8caed1e0987ca0fb`，首次迁移和密钥轮换说明见[发布签名](docs/release-signing.md)。Windows/macOS 平台签名、公证已接线，但尚未配置平台证书。内置 Microsoft Client ID 审核状态未知，设置页支持自己的 ID 并提供替代登录指引，详见[Microsoft 登录配置](docs/microsoft-client-id.md)。完成范围见[改进落实记录](docs/repository-improvements.md)。
 
 ## 历史资料
 

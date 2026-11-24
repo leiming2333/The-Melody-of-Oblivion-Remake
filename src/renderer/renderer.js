@@ -99,6 +99,7 @@ const downloadEta = document.querySelector('#downloadEta');
 const downloadSize = document.querySelector('#downloadSize');
 const downloadFiles = document.querySelector('#downloadFiles');
 const settingsDialog = document.querySelector('#settingsDialog');
+const microsoftClientIdInput = document.querySelector('#microsoftClientIdInput');
 const launcherApp = document.querySelector('.launcher-app');
 const javaSelect = document.querySelector('#javaSelect');
 const javaBrowseButton = document.querySelector('#javaBrowseButton');
@@ -434,7 +435,7 @@ function problemGuidance(message, code, domain) {
   }
   if (/注册审核|登录配置不可用|Client ID|登录未配置/.test(message)) {
     return { title: '启动器登录配置异常', message: '启动器的 Microsoft 登录配置或应用注册需要维护者处理。',
-      advice: '先更新启动器；若仍失败，请将下方错误信息反馈给启动器维护者。' };
+      advice: '这通常与账户密码或网络无关。请联系维护者；应用所有者可在高级登录设置中使用自己的 Client ID。也可在账户管理中使用离线账户或 LittleSkin，二者均不能提供正版验证。', account: true, settings: true };
   }
   if (/登录已失效|登录已过期|账户令牌已失效/.test(message)) {
     return { title: '需要重新登录', message: '账户的登录授权已失效，暂时无法启动游戏。',
@@ -625,6 +626,7 @@ async function loadAccountState({ strict = false } = {}) {
 }
 
 function applySettingsToForm() {
+  microsoftClientIdInput.value = launcherSettings.microsoftClientId ?? '';
   wallpaperSelect.value = String(launcherSettings.wallpaperIndex ?? 3);
   selectWallpaper(Number(wallpaperSelect.value));
   selectedJavaPath = launcherSettings.javaPath ?? '';
@@ -876,6 +878,7 @@ async function ensureSettingsOpen() {
     applySettingsToForm();
     settingsDialog.returnValue = '';
     settingsDialog.showModal();
+    void refreshMicrosoftConfiguration();
   }
   return true;
 }
@@ -988,6 +991,28 @@ javaDownloadCancelButton.addEventListener('click', async () => {
     showProblem(error);
   }
 });
+
+let microsoftClientUiModule;
+let microsoftClientConfigurationRequest = 0;
+async function refreshMicrosoftConfiguration() {
+  if (!accountsApi?.getMicrosoftConfiguration) return;
+  const request = ++microsoftClientConfigurationRequest;
+  try {
+    microsoftClientUiModule ??= import('./modules/microsoft-client-ui.mjs').catch((error) => {
+      microsoftClientUiModule = undefined;
+      throw error;
+    });
+    const [configuration, ui] = await Promise.all([accountsApi.getMicrosoftConfiguration(), microsoftClientUiModule]);
+    if (request !== microsoftClientConfigurationRequest) return;
+    ui.renderMicrosoftClientConfiguration({ input: microsoftClientIdInput,
+      statuses: [document.querySelector('#microsoftClientStatus'), document.querySelector('#microsoftClientSettingsStatus')] }, configuration);
+  } catch (error) {
+    if (request !== microsoftClientConfigurationRequest) return;
+    for (const selector of ['#microsoftClientStatus', '#microsoftClientSettingsStatus']) {
+      document.querySelector(selector).textContent = `登录配置读取失败：${readableError(error)}`;
+    }
+  }
+}
 
 function setMicrosoftLoginBusy(active) {
   microsoftLoginActive = active;
@@ -1667,10 +1692,19 @@ function openAccountManagement() {
   if (!accountDialog.open) accountDialog.showModal();
   void renderAccountList();
   void loadAccountState();
+  void refreshMicrosoftConfiguration();
   microsoftLoginButton.focus();
 }
 
 accountButton.addEventListener('click', openAccountManagement);
+document.querySelector('#microsoftUseOfflineButton').addEventListener('click', () => {
+  offlineNameInput.scrollIntoView({ block: 'nearest' });
+  offlineNameInput.focus();
+});
+document.querySelector('#microsoftUseLittleSkinButton').addEventListener('click', () => {
+  littleSkinUsernameInput.scrollIntoView({ block: 'nearest' });
+  littleSkinUsernameInput.focus();
+});
 document.querySelector('#problemAccountButton').addEventListener('click', () => {
   document.querySelector('#problemDialog').close();
   openAccountManagement();
@@ -1781,10 +1815,12 @@ settingsDialog.addEventListener('close', async () => {
         downloadConcurrency: Number(downloadConcurrencySelect.value),
         memoryMb: Number(memoryRange.value),
         autoUpdate: autoUpdateCheck.checked,
+        microsoftClientId: microsoftClientIdInput.value.trim(),
         launcherUpdatePolicy: launcherUpdatePolicySelect.value
       };
       launcherSettings = settingsApi ? await settingsApi.update(patch) : patch;
       applySettingsToForm();
+      void refreshMicrosoftConfiguration();
       if (launcherSettings.isolateProfiles !== previousIsolation) cancelFabricApiConfirmation();
       if (launcherSettings.gameDirectoryMode !== previousDirectoryMode) {
         autoJavaDetection = null;

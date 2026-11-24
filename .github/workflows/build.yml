@@ -24,6 +24,11 @@ jobs:
       - name: Verify release tag
         if: github.ref_type == 'tag'
         run: node -e "require('./scripts/release-assets.cjs').assertTag(process.env.GITHUB_REF_NAME, require('./package.json').version)"
+      - name: Verify release signing key before building
+        if: github.ref_type == 'tag'
+        env:
+          MELODY_RELEASE_SIGNING_KEY: ${{ secrets.MELODY_RELEASE_SIGNING_KEY }}
+        run: node -e "require('./scripts/sign-release.cjs').assertSigningKey(process.env.MELODY_RELEASE_SIGNING_KEY)"
   build:
     needs: targets
     name: Build ${{ matrix.id }}
@@ -41,6 +46,12 @@ jobs:
         run: npm run build -- --target ${{ matrix.id }}
         env:
           MELODY_MICROSOFT_CLIENT_ID: ${{ secrets.MELODY_MICROSOFT_CLIENT_ID || '72867f11-f8bf-4086-a502-39039a08970c' }}
+          CSC_LINK: ${{ startsWith(matrix.id, 'macos-') && secrets.MAC_CSC_LINK || startsWith(matrix.id, 'windows-') && secrets.WIN_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ startsWith(matrix.id, 'macos-') && secrets.MAC_CSC_KEY_PASSWORD || startsWith(matrix.id, 'windows-') && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MELODY_REQUIRE_CODE_SIGNING: ${{ vars.MELODY_REQUIRE_CODE_SIGNING || 'false' }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -131,6 +142,11 @@ jobs:
           test -n "$BIN"
           chmod +x "$BIN"
           ZIG_BSDIFF="$BIN" node scripts/build-patches.cjs release-verified previous-release
+      - name: Sign verified release assets
+        if: github.ref_type == 'tag'
+        env:
+          MELODY_RELEASE_SIGNING_KEY: ${{ secrets.MELODY_RELEASE_SIGNING_KEY }}
+        run: node scripts/sign-release.cjs release-verified
       - uses: actions/upload-artifact@v4
         with:
           name: verified-release-bundle

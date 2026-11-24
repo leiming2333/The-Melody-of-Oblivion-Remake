@@ -14,13 +14,15 @@ Please follow the [Code of Conduct](CODE_OF_CONDUCT.md#english). Report vulnerab
 - [开发与验收用例](docs/development-cases.md)：按改动范围选择自动化测试和人工验收场景。
 - [持续检查与发布验证](docs/ci-release-validation.md)：现有 CI、打包验证和发布门槛。
 
-启动器开发与构建使用 Node.js `26.10.0` 和 npm `11.13.0`。首次准备环境后运行：
+源码开发支持 Node.js `>=24 <27` 和 npm `11.x`，推荐使用 `.node-version` / `.nvmrc` 指定的 Node.js `26.10.0` 与 `packageManager` 指定的 npm `11.13.0`。其他兼容版本可正常安装依赖并运行开发检查。首次准备环境后运行：
 
 ```sh
 npm ci
-npm run verify:toolchain
+npm run verify:dev-toolchain
 npm run dev
 ```
+
+正式构建与 CI 仍使用固定的 Node.js `26.10.0`、npm `11.13.0`，由 `npm run verify:toolchain` 和构建脚本严格检查；开发检查也会验证 Electron / electron-builder 锁定版本及依赖来源、完整性信息。
 
 测试时使用独立的游戏目录，并先备份需要保留的数据。普通 `npm run dev` 仍会使用当前系统用户的启动器账号和设置；完整隔离的人工测试可使用独立系统用户或虚拟机，详见开发指南。真实账号登录、游戏下载、游戏启动和安装包升级需要按场景另外验证，不能只凭单元测试判断通过。
 

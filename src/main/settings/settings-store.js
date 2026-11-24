@@ -1,5 +1,6 @@
 const path = require('node:path');
 const { RecoverableJsonStore, isJsonObject } = require('../recoverable-json-store');
+const { normalizeConfiguredClientId } = require('../accounts/microsoft-client-config');
 
 const DOWNLOAD_CONCURRENCY_OPTIONS = Object.freeze([4, 8, 12, 16, 24, 32]);
 const DOWNLOAD_SOURCE_OPTIONS = Object.freeze(['auto', 'bmclapi', 'official']);
@@ -15,6 +16,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   downloadConcurrency: 32,
   memoryMb: 4096,
   autoUpdate: true,
+  microsoftClientId: '',
   launcherUpdatePolicy: 'auto'
 });
 
@@ -54,12 +56,13 @@ function normalizeSettings(value = {}) {
     autoUpdate: typeof value.autoUpdate === 'boolean'
       ? value.autoUpdate
       : DEFAULT_SETTINGS.autoUpdate,
+    microsoftClientId: normalizeConfiguredClientId(value.microsoftClientId),
     launcherUpdatePolicy: normalizeLauncherUpdatePolicy(value.launcherUpdatePolicy, value.launcherAutoUpdate)
   };
 }
 
 function validateStoredSettings(value) {
-  const stringFields = ['javaPath', 'downloadSource', 'launcherUpdatePolicy', 'gameDirectoryMode'];
+  const stringFields = ['javaPath', 'downloadSource', 'launcherUpdatePolicy', 'gameDirectoryMode', 'microsoftClientId'];
   const booleanFields = ['isolateProfiles', 'autoUpdate', 'launcherAutoUpdate'];
   if (!isJsonObject(value)
       || (value.version !== undefined && (!Number.isInteger(value.version) || value.version < 1 || value.version > 3))
@@ -69,6 +72,7 @@ function validateStoredSettings(value) {
         || value.javaRuntimes.some((entry) => !isJsonObject(entry) || typeof entry.path !== 'string')))) {
     throw new Error('设置文件结构无效');
   }
+  normalizeConfiguredClientId(value.microsoftClientId);
 }
 
 function normalizeJavaRuntimes(value, selectedPath = '') {
@@ -118,6 +122,7 @@ class SettingsStore {
 
   update(patch = {}) {
     return this.runExclusive(async () => {
+      if (Object.hasOwn(patch, 'microsoftClientId')) normalizeConfiguredClientId(patch.microsoftClientId);
       const current = await this.read();
       return this.write({ ...current, ...patch });
     });

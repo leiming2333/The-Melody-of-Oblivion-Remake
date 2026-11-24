@@ -101,6 +101,7 @@ test('启动设置可以持久化并自动规范内存值', async (t) => {
     downloadSource: 'official',
     downloadConcurrency: 12,
     memoryMb: 5120,
+    microsoftClientId: '',
     autoUpdate: false,
     launcherUpdatePolicy: 'notify'
   });

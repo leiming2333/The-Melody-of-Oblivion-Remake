@@ -5,8 +5,9 @@ import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { put, list } from '@vercel/blob';
 import releaseAssets from './release-assets.cjs';
+import { mirrorSignatures } from './mirror-release-signatures.mjs';
 
-const { assertTag, verifyManifest } = releaseAssets;
+const { assertTag, verifyManifest, verifyPatchManifest } = releaseAssets;
 
 function newerVersion(left, right) {
   const a = String(left).replace(/^v/, '').split('.').map(Number);
@@ -18,12 +19,28 @@ function newerVersion(left, right) {
 export async function syncRelease(assetDirectory, tag, metadataPath, {
   token = process.env.BLOB_READ_WRITE_TOKEN,
   repository = process.env.GITHUB_REPOSITORY || 'leiming2333/The-Melody-of-Oblivion-Remake',
-  putBlob = put, listBlobs = list, fetchUrl = fetch
+  putBlob = put, listBlobs = list, fetchUrl = fetch, trustedKeys
 } = {}) {
   if (!token) throw new Error('BLOB_READ_WRITE_TOKEN is required to sync a GitHub Release.');
   const manifest = JSON.parse(await readFile(path.join(assetDirectory, 'release-manifest.json'), 'utf8'));
   assertTag(tag, manifest.version);
   const packages = await verifyManifest(assetDirectory, manifest);
+  const patchManifest = await verifyPatchManifest(assetDirectory, manifest);
+  const signatures = await mirrorSignatures(assetDirectory, tag, [
+    ...packages.map(item => item.name), 'release-manifest.json',
+    ...(patchManifest ? ['patch-manifest.json', ...patchManifest.patches.map(patch => patch.name)] : [])
+  ], trustedKeys);
+  const additional = [...signatures];
+  if (patchManifest) {
+    additional.push(...patchManifest.patches.map(patch => ({ ...patch, file: path.join(assetDirectory, patch.name) })));
+    const file = path.join(assetDirectory, 'patch-manifest.json');
+    const bytes = await readFile(file);
+    additional.push({ name: 'patch-manifest.json', file, size: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex') });
+  }
+  const mirroredNames = new Set([...packages, ...additional].map(item => item.name));
+  additional.push(...signatures.filter(item => !mirroredNames.has(item.signedFile.name)).map(item => item.signedFile));
+  const mirrorItems = [...packages, ...additional];
   const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
   if (metadata.tagName !== tag) throw new Error('GitHub release metadata does not match the requested tag');
   async function existingBlob(pathname) {
@@ -58,7 +75,7 @@ export async function syncRelease(assetDirectory, tag, metadataPath, {
   // already published the complete manifest, so the same tag may add its other
   // verified platforms while keeping that manifest and existing objects intact.
   const existing = new Map();
-  for (const item of packages) {
+  for (const item of mirrorItems) {
     const blob = await existingBlob(`releases/${tag}/${item.name}`);
     if (!blob) continue;
     try { await verifyBlob(blob, item); }
@@ -66,7 +83,7 @@ export async function syncRelease(assetDirectory, tag, metadataPath, {
     existing.set(item.name, blob);
   }
   const assets = [];
-  for (const item of packages) {
+  for (const item of mirrorItems) {
     let blob = existing.get(item.name);
     if (!blob) {
       const contents = await readFile(item.file);
@@ -77,7 +94,7 @@ export async function syncRelease(assetDirectory, tag, metadataPath, {
       await verifyBlob(blob, item);
     }
     assets.push({ name: item.name, size: item.size,
-      platform: `${{ win32: 'Windows', linux: 'Linux', darwin: 'macOS' }[item.target.platform]}-${item.target.arch}`,
+      ...(item.target ? { platform: `${{ win32: 'Windows', linux: 'Linux', darwin: 'macOS' }[item.target.platform]}-${item.target.arch}` } : {}),
       digest: `sha256:${item.sha256}`, browser_download_url: blob.url,
       github_download_url: `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(item.name)}` });
   }
@@ -99,6 +116,6 @@ export async function syncRelease(assetDirectory, tag, metadataPath, {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const [assetDirectory, tag, metadataPath] = process.argv.slice(2);
   syncRelease(assetDirectory, tag, metadataPath)
-    .then(result => console.log(`Verified ${result.assets.length} cross-platform Blob packages for ${tag}; latest updated: ${result.latestUpdated}.`))
+    .then(result => console.log(`Verified ${result.assets.filter(asset => asset.platform).length} cross-platform Blob packages for ${tag}; latest updated: ${result.latestUpdated}.`))
     .catch(error => { console.error(error); process.exitCode = 1; });
 }

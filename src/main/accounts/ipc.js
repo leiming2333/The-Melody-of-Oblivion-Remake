@@ -14,6 +14,7 @@ function registerAccountIpc({
   accountStore,
   microsoftAuth,
   yggdrasilAuth,
+  getSettingsStore,
   getAccountStore = () => {
     if (!accountStore) {
       const { AccountStore } = require('./account-store');
@@ -34,6 +35,10 @@ function registerAccountIpc({
     });
   };
   ipcMain.handle('accounts:get-state', () => getAccountStore().getState());
+  ipcMain.handle('accounts:microsoft-configuration', async () => {
+    const { microsoftClientConfiguration } = require('./microsoft-client-config');
+    return microsoftClientConfiguration({ settings: await getSettingsStore?.().getState() });
+  });
   ipcMain.handle('accounts:add-offline', (_event, playerName, skinModel) => (
     getAccountStore().addOffline(playerName, skinModel)
   ));

@@ -1,6 +1,6 @@
 {
   "name": "melody-of-oblivion-launcher",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "description": "我的世界忘却的旋律启动器",
   "author": {
     "name": "leiming2333",
@@ -18,6 +18,7 @@
     "build:mac": "node scripts/build.cjs --mac",
     "build:targets": "node scripts/release-targets.cjs",
     "verify:toolchain": "node scripts/toolchain.cjs",
+    "verify:dev-toolchain": "node scripts/toolchain.cjs --development",
     "smoke": "node scripts/smoke.cjs",
     "check": "node scripts/check.js",
     "lint": "eslint site.js website-download-auth.mjs website-downloader.mjs cloudflare src api scripts test eslint.config.js",
@@ -25,11 +26,13 @@
     "verify:website-browser": "electron scripts/verify-website-download-browser.cjs",
     "verify:production-downloads": "node scripts/verify-production-downloads.mjs",
     "patches:build": "node scripts/build-patches.cjs",
-    "test": "node --test --test-concurrency=4 test/*.test.js"
+    "test": "node --test --test-concurrency=4 test/*.test.js",
+    "test:coverage": "node scripts/test-coverage.cjs",
+    "release:sign": "node scripts/sign-release.cjs"
   },
   "engines": {
-    "node": "24.x || 26.10.0",
-    "npm": "11.13.0"
+    "node": ">=24 <27",
+    "npm": ">=11 <12"
   },
   "build": {
     "appId": "com.melodyofoblivion.launcher",
@@ -72,6 +75,10 @@
       ]
     },
     "mac": {
+      "hardenedRuntime": true,
+      "notarize": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "icon": "src/renderer/assets/app-icon.icns",
       "artifactName": "The-Melody-of-Oblivion-Remake-macOS-${arch}.${ext}",
       "target": [

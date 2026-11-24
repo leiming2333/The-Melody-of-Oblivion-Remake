@@ -2015,6 +2015,28 @@ dialog ::-webkit-scrollbar-thumb {
   font-size: 12px;
 }
 
+.setting-group > summary {
+  margin-bottom: 12px;
+  color: var(--panel-ink);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#microsoftClientIdInput {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--control-radius);
+  color: var(--panel-ink);
+  background: var(--panel-card);
+  font-size: 11px;
+}
+
+#microsoftClientIdInput:disabled { opacity: 0.65; }
+#microsoftClientIdInput:invalid { border-color: var(--danger-border); }
+
 .java-path-picker {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;

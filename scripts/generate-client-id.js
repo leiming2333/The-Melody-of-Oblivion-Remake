@@ -10,6 +10,7 @@
  * - Client ID 是公开 OAuth 应用 ID，不是客户端密钥
  * - 构建产物（asar 内）包含真实 Client ID（保证功能可用）
  * - 本地开发时可手动设置环境变量后运行此脚本
+ * - 申请、Minecraft Services 审核及运行时覆盖说明见 docs/microsoft-client-id.md
  */
 const fs = require('node:fs');
 const path = require('node:path');

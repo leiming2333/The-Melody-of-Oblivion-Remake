@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import releaseAssets from './release-assets.cjs';
+import { mirrorSignatures } from './mirror-release-signatures.mjs';
 
 const { assertTag, verifyManifest, verifyPatchManifest } = releaseAssets;
 const PATCH_MANIFEST_NAME = 'patch-manifest.json';
@@ -152,13 +153,18 @@ async function verifyResponse(response, expected, label) {
 }
 
 export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
-  env = process.env, fetchImpl = fetch, now = () => new Date()
+  env = process.env, fetchImpl = fetch, now = () => new Date(), trustedKeys
 } = {}) {
   const { config, invalidFields } = configValidation(env);
   if (!config) throw new Error(`Invalid R2 configuration fields: ${invalidFields.join(', ')}. Check their format or missing values.`);
   const manifest = JSON.parse(await readFile(path.join(assetDirectory, 'release-manifest.json'), 'utf8'));
   assertTag(tag, manifest.version);
   const packages = await verifyManifest(assetDirectory, manifest);
+  const patchManifest = await verifyPatchManifest(assetDirectory, manifest);
+  const signatures = await mirrorSignatures(assetDirectory, tag, [
+    ...packages.map(item => item.name), 'release-manifest.json',
+    ...(patchManifest ? [PATCH_MANIFEST_NAME, ...patchManifest.patches.map(patch => patch.name)] : [])
+  ], trustedKeys);
   const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
   if (metadata.tagName !== tag) throw new Error('GitHub release metadata does not match the requested tag');
   const client = createR2Client(config, fetchImpl, now);
@@ -213,16 +219,19 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
     assets.push({ name: item.name, size: item.size,
       platform: `${{ win32: 'Windows', linux: 'Linux', darwin: 'macOS' }[item.target.platform]}-${item.target.arch}`,
       digest: `sha256:${item.sha256}`, object_storage_download_url: objectUrl(config, pathname),
+      browser_download_url: objectUrl(config, pathname),
       object_storage_verified: true,
       github_download_url: `https://github.com/${env.GITHUB_REPOSITORY || 'leiming2333/The-Melody-of-Oblivion-Remake'}/releases/download/${encode(tag)}/${encode(item.name)}` });
   }
-  const patchManifest = await verifyPatchManifest(assetDirectory, manifest);
   let patchCount = 0;
   if (patchManifest) {
     for (const patch of patchManifest.patches) {
       patchCount += 1;
       await uploadVerified(`patches/${tag}/${patch.name}`,
         await readFile(path.join(assetDirectory, patch.name)), patch, 'application/octet-stream');
+      if (signatures.length) assets.push({ name: patch.name, size: patch.size,
+        digest: `sha256:${patch.sha256}`, browser_download_url: objectUrl(config, `patches/${tag}/${patch.name}`),
+        github_download_url: `https://github.com/${env.GITHUB_REPOSITORY || 'leiming2333/The-Melody-of-Oblivion-Remake'}/releases/download/${encode(tag)}/${encode(patch.name)}` });
     }
     const patchManifestPath = path.join(assetDirectory, PATCH_MANIFEST_NAME);
     const patchManifestBytes = await readFile(patchManifestPath);
@@ -230,6 +239,21 @@ export async function syncReleaseToR2(assetDirectory, tag, metadataPath, {
       { name: PATCH_MANIFEST_NAME, size: patchManifestBytes.length,
         sha256: createHash('sha256').update(patchManifestBytes).digest('hex') },
       'application/json; charset=utf-8');
+    if (signatures.length) assets.push({ name: PATCH_MANIFEST_NAME, size: patchManifestBytes.length,
+      digest: `sha256:${createHash('sha256').update(patchManifestBytes).digest('hex')}`,
+      browser_download_url: objectUrl(config, `patches/${tag}/${PATCH_MANIFEST_NAME}`),
+      github_download_url: `https://github.com/${env.GITHUB_REPOSITORY || 'leiming2333/The-Melody-of-Oblivion-Remake'}/releases/download/${encode(tag)}/${PATCH_MANIFEST_NAME}` });
+  }
+  const publishedNames = new Set(assets.map(item => item.name));
+  const signatureFiles = signatures.flatMap(item => [item,
+    ...(publishedNames.has(item.signedFile.name) ? [] : [item.signedFile])]);
+  for (const item of signatureFiles) {
+    const pathname = `releases/${tag}/${item.name}`;
+    await uploadVerified(pathname, await readFile(item.file), item, 'application/json; charset=utf-8');
+    assets.push({ name: item.name, size: item.size, digest: `sha256:${item.sha256}`,
+      browser_download_url: objectUrl(config, pathname),
+      object_storage_download_url: objectUrl(config, pathname), object_storage_verified: true,
+      github_download_url: `https://github.com/${env.GITHUB_REPOSITORY || 'leiming2333/The-Melody-of-Oblivion-Remake'}/releases/download/${encode(tag)}/${encode(item.name)}` });
   }
   if (!existingManifest) {
     const putManifest = await client.request('PUT', manifestPath, Buffer.from(JSON.stringify(manifest)), {
@@ -283,6 +307,6 @@ function newerVersion(left, right) {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const [assetDirectory, tag, metadataPath] = process.argv.slice(2);
   syncReleaseToR2(assetDirectory, tag, metadataPath)
-    .then(result => console.log(`Verified ${result.assets.length} R2 packages and ${result.patches} patches for ${tag}; latest updated: ${result.latestUpdated}.`))
+    .then(result => console.log(`Verified ${result.assets.filter(asset => asset.platform).length} R2 packages and ${result.patches} patches for ${tag}; latest updated: ${result.latestUpdated}.`))
     .catch(error => { console.error(error.message); process.exitCode = 1; });
 }

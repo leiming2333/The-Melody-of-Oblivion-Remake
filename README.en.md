@@ -14,7 +14,7 @@
 [![Electron](https://img.shields.io/badge/Electron-43.4.1-9feaf9.svg)](https://www.electronjs.org/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-Java_Edition-62b74a.svg)](https://www.minecraft.net/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#platform-coverage-and-prerequisites)
-[![Source](https://img.shields.io/badge/Source-v2.1.2-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
+[![Source](https://img.shields.io/badge/Source-v2.2.0-red.svg)](https://github.com/leiming2333/The-Melody-of-Oblivion-Remake)
 </div>
 
 > [!IMPORTANT]
@@ -46,7 +46,7 @@ The current repository starts a new implementation; its version numbers and code
 - **Launch core** — resolve inherited version metadata, apply platform rules, assemble arguments and classpaths, extract native libraries safely, launch the Java process, and report its status. LittleSkin accounts automatically provision a SHA-256-verified authlib-injector.
 - **Modpacks** — inspect and install Modrinth `.mrpack` and CurseForge `.zip` archives into separate instances with overrides, Fabric, Forge, NeoForge, and Quilt. A single confirmation shows the game, loader, and file counts; optional files are unchecked by default. Only remote resolution or download failures allow optional files to be skipped with a warning. Disk, permission, and security errors stop installation; required-file failures support retry. Restricted CurseForge files can be downloaded from their official pages, selected locally, and verified against trusted hashes before installation continues.
 - **Launcher updates** — checks GitHub Releases on startup with a three-level policy (auto-download / notify only / never); system notifications announce new versions and ready updates, and settings show release notes. Small parallel probes choose among Blob, GitHub mirrors, and GitHub. Large packages use four concurrent ranges and retain completed ranges when changing sources during the same download; servers without Range support use a single stream. When one of the latest three stable releases is installed, a bsdiff + Zstandard delta patch is preferred: patches are read from the R2 mirror first with GitHub/mirror fallback, the installed file and patch are verified, the exact target bytes are reconstructed, and the full size and official SHA-256 are checked before installation. Missing, stale, corrupt, or mismatched patches fall back to the complete segmented package; macOS retains one verified official ZIP as its patch base. Slow-speed detection adapts to measured throughput. Size or SHA-256 mismatches discard completed ranges and try another source; installation requires successful verification. Legacy boolean update settings migrate automatically. See [delta updates](docs/patch-updates.md).
-- **Desktop UI** — a compact fixed-size frameless Electron window with version, account, download, launch, and settings flows. Reopen background tasks from home; retry failures or copy redacted details from the problem dialog. Closing a dialog keeps the task running. Cancel stops it and becomes unavailable during final commit.
+- **Desktop UI** — a resizable, maximizable frameless Electron window, initially 760×466 with a 680×417 minimum, with version, account, download, launch, and settings flows. Reopen background tasks from home; retry failures or copy redacted details from the problem dialog. Closing a dialog keeps the task running. Cancel stops it and becomes unavailable during final commit.
 
 ### Download source coverage
 
@@ -58,11 +58,11 @@ The automated test suite covers accounts, authentication, downloads, Java select
 
 ## Actual interface
 
-These screenshots were captured from the `1.6.5` Electron source, with no accounts added or games installed. The current source interface may differ.
+These screenshots were captured on 2026-11-24 from the `2.2.0` source using isolated data directories, with no accounts or games.
 
 ![Actual launcher home screen with the default Desert Lake wallpaper](assets/launcher-screenshot.png)
 
-![Actual v1.6.5 account management screen](assets/launcher-accounts.png)
+![Current source account management screen](assets/launcher-accounts.png)
 
 The website does not embed launcher screenshots; the captures above appear in this README only. Its download section offers system and architecture selection. The primary button completes Cloudflare Turnstile verification, then downloads through a separate signed Worker using 1 MiB parts and four concurrent requests, with speed, progress, cancellation, and fixed upstream fallbacks. Files reach the browser's save flow only after size and official SHA-256 verification. Cancellation or closing the page discards in-memory parts. GitHub original and cloud-download links remain public, outside this downloader. Release notes open by default and show only the latest version. SHA-256 values are not displayed; launcher updates also verify files before installation. The verified button stays unavailable until its configuration and matching deployments are complete.
 
@@ -79,8 +79,8 @@ The website does not embed launcher screenshots; the captures above appear in th
 ## Requirements
 
 - Windows 10/11, macOS, or Linux, with a download matching the device architecture
-- Node.js `26.10.0` and npm `11.13.0` for source development and builds
-- The Vercel website uses Node.js `24.x`. `engines.node` supports both environments; `.node-version` and the build preflight still require `26.10.0` for launcher builds.
+- Source development supports Node.js `>=24 <27` and npm `11.x`; `.nvmrc`, `.node-version`, and `packageManager` identify recommended versions.
+- The Vercel website uses Node.js `24.x`. Release builds and CI still require Node.js `26.10.0` and npm `11.13.0` for consistent inputs.
 - An internet connection for metadata, game files, authentication, and managed Java downloads
 - A legally owned Minecraft: Java Edition account for authenticated online play
 
@@ -114,6 +114,8 @@ Background module processes start on demand and are reused within the current ga
 | `npm test` | Run the Node.js test suite |
 | `npm run smoke` | Run Electron with fresh temporary user-data and game directories; confirm preparation, readable configuration, and usable home controls, then exit and clean up |
 | `npm run verify:toolchain` | Verify pinned Node, npm, Electron, and electron-builder versions |
+| `npm run verify:dev-toolchain` | Verify a compatible development runtime and lockfile integrity |
+| `npm run test:coverage` | Run all tests and enforce coverage thresholds for high-risk modules |
 | `npm run build -- --target windows-x64` | Build one target through the shared entry point without publishing |
 | `npm run build:win` | Build Windows portable EXE with a persistent runtime |
 | `npm run build:linux` | Build Linux AppImage |
@@ -179,6 +181,8 @@ Modpack previews and installation share archive safety checks. Hash-verified dow
 Internal staging directories are hidden from the instance list. Startup scans and later installations reclaim only inactive crash residue with a valid launcher ownership marker and a safe path, retaining verified downloads. Failed cleanup can be retried later. To reclaim cache space, remove the cache directory after closing games and stopping installations.
 
 Builds use a pinned toolchain, a committed lockfile, one platform target definition, and clean isolated output directories. Manually dispatched CI produces eight packages, checksum sidecars, `SHA256SUMS`, a build manifest, and seven native startup/upgrade reports without public publication. Version tags publish only after validation. Repeatability means fixed inputs and traceable outputs, not identical bytes. See [release validation](docs/ci-release-validation.md).
+
+Starting with v2.2.0, update assets and manifests carry independent Ed25519 signatures verified with the embedded public key. Its SPKI DER / SHA-256 fingerprint is `7e5ccc6204ba9faad1b9afbb5baff26ff4ba2be922a0b32a8caed1e0987ca0fb`; see [release signing](docs/release-signing.md) for first-upgrade and rotation limits. Windows/macOS code signing and notarization are wired up, but platform certificates are not configured. The bundled Microsoft Client ID's approval status is unknown; settings accept your own ID with source and fallback guidance. See [Microsoft sign-in configuration](docs/microsoft-client-id.md) and the [implementation record](docs/repository-improvements.md).
 
 ## Historical references
 

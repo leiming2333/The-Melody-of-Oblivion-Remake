@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const { createReadStream } = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { verifyAssetSignature, signatureError, readBoundedText, SIGNATURE_MAX_BYTES } = require('./release-signature');
 const { pipeline } = require('node:stream/promises');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
@@ -163,6 +164,7 @@ class UpdateManager {
     rankCandidates = downloadFile === downloadToFile ? rankDownloadCandidates : null,
     fileSystem = fs,
     hashFile = sha256File,
+    trustedKeys = require('./release-trust.json').keys,
     spawnProcess = spawn,
     runCommand = promisify(execFile),
     startHelper = startInstallHelper,
@@ -186,6 +188,8 @@ class UpdateManager {
     this.rankCandidates = rankCandidates;
     this.fileSystem = fileSystem;
     this.hashFile = hashFile;
+    this.trustedKeys = trustedKeys;
+    this.verifiedSignatures = new Map();
     this.spawnProcess = spawnProcess;
     this.runCommand = runCommand;
     this.startHelper = startHelper;
@@ -371,7 +375,7 @@ class UpdateManager {
     throw lastError ?? new Error('获取 Release 信息失败');
   }
 
-  async fetchText(url, signal, validate = null) {
+  async fetchText(url, signal, validate = null, maxBytes = null) {
     const candidates = [url, ...mirrorUrls(url)];
     let lastError = null;
     for (const candidate of candidates) {
@@ -382,7 +386,7 @@ class UpdateManager {
           signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(API_TIMEOUT_MS)]) : AbortSignal.timeout(API_TIMEOUT_MS)
         });
         if (!response.ok) throw new Error(`下载校验文件失败（HTTP ${response.status}）`);
-        const text = await response.text();
+        const text = maxBytes ? await readBoundedText(response, maxBytes) : await response.text();
         if (validate && !validate(text)) throw new Error('下载文件校验失败');
         return text;
       } catch (error) {
@@ -396,6 +400,21 @@ class UpdateManager {
   releaseAsset(name) {
     return (Array.isArray(this.release?.assets) ? this.release.assets : [])
       .find((asset) => asset?.name === name) ?? null;
+  }
+
+  signatureFor(asset) {
+    return this.verifiedSignatures.get(JSON.stringify([this.release?.tag_name, asset?.name, asset?.size])) ?? null;
+  }
+
+  verifyInstallSignature(record, filePath) {
+    if (!this.trustedKeys.length) return;
+    const evidence = record?.signature ?? this.signatureFor(this.releaseAsset(path.basename(filePath)));
+    if (!evidence) throw signatureError('更新恢复记录缺少签名，请保留当前版本后重新下载更新');
+    const verified = verifyAssetSignature(JSON.stringify(evidence), {
+      tag: `v${String(record?.toVersion ?? this.state.availableVersion).replace(/^v/, '')}`,
+      name: path.basename(filePath)
+    }, this.trustedKeys);
+    if (verified.sha256 !== (record?.sha256 ?? this.downloadedSha256)) throw signatureError('恢复记录与签名摘要不一致');
   }
 
   patchTargetId() {
@@ -417,7 +436,8 @@ class UpdateManager {
   async fetchPatchManifest(signal) {
     const asset = this.releaseAsset(PATCH_MANIFEST_NAME);
     if (!asset?.browser_download_url) return null;
-    let expected = /^sha256:([a-f\d]{64})$/i.exec(String(asset.digest ?? ''))?.[1]?.toLowerCase();
+    let expected = this.trustedKeys.length ? await this.expectedSha256For(asset, signal)
+      : /^sha256:([a-f\d]{64})$/i.exec(String(asset.digest ?? ''))?.[1]?.toLowerCase();
     if (!expected) {
       const sidecar = this.releaseAsset(`${PATCH_MANIFEST_NAME}.sha256`);
       if (!sidecar?.browser_download_url) return null;
@@ -429,10 +449,10 @@ class UpdateManager {
     let text;
     const cdnUrl = this.patchCdnUrl(this.release?.tag_name, PATCH_MANIFEST_NAME);
     if (cdnUrl) {
-      try { text = await this.fetchText(cdnUrl, signal, validate); }
+      try { text = await this.fetchText(cdnUrl, signal, validate, PATCH_MANIFEST_MAX_BYTES); }
       catch (error) { throwIfAborted(signal); }
     }
-    text ??= await this.fetchText(asset.browser_download_url, signal, validate);
+    text ??= await this.fetchText(asset.browser_download_url, signal, validate, PATCH_MANIFEST_MAX_BYTES);
     let value;
     try { value = JSON.parse(text); } catch { return null; }
     try {
@@ -558,6 +578,14 @@ class UpdateManager {
     if (expectedSha256 !== patch.toSha256 || Number(asset.size) !== patch.toSize) return null;
     const patchAsset = this.releaseAsset(patch.name);
     if (!patchAsset?.browser_download_url) return null;
+    if (this.trustedKeys.length) {
+      try {
+        if (await this.expectedSha256For(patchAsset, signal) !== patch.sha256) return null;
+      } catch {
+        throwIfAborted(signal);
+        return null;
+      }
+    }
     if (Number.isSafeInteger(Number(patchAsset.size)) && Number(patchAsset.size) !== patch.size) return null;
     const releasedDigest = /^sha256:([a-f\d]{64})$/i.exec(String(patchAsset.digest ?? ''))?.[1]?.toLowerCase();
     if (releasedDigest && releasedDigest !== patch.sha256) return null;
@@ -616,7 +644,8 @@ class UpdateManager {
           id, platform: this.platform, arch: this.arch, fromVersion: this.state.currentVersion,
           toVersion: this.state.availableVersion, targetPath: store.target, ...managed,
           phase: 'prepared', createdAt: new Date().toISOString(), error: '',
-          sourcePath: targetPath, downloadPath: targetPath, sha256: actualSha256
+          sourcePath: targetPath, downloadPath: targetPath, sha256: actualSha256,
+          signature: this.signatureFor(asset)
         };
         await store.save(record);
         this.transaction = record;
@@ -691,6 +720,29 @@ class UpdateManager {
   }
 
   async expectedSha256For(updateAsset, signal) {
+    if (this.trustedKeys.length) {
+      const key = JSON.stringify([this.release?.tag_name, updateAsset?.name, updateAsset?.size]);
+      let verified = this.verifiedSignatures.get(key);
+      if (!verified) {
+        const signature = this.releaseAsset(`${updateAsset?.name}.sig`);
+        if (!signature?.browser_download_url) throw signatureError('发布版本缺少独立签名，请从官方发布页核对');
+        const expected = { tag: this.release?.tag_name, name: updateAsset?.name, size: Number(updateAsset?.size) };
+        const validate = value => {
+          verifyAssetSignature(value, expected, this.trustedKeys);
+          return true;
+        };
+        let text;
+        if (signature.object_storage_verified === true && isTrustedObjectStorageUrl(signature.object_storage_download_url,
+          OBJECT_STORAGE_ORIGIN, this.release?.tag_name ?? '', signature.name)) {
+          try { text = await this.fetchText(signature.object_storage_download_url, signal, validate, SIGNATURE_MAX_BYTES); }
+          catch { throwIfAborted(signal); }
+        }
+        text ??= await this.fetchText(signature.browser_download_url, signal, validate, SIGNATURE_MAX_BYTES);
+        verified = verifyAssetSignature(text, expected, this.trustedKeys);
+        this.verifiedSignatures.set(key, verified);
+      }
+      return verified.sha256;
+    }
     let expectedSha256 = /^sha256:([a-f0-9]{64})$/i.exec(String(updateAsset?.digest ?? ''))?.[1]?.toLowerCase();
     if (!expectedSha256) {
       const checksumAsset = this.checksumAssetFor(updateAsset);
@@ -935,7 +987,8 @@ class UpdateManager {
           targetPath, sha256);
       }
       if (record) {
-        record = { ...record, sourcePath: targetPath, downloadPath: targetPath, sha256 };
+        record = { ...record, sourcePath: targetPath, downloadPath: targetPath, sha256,
+          signature: this.signatureFor(asset) };
         await store.save(record);
         this.transaction = record;
       }
@@ -1020,6 +1073,7 @@ class UpdateManager {
     try {
       throwIfAborted(signal);
       if (!record) {
+        if (!rollback) this.verifyInstallSignature(null, this.updateFilePath);
         await this.fileSystem.stat?.(this.updateFilePath);
         if (this.downloadedSha256 && await this.hashFile(this.updateFilePath, signal) !== this.downloadedSha256) {
           throw new Error('更新包校验失败：安装前 SHA-256 不匹配');
@@ -1039,6 +1093,7 @@ class UpdateManager {
         if (targetStat?.isSymbolicLink()) throw new Error('当前启动器路径不能是符号链接');
         if (this.platform !== 'darwin') record.backupSha256 = await this.hashFile(record.targetPath, signal);
         const packagePath = rollback ? record.sourcePath : (record.downloadPath || record.sourcePath);
+        if (!rollback) this.verifyInstallSignature(record, packagePath);
         await assertManagedAncestors(this.fileSystem, packagePath, this.platform === 'darwin' && !record.rollbackOf
           ? path.dirname(this.store.filePath) : path.dirname(record.targetPath));
         const file = await this.fileSystem.lstat?.(packagePath);

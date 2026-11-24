@@ -21,13 +21,17 @@ class BackgroundAccounts {
 }
 
 class BackgroundAccountAuth {
-  constructor({ provider, clientId, getAccountStore }) {
+  constructor({ provider, clientId, getClientId, getAccountStore }) {
+    this.getClientId = getClientId;
     const methods = ['upsertMicrosoft', 'upsertYggdrasil', 'updateYggdrasilTexture', 'getAccount', 'read'];
     this.process = new ModuleProcess({ moduleName: `account-${provider}`,
       modulePath: path.join(__dirname, '../worker-modules/account-auth.js'), options: { provider, clientId },
       handlers: Object.fromEntries(methods.map((method) => [method, (...args) => getAccountStore()[method](...args)])) });
   }
-  begin(ownerId) { return this.process.invoke('begin', [ownerId]); }
+  async begin(ownerId) {
+    const clientId = this.getClientId ? await this.getClientId() : undefined;
+    return this.process.invoke('begin', [ownerId, clientId ?? null]);
+  }
   complete(sessionId, ownerId, onProgress) { return this.process.invoke('complete', [sessionId, ownerId], { onProgress }); }
   cancel(sessionId, ownerId) { return this.process.invoke('cancel', [sessionId, ownerId]); }
   cancelOwner(ownerId) { return this.process.invoke('cancelOwner', [ownerId]).catch(() => {}); }

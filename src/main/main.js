@@ -102,14 +102,9 @@ ipcMain.handle('diagnostics:export-report', (event, message) => (
   services.errorLog.exportReport(event.sender, String(message ?? ''))
 ));
 
-ipcMain.handle('shell:open-external', async (_event, url) => {
-  const target = String(url ?? '');
-  if (/^https?:\/\//i.test(target)) {
-    await shell.openExternal(target);
-    return true;
-  }
-  return false;
-});
+ipcMain.handle('shell:open-external', require('./external-links').createExternalLinkHandler({
+  shell, BrowserWindow, rendererUrl
+}));
 
 function focusLauncherUpdateSettings() {
   const parentWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
@@ -138,15 +133,18 @@ function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 760,
     height: 466,
+    minWidth: 680,
+    minHeight: 417,
     show: false,
     frame: false,
-    transparent: true,
-    hasShadow: false,
-    resizable: false,
-    maximizable: false,
+    transparent: false,
+    roundedCorners: true,
+    hasShadow: true,
+    resizable: true,
+    maximizable: true,
     fullscreenable: false,
     autoHideMenuBar: true,
-    backgroundColor: '#00000000',
+    backgroundColor: '#171012',
     icon: appIconPath,
     title: '忘却的旋律启动器',
     webPreferences: {
@@ -266,8 +264,10 @@ const services = createLazyServices({
   },
   microsoftAuth: () => {
     const { BackgroundAccountAuth } = require('./accounts/background-accounts');
-    const { clientId } = require('./accounts/microsoft-client-id.json');
-    return new BackgroundAccountAuth({ provider: 'microsoft', getAccountStore, clientId: process.env.MELODY_MICROSOFT_CLIENT_ID || clientId });
+    return new BackgroundAccountAuth({ provider: 'microsoft', getAccountStore,
+      getClientId: async () => require('./accounts/microsoft-client-config').microsoftClientConfiguration({
+        settings: await getSettingsStore().getState()
+      }).clientId });
   },
   yggdrasilAuth: () => {
     const { BackgroundAccountAuth } = require('./accounts/background-accounts');
@@ -377,7 +377,7 @@ async function initializeBackgroundServices() {
 if (hasSingleInstanceLock) app.whenReady().then(() => {
   startupMetrics.attach(app.getPath('userData'));
   startupMetrics.mark('electron-ready');
-  require('./accounts/ipc').registerAccountIpc({ app, ipcMain, shell, clipboard, getAccountStore, getMicrosoftAuth, getYggdrasilAuth });
+  require('./accounts/ipc').registerAccountIpc({ app, ipcMain, shell, clipboard, getAccountStore, getSettingsStore, getMicrosoftAuth, getYggdrasilAuth });
   require('./settings/ipc').registerSettingsIpc({ BrowserWindow, dialog, ipcMain, getSettingsStore, getJavaProbeCache, getJavaService });
   require('./minecraft/ipc').registerMinecraftIpc({
     app, ipcMain, shell, dialog, BrowserWindow, getSettingsStore, getAccountStore, getMicrosoftAuth, getYggdrasilAuth, getJavaProbeCache

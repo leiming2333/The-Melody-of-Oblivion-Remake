@@ -157,10 +157,10 @@ test('publication accepts the exact patch set and rejects a missing or extra pat
     await fs.writeFile(path.join(f.release, `${asset.name}.sha256`), `${asset.sha256}  ${asset.name}\n`);
   }
   await fs.writeFile(path.join(f.release, 'SHA256SUMS'), checksumLines(f.releaseManifest.assets));
-  await verifyPublicationFiles(f.release, f.releaseManifest);
+  await verifyPublicationFiles(f.release, f.releaseManifest, []);
   const patch = (await verifyPatchManifest(f.release, f.releaseManifest)).patches[0];
   await fs.rm(path.join(f.release, patch.name));
-  await assert.rejects(verifyPublicationFiles(f.release, f.releaseManifest), /Patch file mismatch|unexpected files|missing/);
+  await assert.rejects(verifyPublicationFiles(f.release, f.releaseManifest, []), /Patch file mismatch|unexpected files|missing/);
 });
 
 test('patch publication verification rejects a manifest or patch file changed after generation', async t => {

@@ -5,7 +5,7 @@ function createModule({ options, callMain }) {
     ? new (require('../accounts/microsoft-auth').MicrosoftAuthManager)({ accountStore, clientId: options.clientId })
     : new (require('../accounts/yggdrasil-auth').YggdrasilAuthManager)({ accountStore });
   return options.provider === 'microsoft' ? {
-    begin: (ownerId) => manager.begin(ownerId),
+    begin: (ownerId, clientId) => manager.begin(ownerId, clientId ?? undefined),
     complete: (sessionId, ownerId, context) => manager.complete(sessionId, ownerId, context.onProgress),
     cancel: (sessionId, ownerId) => manager.cancel(sessionId, ownerId),
     cancelOwner: (ownerId) => manager.cancelOwner(ownerId),

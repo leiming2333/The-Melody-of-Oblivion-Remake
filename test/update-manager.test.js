@@ -273,6 +273,8 @@ function fixture({
   const calls = { download: [], spawn: [], quit: 0, relaunch: 0, showItemInFolder: [], updateAvailable: [], updateReady: [] };
   const manager = new UpdateManager({
     app: {
+      // Lifecycle fixtures inject their hash and transport; signature integration
+      // is exercised with real Ed25519 keys in update-signatures.test.js.
       isPackaged,
       getVersion: () => '1.2.0',
       getPath: () => '/tmp/downloads',
@@ -283,6 +285,7 @@ function fixture({
     ipcMain: { handle: () => {} },
     platform,
     arch,
+    trustedKeys: [],
     env: {},
     hashFile: async () => fixtureHash,
     shell: { showItemInFolder: (filePath) => calls.showItemInFolder.push(filePath) },
@@ -1012,6 +1015,7 @@ test('real file verification accepts valid bytes and removes a tampered update',
   let ready = 0;
   const manager = new UpdateManager({
     app: { isPackaged: true, getVersion: () => '1.0.0' },
+    trustedKeys: [],
     platform: 'win32',
     arch: 'x64',
     env: { PORTABLE_EXECUTABLE_DIR: directory },

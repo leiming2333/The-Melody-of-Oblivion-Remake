@@ -28,6 +28,7 @@ async function fixture(t, { platform = 'linux', version = '1.0.0', nextVersion =
     browser_download_url: 'https://example.test/update', size: bytes.length, digest: `sha256:${digest(bytes)}` };
   const calls = { quit: 0, relaunch: 0, trash: [] };
   const manager = new UpdateManager({
+    trustedKeys: [],
     app: { isPackaged: true, getVersion: () => version,
       getPath: (key) => key === 'exe' ? path.join(target, 'Contents', 'MacOS', 'Launcher') : path.join(directory, key),
       quit: () => calls.quit++, relaunch: () => calls.relaunch++ },

@@ -184,6 +184,9 @@ async function verifyUpgrade({ target: targetId, artifact, previousArtifact, rep
       : await verify(executable, [], { expectedArch: target.arch, expectedVersion: '0.0.0', reportPath: previousReportPath, emulatedBy });
     function manager(currentVersion, { dataDirectory = userData, quit = () => {}, helper } = {}) {
       return new UpdateManager({
+        // This offline pre-assembly harness tests replacement; release signatures
+        // are generated only after these exact packages pass acceptance.
+        trustedKeys: [],
         app: { isPackaged: true, getVersion: () => currentVersion,
           getPath: name => name === 'exe' ? executable : name === 'userData' ? dataDirectory : directory,
           quit, relaunch() { launchPromise = launchLinux(); } },

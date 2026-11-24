@@ -7,15 +7,27 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { hashFile, verifyManifest, verifyPatchManifest, assertTag, checksumLines } = require('./release-assets.cjs');
 const exec = promisify(execFile);
+const { verifyAssetSignature } = require('../src/main/updater/release-signature');
 
-async function verifyPublicationFiles(directory, manifest) {
+async function verifyPublicationFiles(directory, manifest, keys = require('../src/main/updater/release-trust.json').keys) {
   const patches = await verifyPatchManifest(directory, manifest);
   const expected = [
     'release-manifest.json', 'SHA256SUMS',
     ...manifest.assets.flatMap(asset => [asset.name, `${asset.name}.sha256`]),
     ...(patches ? ['patch-manifest.json', 'patch-manifest.json.sha256',
       ...patches.patches.map(patch => patch.name)] : [])
-  ].sort();
+  ];
+  if (keys.length) {
+    for (const name of [...expected]) {
+      const file = path.join(directory, name);
+      const signature = verifyAssetSignature(await fs.readFile(`${file}.sig`, 'utf8'), {
+        tag: manifest.tag, name, size: (await fs.stat(file)).size
+      }, keys);
+      if (await hashFile(file) !== signature.sha256) throw new Error(`Signed release asset mismatch: ${name}`);
+      expected.push(`${name}.sig`);
+    }
+  }
+  expected.sort();
   if (JSON.stringify((await fs.readdir(directory)).sort()) !== JSON.stringify(expected)) throw new Error('Publication directory contains missing or unexpected files');
   for (const asset of manifest.assets) {
     if (await fs.readFile(path.join(directory, `${asset.name}.sha256`), 'utf8') !== `${asset.sha256}  ${asset.name}\n`) throw new Error(`Invalid checksum sidecar: ${asset.name}`);
@@ -38,12 +50,15 @@ async function assertSameAssets(local, remote) {
   }
 }
 
-async function publishRelease(directory, tag, repository, run = gh) {
+async function publishRelease(directory, tag, repository, run = gh, {
+  trustedKeys = require('../src/main/updater/release-trust.json').keys, requireSignatures = true
+} = {}) {
+  if (requireSignatures) require('./sign-release.cjs').assertTrustedKeys(trustedKeys);
   const manifest = JSON.parse(await fs.readFile(path.join(directory, 'release-manifest.json'), 'utf8'));
   assertTag(tag, manifest.version);
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository || '')) throw new Error('Invalid GitHub repository');
   await verifyManifest(directory, manifest);
-  await verifyPublicationFiles(directory, manifest);
+  await verifyPublicationFiles(directory, manifest, trustedKeys);
   const taggedCommit = (await run(['api', `repos/${repository}/commits/${tag}`, '--jq', '.sha'])).trim();
   if (taggedCommit !== manifest.commit) throw new Error('Remote release tag does not point to the verified source commit');
   let existing;

@@ -36,10 +36,12 @@ function run(command, args, options = {}) {
 async function build(args = process.argv.slice(2)) {
   assertToolchain();
   const target = selectTarget(args);
+  const signingArguments = require('./platform-signing.cjs').platformSigningArguments(target.platform);
   const pkg = require('../package.json');
   const lock = require('../package-lock.json');
   if (pkg.version !== lock.version || pkg.version !== lock.packages[''].version) throw new Error('Package and lockfile versions differ');
   const tag = process.env.GITHUB_REF_TYPE === 'tag' ? process.env.GITHUB_REF_NAME : null;
+  if (tag) require('./sign-release.cjs').assertTrustedKeys(require('../src/main/updater/release-trust.json').keys);
   if (tag && tag !== `v${pkg.version}`) throw new Error(`Release tag ${tag} does not match package version ${pkg.version}`);
   const { execFileSync } = require('node:child_process');
   const gitOptions = { cwd: root, encoding: 'utf8', windowsHide: true };
@@ -60,6 +62,7 @@ async function build(args = process.argv.slice(2)) {
   const builder = require.resolve('electron-builder/cli.js');
   const platformFlag = { win32: '--win', linux: '--linux', darwin: '--mac' }[target.platform];
   await run(process.execPath, [builder, platformFlag, `--${target.arch}`, '--publish', 'never', `--config.directories.output=${output}`,
+    ...signingArguments,
     ...(target.fixtureVersion ? [`--config.extraMetadata.version=${target.fixtureVersion}`] : [])]);
   if (target.id === 'linux-x64') await fs.rename(path.join(output, target.filename.replace('x64.AppImage', 'x86_64.AppImage')), path.join(output, target.filename));
   const stat = await fs.stat(path.join(output, target.filename));

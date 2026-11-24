@@ -2,7 +2,7 @@
 
 ## 固定输入与构建入口
 
-开发、CI 和发布固定使用 Node.js `26.10.0`、npm `11.13.0`、Electron `43.4.1`、electron-builder `26.15.3`。直接依赖固定版本，`package-lock.json` 保存已有解析版本、registry 来源和完整性信息。使用 `npm ci` 安装，`npm run verify:toolchain` 检查工具链。这里的可重复构建指固定环境与可追溯产物，不要求两次输出的字节完全一致。
+开发支持 Node.js `>=24 <27` 和 npm `11.x`，通过 `npm run verify:dev-toolchain` 检查。CI 和发布固定使用 Node.js `26.10.0`、npm `11.13.0`、Electron `43.4.1`、electron-builder `26.15.3`。直接依赖固定版本，`package-lock.json` 保存已有解析版本、registry 来源和完整性信息。使用 `npm ci` 安装，`npm run verify:toolchain` 检查固定工具链。这里的可重复构建指固定环境与可追溯产物，不要求两次输出的字节完全一致。
 
 `scripts/release-targets.cjs` 是构建矩阵和预期文件名的唯一来源。`npm run build -- --target windows-x64` 等命令先验证工具链，再清空该目标自己的输出目录；所有构建显式禁用 electron-builder 发布。正式包位于 `release/build/<目标>/`。不要直接调用 electron-builder 绕过检查。
 
