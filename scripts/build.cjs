@@ -5,6 +5,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { targets } = require('./release-targets.cjs');
 const { versions, assertToolchain } = require('./toolchain.cjs');
+const { platformSigningArguments, sanitizeSigningEnvironment } = require('./platform-signing.cjs');
 const root = path.resolve(__dirname, '..');
 
 function selectTarget(args, host = { platform: process.platform, arch: process.arch }) {
@@ -36,7 +37,8 @@ function run(command, args, options = {}) {
 async function build(args = process.argv.slice(2)) {
   assertToolchain();
   const target = selectTarget(args);
-  const signingArguments = require('./platform-signing.cjs').platformSigningArguments(target.platform);
+  const signingEnvironment = sanitizeSigningEnvironment();
+  const signingArguments = platformSigningArguments(target.platform, signingEnvironment);
   const pkg = require('../package.json');
   const lock = require('../package-lock.json');
   if (pkg.version !== lock.version || pkg.version !== lock.packages[''].version) throw new Error('Package and lockfile versions differ');
@@ -63,7 +65,7 @@ async function build(args = process.argv.slice(2)) {
   const platformFlag = { win32: '--win', linux: '--linux', darwin: '--mac' }[target.platform];
   await run(process.execPath, [builder, platformFlag, `--${target.arch}`, '--publish', 'never', `--config.directories.output=${output}`,
     ...signingArguments,
-    ...(target.fixtureVersion ? [`--config.extraMetadata.version=${target.fixtureVersion}`] : [])]);
+    ...(target.fixtureVersion ? [`--config.extraMetadata.version=${target.fixtureVersion}`] : [])], { env: signingEnvironment });
   if (target.id === 'linux-x64') await fs.rename(path.join(output, target.filename.replace('x64.AppImage', 'x86_64.AppImage')), path.join(output, target.filename));
   const stat = await fs.stat(path.join(output, target.filename));
   if (!stat.isFile() || stat.size === 0) throw new Error('Build did not produce the expected nonempty package');
